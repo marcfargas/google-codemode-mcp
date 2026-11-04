@@ -244,4 +244,5 @@ A successful live run qualifies the production bundle against live Gmail. Hosted
 CPU enforcement, CFA gateway adaptation, and Claude/ChatGPT/OpenClaw integration
 remain separate acceptance work.
 
-Live Gmail verification is currently pending initial interactive consent.
+Interactive consent and CI secret setup are complete. Live Gmail verification is
+pending its first successful workflow run.

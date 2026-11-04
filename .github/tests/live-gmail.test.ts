@@ -86,6 +86,9 @@ test('live Gmail through the built sessionless Worker', { timeout: 240_000 }, as
   const run = randomUUID();
   const labelName = `codemode-live-${run}`;
   const messageId = `<codemode-live-${run}@test.invalid>`;
+  const draftSubjectPrefix = `codemode live ${run}`;
+  const sendSubject = `codemode self-send ${run}`;
+  let observedSendMessageId: string | undefined;
   const drafts = new Set<string>();
   const labels = new Set<string>();
   const sentMessages = new Set<string>();
@@ -255,9 +258,9 @@ test('live Gmail through the built sessionless Worker', { timeout: 240_000 }, as
     await stage(
       'explicit native pagination visits only this run drafts without duplicates',
       async () => {
-        // Gmail drafts cannot have custom labels. Isolate the two fixtures by
-        // their exact RFC Message-IDs using the native drafts.list query.
-        const q = `{rfc822msgid:draft-${run}@test.invalid rfc822msgid:page-${run}@test.invalid}`;
+        // Gmail rewrites draft Message-ID headers and drafts cannot have custom
+        // labels. The unique subject survives create/update and isolates this run.
+        const q = `subject:"${draftSubjectPrefix}"`;
         let indexed = false;
         for (let attempt = 0; attempt < 6 && !indexed; attempt++) {
           if (attempt) await delay(1_000);
@@ -266,7 +269,9 @@ test('live Gmail through the built sessionless Worker', { timeout: 240_000 }, as
             q,
             maxResults: 5,
           });
-          indexed = response.data.drafts?.length === 2;
+          indexed =
+            response.data.drafts?.length === 2 &&
+            response.data.drafts.every((draft) => drafts.has(draft.id));
         }
         assert.equal(indexed, true);
         const ids = new Set<string>();
@@ -297,7 +302,7 @@ test('live Gmail through the built sessionless Worker', { timeout: 240_000 }, as
 
     await stage('single self-send is acknowledged without an automatic retry', async () => {
       const mime = Buffer.from(
-        `From: ${expected}\r\nTo: ${expected}\r\nSubject: codemode self-send ${run}\r\nMessage-ID: ${messageId}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nself-send fixture ${run}\r\n`,
+        `From: ${expected}\r\nTo: ${expected}\r\nSubject: ${sendSubject}\r\nMessage-ID: ${messageId}\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nself-send fixture ${run}\r\n`,
       ).toString('base64url');
       // Exactly one submission. A lost/unknown result fails instead of resending.
       const receipt = await method<Message>('users.messages.send', {
@@ -316,27 +321,41 @@ test('live Gmail through the built sessionless Worker', { timeout: 240_000 }, as
         requestBody: { addLabelIds: [labelId!] },
       });
       assert.ok(labeled.data.labelIds?.includes(labelId!));
+      const metadata = await native<Message>('users.messages.get', {
+        userId: 'me',
+        id: sent.data.id,
+        format: 'metadata',
+        metadataHeaders: ['Message-ID', 'Subject'],
+      });
+      const headers = new Map(
+        metadata.data.payload?.headers?.map((h) => [h.name.toLowerCase(), h.value]),
+      );
+      assert.equal(headers.get('subject'), sendSubject);
+      const actualId = headers.get('message-id');
+      assert.ok(actualId && /^<[^<>\s]+>$/.test(actualId));
+      observedSendMessageId = actualId;
     });
 
     await stage(
       'bounded polling separately observes the self-send in the recipient inbox',
       async () => {
         let delivered = false;
+        const observedId = observedSendMessageId;
+        assert.ok(observedId);
         for (let attempt = 0; attempt < 6 && !delivered; attempt++) {
           if (attempt) await delay(1_500);
-          const response = await native<Page>('users.messages.list', {
+          const response: Native<Page> = await native<Page>('users.messages.list', {
             userId: 'me',
-            q: `rfc822msgid:${messageId.slice(1, -1)}`,
+            q: `rfc822msgid:${observedId.slice(1, -1)}`,
             labelIds: ['INBOX'],
             maxResults: 5,
           });
           for (const message of response.data.messages ?? []) {
-            sentMessages.add(message.id);
-            const read = await native<Message>('users.messages.get', {
+            const read: Native<Message> = await native<Message>('users.messages.get', {
               userId: 'me',
               id: message.id,
               format: 'metadata',
-              metadataHeaders: ['Message-ID', 'From', 'To'],
+              metadataHeaders: ['Message-ID', 'Subject', 'From', 'To'],
             });
             const headers = new Map(
               read.data.payload?.headers?.map((header) => [
@@ -344,10 +363,12 @@ test('live Gmail through the built sessionless Worker', { timeout: 240_000 }, as
                 header.value,
               ]),
             );
-            assert.equal(headers.get('message-id'), messageId);
+            assert.equal(headers.get('message-id'), observedId);
+            assert.equal(headers.get('subject'), sendSubject);
             assert.ok(headers.get('to')?.toLowerCase().includes(expected.toLowerCase()));
             assert.ok(headers.get('from')?.toLowerCase().includes(expected.toLowerCase()));
             assert.ok(read.data.labelIds?.includes('INBOX'));
+            sentMessages.add(message.id);
             delivered = true;
           }
         }
@@ -426,8 +447,10 @@ test('live Gmail through the built sessionless Worker', { timeout: 240_000 }, as
           googleProfileGuardPassed: guarded,
           markers: {
             label: labelName,
-            draftMessageIds: [`<draft-${run}@test.invalid>`, `<page-${run}@test.invalid>`],
-            sendMessageId: messageId,
+            draftSubjects: [`${draftSubjectPrefix} draft`, `${draftSubjectPrefix} page`],
+            sendSubject,
+            requestedSendMessageId: messageId,
+            observedSendMessageId: observedSendMessageId ?? null,
           },
           recordedIds: { labels: [...labels], drafts: [...drafts], messages: [...sentMessages] },
           unknownMutations,
