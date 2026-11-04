@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 
 const options = process.argv.slice(2);
 if (options.length > 1 || options.some((option) => option !== '--dry-run'))
-  throw new Error('Use node .github/deploy.mjs [--dry-run]');
+  throw new Error('Use node deploy.mjs [--dry-run]');
 
 const { WORKER_NAME: name, WORKER_DOMAIN: domain, WORKER_ROUTE: route } = process.env;
 const expectedName = process.env.WRANGLER_CI_OVERRIDE_NAME;

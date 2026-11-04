@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { createBuiltWorker } from '../worker-client.ts';
+import { createBuiltWorker } from '../support/worker-client.ts';
 
 const MCP_VERSION = '2026-07-28';
 const MAX_RESPONSE_BYTES = 524288;

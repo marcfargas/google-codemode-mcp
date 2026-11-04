@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { localCredentials } from './secrets.mjs';
+import { localCredentials } from './support/credentials.mjs';
 import { acquireLocalEvalLock } from './eval/act.mjs';
 
 const target = process.argv[2] ?? 'check';

@@ -21,9 +21,9 @@ export async function prepareHosted(output: string, mode: 'probes' | 'product' =
     'snippets.config.ts',
     'wrangler.jsonc',
     'skills/google-workspace/SKILL.md',
-    '.github/hosted/wrangler.json',
+    'tests/hosted/wrangler.json',
   ];
-  for (const directory of ['src', '.github/hosted'])
+  for (const directory of ['src', 'tests/hosted'])
     for (const file of await readdir(join(checkout, directory)))
       if (file.endsWith('.ts')) sourcePaths.push(`${directory}/${file}`);
   const sourceFiles: Record<string, string> = {};
@@ -34,10 +34,10 @@ export async function prepareHosted(output: string, mode: 'probes' | 'product' =
     join(checkout, 'node_modules/.bin/wrangler'),
     [
       'deploy',
-      join(checkout, `.github/hosted/${mode === 'product' ? 'product' : 'worker'}.ts`),
+      join(checkout, `tests/hosted/${mode === 'product' ? 'product' : 'worker'}.ts`),
       '--dry-run',
       '--config',
-      join(checkout, '.github/hosted/wrangler.json'),
+      join(checkout, 'tests/hosted/wrangler.json'),
       '--outdir',
       output,
     ],
@@ -48,7 +48,7 @@ export async function prepareHosted(output: string, mode: 'probes' | 'product' =
     throw new Error('Verification bundle preparation failed; inspect retained prepare.log');
   const bundle = await readFile(join(output, mode === 'product' ? 'product.js' : 'worker.js'));
   if (mode === 'product') await writeFile(join(output, 'worker.js'), bundle, { mode: 0o600 });
-  const config = JSON.parse(await readFile(join(checkout, '.github/hosted/wrangler.json'), 'utf8'));
+  const config = JSON.parse(await readFile(join(checkout, 'tests/hosted/wrangler.json'), 'utf8'));
   delete config.$schema;
   const deployment = {
     ...config,

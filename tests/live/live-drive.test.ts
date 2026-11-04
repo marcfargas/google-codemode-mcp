@@ -6,7 +6,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { gradeDrive, prepareDriveFixture } from '../eval/drive.ts';
 import type { McpEvent } from '../eval/server.ts';
 import type { CallOutcome } from '../../src/dispatcher.ts';
-import { openBuiltWorker, type ExecutionReceipt } from '../worker-client.ts';
+import { openBuiltWorker, type ExecutionReceipt } from '../support/worker-client.ts';
 
 type Receipt<T> = Omit<ExecutionReceipt<T>, 'outcomes'> & { outcomes: CallOutcome[] };
 type Native<T> = { data: T; status: number; headers: Record<string, string> };

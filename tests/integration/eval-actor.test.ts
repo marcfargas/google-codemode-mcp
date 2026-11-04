@@ -415,7 +415,7 @@ test(
       ],
       [
         { name: 'Write', arguments: { file_path: outside, content: 'forbidden' } },
-        { name: 'Read', arguments: { file_path: join(process.cwd(), '.github/eval/gmail.ts') } },
+        { name: 'Read', arguments: { file_path: join(process.cwd(), 'tests/eval/gmail.ts') } },
         { name: 'Write', arguments: { file_path: workspaceFile, content: 'Café — 東京 ✓\n' } },
       ],
       [],

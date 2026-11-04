@@ -510,7 +510,7 @@ test(
           assert.ok(actor.isolation.denied.every((entry) => entry.denied));
           assert.ok(
             actor.isolation.denied.some(
-              (entry) => entry.path === resolve('.github/eval/actor.ts') && entry.denied,
+              (entry) => entry.path === resolve('tests/eval/actor.ts') && entry.denied,
             ),
           );
           assert.deepEqual(actor.isolation.groups, [61337]);

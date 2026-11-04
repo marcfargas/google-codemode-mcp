@@ -27,11 +27,11 @@ test('candidate source retains untracked evaluation implementation with exact ha
   const output = await mkdtemp(join(tmpdir(), 'eval-candidate-'));
   try {
     const manifest = await retainCandidateSource(output);
-    assert.match(manifest['.github/eval/act.mjs'], /^[0-9a-f]{64}$/);
-    assert.match(manifest['.github/eval/regrade.ts'], /^[0-9a-f]{64}$/);
+    assert.match(manifest['tests/eval/act.mjs'], /^[0-9a-f]{64}$/);
+    assert.match(manifest['tests/eval/regrade.ts'], /^[0-9a-f]{64}$/);
     assert.equal(
-      await readFile(join(output, 'candidate-source', '.github/eval/regrade.ts'), 'utf8'),
-      await readFile('.github/eval/regrade.ts', 'utf8'),
+      await readFile(join(output, 'candidate-source', 'tests/eval/regrade.ts'), 'utf8'),
+      await readFile('tests/eval/regrade.ts', 'utf8'),
     );
     assert.deepEqual(
       JSON.parse(await readFile(join(output, 'candidate-source.json'), 'utf8')),

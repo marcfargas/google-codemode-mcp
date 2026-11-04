@@ -6,7 +6,7 @@ import { parseEnv } from 'node:util';
 import { createInterface } from 'node:readline';
 import { Writable } from 'node:stream';
 import { OAuth2Client } from 'google-auth-library';
-import { localCredentials, defaultTokenFile } from './secrets.mjs';
+import { localCredentials, defaultTokenFile } from './credentials.mjs';
 
 function totp(secret) {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';

@@ -65,7 +65,7 @@ just deploy --dry-run                # Bundle and validate; no upload
 just deploy                          # Publish and configure the domain/route
 ```
 
-The equivalent command without `just` is `node .github/deploy.mjs`, optionally
+The equivalent command without `just` is `node deploy.mjs`, optionally
 with `--dry-run`. The helper maps settings to pinned Wrangler flags and keeps
 Cloudflare credentials in the deployment process. These variables are not Worker
 runtime bindings. Export them in the shell or configure them in CI build settings;
@@ -99,8 +99,11 @@ checkout can serve different accounts, names, and domains through
 | Production branch | `main`                                                                                  |
 | Build variables   | `NODE_VERSION=24`, `SKIP_DEPENDENCY_INSTALL=1`, plus optional `WORKER_*` settings above |
 | Build command     | `npm ci --ignore-scripts`                                                               |
-| Deploy command    | `node .github/deploy.mjs`                                                               |
+| Deploy command    | `node deploy.mjs`                                                                       |
 | Preview builds    | Disable for this initial setup; preview deployment/protection is unqualified.           |
+
+If an existing Workers Builds configuration uses `node .github/deploy.mjs`, update
+its Deploy command to `node deploy.mjs` when adopting this layout.
 
 Workers Builds supplies its account/deployment credential. Do not add the Gmail
 test OAuth secrets to Builds or the deployed Worker. Build variables are available
@@ -125,7 +128,7 @@ including native CPU termination, asynchronous timeout, cancellation fences and
 multiple bridge calls. Account/DNS configurations, Workers Builds, and deployment
 of the live Google service remain separate from that bounded qualification.
 
-The [hosted verification harness](.github/hosted/README.md) prepares a separate
+The [hosted verification harness](tests/hosted/README.md) prepares a separate
 private Worker with fixed synthetic probes, then checks its exact deployed
 version through an existing protected ingress. Run `just hosted-prepare OUTPUT`
 without credentials; after deployment, `just hosted-verify OUTPUT` uses the
@@ -134,7 +137,7 @@ the 15-second asynchronous timeout, late-call fencing, multiple bridge calls and
 healthy follow-ups. Local tests cover these paths except hosted CPU enforcement.
 An external timeout or generic resource error cannot pass the CPU criterion.
 The qualified run observed the native `Worker exceeded CPU time limit.` exception;
-see the [hosted result and its limits](.github/hosted/README.md#qualified-hosted-run-2026-11-04).
+see the [hosted result and its limits](tests/hosted/README.md#qualified-hosted-run-2026-11-04).
 
 ## HTTP connection contract
 
@@ -372,7 +375,7 @@ GitHub, as recorded below. The six independent Gmail agent cases completed their
 task outcomes with both required models; the initial stricter discovery gate failed
 for Sonnet on attachment and pagination. A later focused hosted run passed both
 cases with Sonnet and Sol, including strict discovery and skill retrieval. See the
-[versioned results](.github/eval/README.md#independent-gmail-cases-with-grading-version-2-2026-11-04).
+[versioned results](tests/eval/README.md#independent-gmail-cases-with-grading-version-2-2026-11-04).
 The separate hosted synthetic Worker passed CPU/timeout/cancellation and bridge
 checks. The protected test Worker also ran the actual product against Gmail,
 using test-account tokens directly. Gateway adaptation is deployed in its owning project, but the Code Mode
@@ -401,10 +404,14 @@ and fallbacks when shared mafe-si skills are unavailable.
 
 ## Workflow verification
 
-All test sources, fixtures, OAuth helpers, and workflow code live under `.github/`.
-Commands are exposed through `justfile`; there is no project `scripts/` directory
-or npm task layer. Requires Node 24, Docker, `act`, `just`, and `gh` for secret
-installation. GitHub uses the same `.github/run.mjs` entrypoint as local checks.
+Test suites and infrastructure live under `tests/`: `unit/` for isolated checks,
+`integration/` for Worker, HTTP, CLI and runner checks, `live/` for credentialed
+Google checks, and `fixtures/`, `support/`, `eval/` and `hosted/` for their helpers.
+`.github/` contains GitHub workflows and repository-secret installation. Local
+workflow launchers live in `tests/`; the deployment entrypoint is root `deploy.mjs`. Commands are
+exposed through `justfile`; there is no project `scripts/` directory or npm task
+layer. Requires Node 24, Docker, `act`, `just`, and `gh` for secret installation.
+GitHub and local checks invoke `tests/run.mjs` directly.
 
 ```sh
 npm ci --ignore-scripts
@@ -451,7 +458,7 @@ token rates for GPT). Estimates are separate from actual proxy billing. There ar
 Gmail and Drive profiles are implemented. Sheets, Docs, and Calendar remain pending
 coverage targets; selecting them fails before model spending. This is a synthetic
 feasibility check, not acceptance of every host or service. See the
-[gate documentation](.github/eval/README.md) for isolation, usage accounting,
+[gate documentation](tests/eval/README.md) for isolation, usage accounting,
 offline regrading, and manual GitHub setup.
 
 The first matrix completed all task outcomes with Sonnet, Terra, and Haiku, but
@@ -459,7 +466,7 @@ all three failed the full discovery/skill gate. Sonnet and Haiku skipped method
 discovery; Terra skipped root discovery and the skill resource. Luna exhausted
 18 turns without completing the task, stopping the campaign before Opus/Sol.
 All attempted cells cleaned up successfully with no unknown mutations. The
-[gate results](.github/eval/README.md#first-model-matrix-2026-11-04) retain these
+[gate results](tests/eval/README.md#first-model-matrix-2026-11-04) retain these
 failures, observed cache counters, estimates, and the unattempted cells.
 
 Under the earlier grading version, each required model had one passing attempt: Sonnet after fixing
@@ -467,10 +474,10 @@ instruction handoff and clarifying product guidance; Sol after additionally fixi
 conservative budget settlement. Both completed the Gmail task, discovery, skill
 retrieval, and cleanup with zero unknown mutations. These are separate harness
 candidates, not a fresh pair pass or a reliability claim. The earlier failed pair
-remains retained. See the [qualified results](.github/eval/README.md#sol-validation-with-accounting-version-2-2026-11-04)
+remains retained. See the [qualified results](tests/eval/README.md#sol-validation-with-accounting-version-2-2026-11-04)
 for cost/cache evidence and the earlier method criterion's coverage limits. The
 current grader requires every used method to be described before execution; the
-[independent case results](.github/eval/README.md#independent-gmail-cases-with-grading-version-2-2026-11-04)
+[independent case results](tests/eval/README.md#independent-gmail-cases-with-grading-version-2-2026-11-04)
 retain the remaining Sonnet discovery failures and the corrected pagination grades.
 
 ### Initial test consent and CI secrets

@@ -14,7 +14,7 @@ before(async () => {
   directory = await mkdtemp(join(tmpdir(), 'google-codemode-worker-'));
   const scriptPath = join(directory, 'worker.js');
   await build({
-    entryPoints: ['.github/tests/workerd.fixture.ts'],
+    entryPoints: ['tests/fixtures/workerd.ts'],
     bundle: true,
     format: 'esm',
     platform: 'neutral',

@@ -26,7 +26,7 @@ for (const omitScheme of [false, true])
         }),
       );
       await writeFile(join(directory, '.test.env'), 'GOOGLE_TEST_USER=test@example.invalid\n');
-      const child = spawn(process.execPath, [resolve('.github/oauth.mjs')], {
+      const child = spawn(process.execPath, [resolve('tests/support/oauth.mjs')], {
         cwd: directory,
         env: {
           ...process.env,
@@ -129,7 +129,7 @@ test(
       join(directory, '.test.env'),
       'GOOGLE_TEST_USER=test@example.invalid\nGOOGLE_TEST_PASSWORD=unused-password\nGOOGLE_TEST_TOPT_KEY=unused-seed\n',
     );
-    const child = spawn(process.execPath, [resolve('.github/oauth.mjs')], {
+    const child = spawn(process.execPath, [resolve('tests/support/oauth.mjs')], {
       cwd: directory,
       env: {
         ...process.env,

@@ -10,7 +10,7 @@ Use these existing homes according to the reader's question:
 | Home                                                                                     | Purpose / evidence to inspect                                                                                       |
 | ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
 | [README.md](../../../README.md)                                                          | Product contract, discovery/execution examples, deployment, HTTP headers, OAuth and verification setup              |
-| [.github/eval/README.md](../../../.github/eval/README.md)                                | Agent gate commands, coverage, caps, model/runner identities, qualified pilot results                               |
+| [tests/eval/README.md](../../../tests/eval/README.md)                                    | Agent gate commands, coverage, caps, model/runner identities, qualified pilot results                               |
 | [skills/google-workspace/SKILL.md](../../../skills/google-workspace/SKILL.md)            | Distributed agent instructions served through MCP Resources/Skills; inspect `src/protocol.ts` for serving/integrity |
 | [Issue #1](https://github.com/marcfargas/google-codemode-mcp/issues/1) and linked issues | Requested outcomes, open decisions and acceptance; tracker is not proof of deployed behavior                        |
 
@@ -22,7 +22,7 @@ or a hosted pass. Keep provisional research/reviews in external task material.
 ## Retrieve and answer
 
 Start with the supplied link/path/section. Otherwise use `rg -n 'TERMS' README.md
-.github/eval/README.md skills src .github/workflows justfile wrangler.jsonc` and
+tests/eval/README.md skills src .github/workflows justfile wrangler.jsonc` and
 read enough surrounding content to preserve limits. Follow useful links and
 inspect relevant code/workflow before claiming freshness. Resolve issue references
 with `gh issue view NUMBER --repo marcfargas/google-codemode-mcp`; search work via

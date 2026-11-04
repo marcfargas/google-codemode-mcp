@@ -6,7 +6,7 @@ description: Verify a Google Code Mode change with the maintained just and GitHu
 # Verify a candidate
 
 Read [README workflow verification](../../../README.md#workflow-verification)
-and [agent gate documentation](../../../.github/eval/README.md) for the selected
+and [agent gate documentation](../../../tests/eval/README.md) for the selected
 path. Product/fixture changes use the delivery procedure when available; this skill
 owns proof, not unrelated repairs or deployment authority.
 
@@ -16,7 +16,7 @@ Record `git rev-parse HEAD`, `git status --short`, and the relevant diff/untrack
 source bytes with results. Local `act` tests working-tree bytes; remote GitHub tests
 its checked-out SHA. A prior pass does not qualify a new candidate. Use new absolute
 evidence directories outside the checkout, retain command/exit/output and receipts,
-and preserve failed attempts. Inspect `justfile`, `.github/run.mjs`, relevant
+and preserve failed attempts. Inspect `justfile`, `tests/run.mjs`, relevant
 workflow and launcher when prerequisites or behavior changed.
 
 Check Node 24, `just`, dependencies (`npm ci --ignore-scripts` when preparation is
@@ -30,7 +30,7 @@ readiness at the failed boundary and restart only trial-owned state when warrant
 | Goal                                                      | Maintained command                                                | What it establishes                                                                      |
 | --------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | Ordinary change check                                     | `just check`                                                      | Check workflow in `act`: typecheck, Wrangler dry-run, credential-free tests, formatting  |
-| Fast host feedback / unavailable compatible Docker runner | `just verify`                                                     | Same `.github/run.mjs check` steps on this host; no claim of `act` compatibility         |
+| Fast host feedback / unavailable compatible Docker runner | `just verify`                                                     | Same `tests/run.mjs check` steps on this host; no claim of `act` compatibility           |
 | Runner/MCP/file plumbing                                  | `just eval-preflight /absolute/new/evidence`                      | Both isolated runners with synthetic responses; no model, OAuth, or Google calls         |
 | Saved trial grading                                       | `just eval-regrade /absolute/saved/trial-1 /absolute/new/regrade` | Offline current grader against retained evidence, preserving original results            |
 | Real Gmail behavior                                       | `just live`                                                       | Manual credentialed Gmail workflow through locally built Worker                          |
@@ -41,14 +41,16 @@ readiness at the failed boundary and restart only trial-owned state when warrant
 | Prepare private hosted probes                             | `just hosted-prepare /absolute/new/prepared`                      | Exact source/bundle identity and private dry-run; no deployment                          |
 | Hosted runtime limits                                     | `just hosted-verify /absolute/new/evidence`                       | Selected deployed version via protected ingress; requires documented `HOSTED_*` inputs   |
 
-All maintained helpers/tests live under `.github/`, commands in `justfile`; there is
-no root `scripts/`, root `tests/`, or npm task layer. Keep new verification support
-there if within the requested change. `just build` and `just deploy --dry-run`
+Maintained suites, helpers and local workflow launchers live under `tests/`;
+`.github/` contains GitHub workflows and repository-secret installation, with
+commands in `justfile` and the deployment entrypoint at root `deploy.mjs`. Credential-free
+checks select `tests/unit/` and `tests/integration/`; credentialed suites in
+`tests/live/` run only through the explicit live targets. `just build` and `just deploy --dry-run`
 only bundle/validate; `just deploy` publishes and needs deployment scope.
 
 `just live` mutates the dedicated test account: labels/drafts and controlled
 self-send. Prerequisites are the matching installed-app client, test user, and
-refresh grant. Resolve through `.github/secrets.mjs` and README's local setup;
+refresh grant. Resolve through `tests/support/credentials.mjs` and README's local setup;
 `.test.env` is ignored and client/token overrides are `GOOGLE_OAUTH_CLIENT_FILE`
 and `GOOGLE_TEST_TOKEN_FILE`. Inspect existence/readability without printing contents.
 Missing consent is a prerequisite gap. OAuth, API enablement, GitHub secret

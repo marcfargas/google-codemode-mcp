@@ -189,7 +189,7 @@ CPU passes only when the observed native executor throws a CPU-specific platform
 ## Credential-free checks
 
 ```sh
-node --experimental-strip-types --test .github/tests/hosted.test.ts
+node --experimental-strip-types --test tests/integration/hosted.test.ts
 ```
 
 The ordinary test workflow includes these tests. They build the private candidate and exercise it in local Miniflare, including the actual 15-second async timeout, late-call fences, five reads, and healthy follow-ups. Outbound networking fails if attempted. CPU grading is tested with synthetic exception evidence; the infinite loop is deliberately never run in local workerd, whose CPU limit behavior does not establish hosted enforcement. A local pass is not a hosted pass.

@@ -278,7 +278,7 @@ export async function regradeTrial(saved: string, output: string) {
       await Promise.all(
         gradingFiles.map(async (file) => [
           file,
-          hash(await readFile(join(checkout, '.github/eval', file), 'utf8')),
+          hash(await readFile(join(checkout, 'tests/eval', file), 'utf8')),
         ]),
       ),
     ),

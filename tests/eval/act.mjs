@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { localCredentials } from '../secrets.mjs';
+import { localCredentials } from '../support/credentials.mjs';
 import { getCellByModel, selectCells } from './matrix.ts';
 
 // flock is held by a subprocess until release; the kernel also releases it if
@@ -62,13 +62,9 @@ export async function retainCandidateSource(destination) {
       '--exclude-standard',
       '-z',
       '--',
-      '.github/eval',
-      '.github/hosted',
-      '.github/tests/eval-*.test.ts',
-      '.github/tests/hosted*.test.ts',
-      '.github/workflows/evaluate.yml',
-      '.github/worker-client.ts',
-      '.github/run.mjs',
+      'tests',
+      '.github/workflows',
+      'deploy.mjs',
       '.github/secrets.mjs',
       'src',
       'skills',

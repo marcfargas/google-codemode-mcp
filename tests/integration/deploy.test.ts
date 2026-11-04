@@ -8,7 +8,7 @@ import test from 'node:test';
 test('deployment CLI maps environment settings and preserves native credentials and Builds guards', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'codemode-deploy-'));
   const executable = join(directory, 'node_modules', '.bin', 'wrangler');
-  const helper = resolve('.github/deploy.mjs');
+  const helper = resolve('deploy.mjs');
   try {
     await mkdir(join(directory, 'node_modules', '.bin'), { recursive: true });
     await writeFile(

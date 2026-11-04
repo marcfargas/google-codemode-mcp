@@ -167,20 +167,20 @@ export async function runCell(configuration?: {
       files: Object.fromEntries(
         await Promise.all(
           [
-            '.github/eval/run.ts',
-            '.github/eval/backend.ts',
-            '.github/eval/campaign.ts',
-            '.github/eval/catalog.ts',
-            '.github/eval/server.ts',
-            '.github/eval/actor.ts',
-            '.github/eval/codex.ts',
-            '.github/eval/responses.ts',
-            '.github/eval/responses-relay.ts',
-            '.github/eval/matrix.ts',
-            '.github/eval/gmail.ts',
-            '.github/eval/mechanisms.ts',
-            '.github/eval/cases.ts',
-            '.github/eval/drive.ts',
+            'tests/eval/run.ts',
+            'tests/eval/backend.ts',
+            'tests/eval/campaign.ts',
+            'tests/eval/catalog.ts',
+            'tests/eval/server.ts',
+            'tests/eval/actor.ts',
+            'tests/eval/codex.ts',
+            'tests/eval/responses.ts',
+            'tests/eval/responses-relay.ts',
+            'tests/eval/matrix.ts',
+            'tests/eval/gmail.ts',
+            'tests/eval/mechanisms.ts',
+            'tests/eval/cases.ts',
+            'tests/eval/drive.ts',
             'skills/google-workspace/SKILL.md',
             'package-lock.json',
           ].map(async (file) => [file, sha256(await readFile(file))]),
@@ -392,7 +392,7 @@ export async function runCell(configuration?: {
   }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve('.github/eval/run.ts')) {
+if (process.argv[1] && resolve(process.argv[1]) === resolve('tests/eval/run.ts')) {
   runCell()
     .then((run) => {
       if (!run.passed) process.exitCode = 1;
