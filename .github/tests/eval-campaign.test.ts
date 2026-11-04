@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -137,5 +137,24 @@ test('independent suite attempts each case/model once and retains unattempted sa
   } finally {
     process.env = original;
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('hosted runner cannot start paid evaluation or create fixture evidence', async () => {
+  const { runCell } = await import('../eval/run.ts');
+  const original = { ...process.env };
+  const directory = await mkdtemp(join(tmpdir(), 'hosted-eval-refusal-'));
+  const output = join(directory, 'must-not-exist');
+  try {
+    process.env.GITHUB_ACTIONS = 'true';
+    delete process.env.ACT;
+    await assert.rejects(
+      runCell({ profile: 'gmail', model: 'gpt-6.1-sol', output }),
+      /requires local act/,
+    );
+    await assert.rejects(access(output), { code: 'ENOENT' });
+  } finally {
+    process.env = original;
+    await rm(directory, { recursive: true, force: true });
   }
 });

@@ -89,6 +89,8 @@ export async function runCell(configuration?: {
   repeats?: number;
   caseId?: string;
 }) {
+  if (process.env.GITHUB_ACTIONS === 'true' && process.env.ACT !== 'true')
+    throw new Error('Paid agent evaluation requires local act and marcdev CLIProxyAPI');
   const profile = configuration?.profile ?? required('EVAL_PROFILE');
   const output = resolve(configuration?.output ?? required('EVAL_OUTPUT'));
   await mkdir(output, { recursive: true, mode: 0o700 });

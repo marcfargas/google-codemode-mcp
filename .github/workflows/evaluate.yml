@@ -59,6 +59,11 @@ jobs:
       GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
       GOOGLE_TEST_REFRESH_TOKEN: ${{ secrets.GOOGLE_TEST_REFRESH_TOKEN }}
     steps:
+      - name: Require local act for agent evaluation
+        if: env.ACT != 'true'
+        run: |
+          echo 'Agent evaluation runs only through local just/act and marcdev CLIProxyAPI.' >&2
+          exit 1
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:

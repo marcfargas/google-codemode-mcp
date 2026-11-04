@@ -94,13 +94,12 @@ without credentials, inference, or Google requests:
 just eval-preflight /absolute/new/preflight-directory
 ```
 
-The GitHub **Agent feasibility** workflow is also manual. Select a single `model`
-or a matrix `selection`. It needs the three Google test secrets documented in the
-root README plus `CPA_CLIENT_API_KEY` and a proxy URL reachable from that runner.
-A localhost proxy on the developer machine is not reachable from a hosted runner.
-No proxy is provisioned or exposed by this workflow. GitHub evidence artifacts
-retain private test content for seven days; local evidence remains in the selected
-external directory. Ordinary push and PR checks never invoke models.
+The **Agent feasibility** workflow runs only through local `act` on marcdev.
+Its first step refuses GitHub-hosted execution before installing tools, refreshing
+OAuth grants, creating fixtures, or calling models. Use the `just eval*`
+commands above with the local CLIProxyAPI; no proxy or model credentials need
+publishing to GitHub. Local evidence stays in the selected external directory.
+Ordinary push and PR checks never invoke models.
 
 There are no performer retries, fallbacks, judge votes, or automatic optimization.
 A single-model invocation may request a second fresh trial as an explicit cache
