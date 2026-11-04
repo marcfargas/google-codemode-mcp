@@ -116,8 +116,7 @@ Access administration through the selected owner path.
 
 This proves the synthetic verification candidate and Access admission. It does
 not deploy the live Google product or qualify its gateway binding, Google tasks,
-or host Skills activation. Deployment with only Worker Editor remains unverified
-until the owner reduces the bootstrap token and a subsequent deploy succeeds.
+or host Skills activation. Deployment with only Worker Editor was subsequently verified as described below.
 Bootstrap Workers Admin and Access rights are no longer needed for the existing
 resources or invoking these tests.
 
@@ -130,6 +129,14 @@ Token-policy introspection was unavailable, so this proves the supplied reduced
 configuration works, rather than a credential containing only Editor. The 11
 runtime probes above retain their original version identity; stress was not
 repeated for this deployment.
+
+After the owner removed the remaining Access permission entries, another
+redeployment succeeded with only the owner-confirmed Worker-scoped Editor grant.
+Version `fb61d70b-1c5c-4e65-9116-c272aac199a8` served the same retained bundle at
+100%; missing credentials returned 403, a wrong secret returned 401, and the
+runner credential returned matching identity with 200. Previews remained disabled.
+This verifies deployment with that supplied credential; token-policy introspection
+remains unavailable. No additional runtime stress probes were needed.
 
 ## Prepare without deployment
 
