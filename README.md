@@ -30,6 +30,151 @@ needs an adapter to populate this argument. The deployed MCP service does not ac
 refresh, or retain credentials. Request arguments are visible to the submitting
 host; keep credential injection in the trusted caller.
 
+## Deploy to Cloudflare
+
+Deployment requires Node 24 and a **Workers Paid plan** for the
+[Dynamic Workers](https://developers.cloudflare.com/dynamic-workers/pricing/)
+used by Code Mode. Executions incur Dynamic Worker creation, request, and CPU
+usage. The checked-in configuration includes the `LOADER` binding; there are no
+databases, persistent sessions, or Google OAuth secrets to provision on the Worker.
+
+The deployment command below uses environment variables without editing
+`wrangler.jsonc` or application source:
+
+| Variable                | Purpose                                                                                            |
+| ----------------------- | -------------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_ACCOUNT_ID` | Target account; supply for unattended CLI/CI deployment.                                           |
+| `CLOUDFLARE_API_TOKEN`  | Wrangler deployment credential; store as a CI secret. Local Wrangler login also works.             |
+| `WORKER_NAME`           | Optional Worker name; defaults to `google-codemode-mcp`, or the Worker selected by Workers Builds. |
+| `WORKER_DOMAIN`         | Optional custom hostname, e.g. `mcp.example.com`; no scheme or path.                               |
+| `WORKER_ROUTE`          | Optional route pattern, e.g. `example.com/mcp*`; use instead of `WORKER_DOMAIN`.                   |
+
+Use a token scoped to the target account with Workers Scripts edit permission
+(the **Edit Cloudflare Workers** template). Custom domains/routes also need the
+appropriate zone permissions, including Workers Routes edit and DNS access where
+required. The hostname/zone must belong to the account.
+
+```sh
+npm ci --ignore-scripts
+# Supply CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN through your environment.
+export WORKER_NAME=my-google-mcp
+export WORKER_DOMAIN=mcp.example.com  # optional
+just deploy --dry-run                # Bundle and validate; no upload
+just deploy                          # Publish and configure the domain/route
+```
+
+The equivalent command without `just` is `node .github/deploy.mjs`, optionally
+with `--dry-run`. The helper maps settings to pinned Wrangler flags and keeps
+Cloudflare credentials in the deployment process. These variables are not Worker
+runtime bindings. Export them in the shell or configure them in CI build settings;
+the helper does not load dotenv files.
+
+With no domain or route, Wrangler enables
+`https://<worker-name>.<account-subdomain>.workers.dev/mcp`. With either setting,
+it disables the workers.dev endpoint and publishes the configured domain/route;
+a custom-domain endpoint is `https://<domain>/mcp`. Keep the domain/route setting
+on every deployment: configuring it only in the dashboard can let a later deploy
+re-enable workers.dev. A route must cover `/mcp`; a custom domain serves the Worker
+directly, while a route requires existing proxied DNS/origin configuration.
+
+**Caller access protection is separate.** This Worker has no caller authentication
+middleware. Anyone who can reach it can submit code and consume your Worker
+resources; Google operations additionally require the supplied Google token.
+Put the endpoint behind the authenticated gateway or Cloudflare Access, and
+protect any workers.dev or preview URLs that you enable. Choosing a custom domain
+does not itself add authentication. The Google token remains the `accessToken`
+tool argument; an Authorization header does not populate that argument.
+
+### Git-connected Workers Builds
+
+Connect a repository you can access in the Cloudflare dashboard. The same
+checkout can serve different accounts, names, and domains through
+[Build settings](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/):
+
+| Setting           | Value                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------- |
+| Root directory    | Repository root                                                                         |
+| Production branch | `main`                                                                                  |
+| Build variables   | `NODE_VERSION=24`, `SKIP_DEPENDENCY_INSTALL=1`, plus optional `WORKER_*` settings above |
+| Build command     | `npm ci --ignore-scripts`                                                               |
+| Deploy command    | `node .github/deploy.mjs`                                                               |
+| Preview builds    | Disable for this initial setup; preview deployment/protection is unqualified.           |
+
+Workers Builds supplies its account/deployment credential. Do not add the Gmail
+test OAuth secrets to Builds or the deployed Worker. Build variables are available
+only during the build/deploy process; putting `WORKER_DOMAIN` in runtime Variables
+& Secrets will not configure deployment.
+
+The helper follows the dashboard's selected Worker name. An explicit `WORKER_NAME`
+must match it. Wrangler's injected account/Worker identity checks are preserved;
+the helper passes the selected name so a name mismatch does not trigger Wrangler's
+config-name correction warning. No generated Wrangler configuration is needed.
+
+This supports deployment without source edits. Cloudflare's separate
+[Deploy to Cloudflare button](https://developers.cloudflare.com/workers/platform/deploy-buttons/)
+requires a public source repository and copies it into the deployer's Git account;
+that flow may rewrite names in the copy. It is a future release convenience, not
+an unchanged-checkout guarantee. Its handling of the Worker Loader binding has
+not been verified, so no active deployment button is advertised yet.
+
+Dry-runs validate bundling and option compatibility. Account permissions, DNS,
+Workers Builds execution, hosted Worker Loader behavior, and CPU-limit enforcement
+still require hosted verification. No hosted deployment has been performed.
+
+## HTTP connection contract
+
+Send JSON-RPC to `POST /mcp`. Every request includes
+`Content-Type: application/json`, `MCP-Protocol-Version: 2026-07-28`, and
+`MCP-Method` matching the JSON-RPC method. For `tools/call`, also send `MCP-Name`
+matching `params.name`. Repeat the protocol/client capability metadata in each
+request; there is no initialize request or session identifier.
+
+For example, list tools without a Google token:
+
+```sh
+curl --fail-with-body https://mcp.example.com/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'MCP-Protocol-Version: 2026-07-28' \
+  -H 'MCP-Method: tools/list' \
+  --data-binary '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}}}'
+```
+
+An `execute` call uses these additional headers/body. The token placeholder is
+replaced by the trusted caller with a short-lived Google access token whose grant
+covers the discovered method's scopes:
+
+```http
+POST /mcp HTTP/1.1
+Content-Type: application/json
+MCP-Protocol-Version: 2026-07-28
+MCP-Method: tools/call
+MCP-Name: execute
+
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "method": "tools/call",
+  "params": {
+    "name": "execute",
+    "arguments": {
+      "accessToken": "<short-lived Google token>",
+      "inputs": {},
+      "code": "const gmail = google.gmail({version: 'v1'}); return (await gmail.users.getProfile({userId: 'me'})).data;"
+    },
+    "_meta": {
+      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+      "io.modelcontextprotocol/clientCapabilities": {}
+    }
+  }
+}
+```
+
+Add whatever caller-authentication headers your gateway or Access policy requires
+separately. Finite JSON responses contain the normal MCP tool result; execution
+data, including mutation outcomes, is in `result.structuredContent`. The pinned
+official MCP client handles these headers/metadata; other clients must support
+this protocol revision or use an adapting gateway.
+
 ## Discover, then execute
 
 The two core tools are `describe` and `execute`. Deployment snippets can add tools.
@@ -158,9 +303,10 @@ Skills integrity, dynamic Discovery, native request encoding, credential/transpo
 isolation, failure outcomes, timeout/unawaited-call fencing, snippets, and the
 actual Wrangler build. Workspace responses are synthetic in these checks.
 
-No hosted deployment or authenticated Gmail business operation has been performed.
-Live Gmail reads/drafts/controlled send, gateway adaptation, hosted CPU enforcement,
-and all three host integrations remain acceptance work. Subsequent APIs are Drive,
+Live Gmail reads, labels, drafts, and controlled self-send passed locally and on
+GitHub, as recorded below. No hosted deployment has been performed. Gateway
+adaptation, hosted CPU enforcement, and all three host integrations remain
+acceptance work. Subsequent APIs are Drive,
 Sheets, Docs, and Calendar, in that order. Tasks and replay are deferred.
 
 [Project scope and remaining acceptance](https://github.com/marcfargas/google-codemode-mcp/issues/1).

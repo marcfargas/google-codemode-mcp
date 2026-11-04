@@ -26,5 +26,9 @@ github-secrets:
 build:
     node .github/run.mjs build
 
+# Publish the unchanged checkout using deployment environment settings.
+deploy *args:
+    node .github/deploy.mjs {{args}}
+
 dev:
     node_modules/.bin/wrangler dev

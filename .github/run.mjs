@@ -10,7 +10,7 @@ function run(program, args) {
   if (result.status !== 0) process.exit(result.status ?? 1);
 }
 function build() {
-  run('node_modules/.bin/wrangler', ['deploy', '--dry-run', '--outdir', 'dist']);
+  run(process.execPath, ['.github/deploy.mjs', '--dry-run']);
 }
 const target = process.argv[2] ?? 'check';
 if (target === 'build') build();
