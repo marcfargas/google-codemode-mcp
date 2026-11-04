@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.wrangler/
+.serena/
+.dev.vars*
+.env*
+coverage/
+
+.test.env
+.test.oauth*.json

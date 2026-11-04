@@ -1,0 +1,30 @@
+{
+  "name": "google-codemode-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "4.1.1",
+    "@cloudflare/codemode": "0.5.6",
+    "@modelcontextprotocol/server": "2.4.0",
+    "googleapis-common": "9.3.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261103.1",
+    "@modelcontextprotocol/client": "2.4.0",
+    "@types/node": "24.10.0",
+    "esbuild": "0.28.2",
+    "google-auth-library": "11.3.3",
+    "miniflare": "5.20261103.0-beta",
+    "playwright": "1.61.1",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "wrangler": "4.157.0"
+  },
+  "overrides": {
+    "undici": "7.30.1"
+  }
+}
