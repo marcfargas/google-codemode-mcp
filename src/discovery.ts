@@ -140,7 +140,7 @@ export class DiscoveryCatalog {
     let document = this.options.document;
     if (!document) {
       const response = await (this.options.fetch ?? fetch)(GMAIL_DISCOVERY_URL, {
-        redirect: 'error',
+        redirect: 'manual',
       });
       if (!response.ok) throw new Error('Google Discovery unavailable');
       document = (await response.json()) as DiscoveryDocument;

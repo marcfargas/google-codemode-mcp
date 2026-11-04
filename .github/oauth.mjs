@@ -3,6 +3,8 @@ import { randomBytes, createHmac } from 'node:crypto';
 import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { parseEnv } from 'node:util';
+import { createInterface } from 'node:readline';
+import { Writable } from 'node:stream';
 import { OAuth2Client } from 'google-auth-library';
 import { localCredentials, defaultTokenFile } from './secrets.mjs';
 
@@ -108,7 +110,7 @@ async function automate(url, expectedUser) {
   }
 }
 
-let server, browser;
+let server, browser, pasteInput;
 try {
   const credentials = await localCredentials({ requireToken: false });
   const config = JSON.parse(credentials.GOOGLE_OAUTH_CLIENT_JSON).installed;
@@ -119,30 +121,43 @@ try {
     reject = fail;
   });
   callback.catch(() => {});
+  function parseCallback(url) {
+    if (url.searchParams.getAll('state').length !== 1 || url.searchParams.get('state') !== state)
+      throw new Error('Invalid OAuth state');
+    const codes = url.searchParams.getAll('code');
+    const errors = url.searchParams.getAll('error');
+    if (errors.length === 1 && errors[0] && codes.length === 0) return { denied: true };
+    if (codes.length === 1 && codes[0] && errors.length === 0) return { code: codes[0] };
+    throw new Error('Invalid OAuth response');
+  }
+  function settleCallback(result) {
+    if (result.denied) reject(new Error('Google consent was denied'));
+    else accept(result.code);
+  }
   server = createServer((request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
     if (url.pathname !== '/oauth/callback') {
       response.writeHead(404).end();
       return;
     }
-    if (url.searchParams.get('state') !== state) {
-      response.writeHead(400).end('Invalid OAuth state');
-      return;
-    }
-    if (url.searchParams.has('error')) {
-      response.writeHead(400).end('Consent was not granted');
-      reject(new Error('Google consent was denied'));
-      return;
-    }
-    const code = url.searchParams.get('code');
-    if (!code) {
-      response.writeHead(400).end('Missing OAuth code');
+    let result;
+    try {
+      result = parseCallback(url);
+    } catch {
+      response.writeHead(400).end('Invalid OAuth callback');
       return;
     }
     response
-      .writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' })
-      .end('OAuth test consent complete. You can close this tab.');
-    accept(code);
+      .writeHead(result.denied ? 400 : 200, {
+        'Content-Type': 'text/plain',
+        'Cache-Control': 'no-store',
+      })
+      .end(
+        result.denied
+          ? 'Consent was not granted'
+          : 'OAuth callback received. You can close this tab.',
+      );
+    settleCallback(result);
   });
   await new Promise((resolve, reject) =>
     server.listen(0, '127.0.0.1', resolve).once('error', reject),
@@ -164,9 +179,45 @@ try {
     if (process.argv.includes('--automate'))
       browser = await automate(url, credentials.GOOGLE_TEST_USER);
     else {
+      pasteInput = createInterface({
+        input: process.stdin,
+        terminal: Boolean(process.stdin.isTTY),
+        output: new Writable({
+          write(_chunk, _encoding, done) {
+            done();
+          },
+        }),
+      });
+      pasteInput.on('SIGINT', () => reject(new Error('OAuth consent cancelled')));
+      pasteInput.on('line', (line) => {
+        if (!line.trim()) return;
+        let result;
+        try {
+          const value = line.trim();
+          const pasted = new URL(value.startsWith('127.0.0.1:') ? `http://${value}` : value);
+          const expected = new URL(redirect);
+          if (
+            pasted.origin !== expected.origin ||
+            pasted.pathname !== expected.pathname ||
+            pasted.username ||
+            pasted.password ||
+            pasted.hash
+          )
+            throw new Error('Foreign callback');
+          result = parseCallback(pasted);
+        } catch {
+          console.log('Invalid OAuth redirect URL; paste the full URL from this consent attempt.');
+          return;
+        }
+        pasteInput.close();
+        process.stdin.pause();
+        settleCallback(result);
+      });
       console.log(`Local callback port: ${server.address().port}`);
-      console.log(`If your browser is on another machine, forward this port to marcdev first.`);
       console.log(`Open this one-time local authorization URL in your browser:\n${url}`);
+      console.log(
+        'After consent, paste the full localhost redirect URL here (input is hidden). No port forwarding needed.',
+      );
     }
     const code = await callback;
     let tokens;
@@ -218,5 +269,7 @@ try {
   process.exitCode = 1;
 } finally {
   await browser?.close();
+  pasteInput?.close();
+  process.stdin.pause();
   server?.close();
 }

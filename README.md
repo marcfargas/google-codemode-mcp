@@ -204,8 +204,13 @@ just live
 Automated consent uses Playwright; install its Chromium with
 `node_modules/.bin/playwright install chromium` or set `GOOGLE_CHROME_PATH` to an
 existing compatible executable. Google can reject automated sign-in. In that case
-use interactive `just oauth`; if the CLI runs remotely, forward its printed
-localhost callback port before completing consent in your browser.
+use interactive `just oauth`. Open its authorization URL in your own
+browser, complete consent, then paste the full localhost redirect URL into the
+waiting CLI. A failed localhost page is expected when the browser runs on another
+machine; no port forwarding is required. Paste input is hidden and is also accepted
+through stdin for private file delivery. Use the URL from the same still-running
+consent attempt. Browser-copied addresses that omit the `http://` prefix are also
+accepted. Automatic localhost callbacks still work.
 
 Consent requests `gmail.modify`, verifies the expected Gmail profile, then saves
 only the refresh grant and binding metadata at

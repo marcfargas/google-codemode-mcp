@@ -5,7 +5,7 @@ import { builtinModules } from 'node:module';
 import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Miniflare } from 'miniflare';
+import { Miniflare, Response as MiniflareResponse } from 'miniflare';
 
 let mf: Miniflare;
 let directory: string;
@@ -242,6 +242,30 @@ test('overflow fallback also redacts a caller-supplied credential echo in correl
 
 test('actual Wrangler build boots and executes through the production MCP route', async () => {
   const bundle = await readFile('dist/worker.js', 'utf8');
+  const outbound: string[] = [];
+  const parameters = { userId: { type: 'string', required: true, location: 'path' } };
+  const discovery = {
+    name: 'gmail',
+    version: 'v1',
+    rootUrl: 'https://gmail.googleapis.com/',
+    servicePath: '',
+    resources: {
+      users: {
+        resources: {
+          messages: {
+            methods: {
+              list: { path: 'gmail/v1/users/{userId}/messages', httpMethod: 'GET', parameters },
+              send: {
+                path: 'gmail/v1/users/{userId}/messages/send',
+                httpMethod: 'POST',
+                parameters,
+              },
+            },
+          },
+        },
+      },
+    },
+  };
   production = new Miniflare({
     workers: [
       {
@@ -256,37 +280,76 @@ test('actual Wrangler build boots and executes through the production MCP route'
           },
           env: { LOADER: { type: 'worker-loader' } },
         },
+        dev: {
+          outboundService: {
+            type: 'fetcher',
+            handler: async (request) => {
+              outbound.push(request.url);
+              assert.equal(new URL(request.url).hostname, 'gmail.googleapis.com');
+              if (new URL(request.url).pathname === '/$discovery/rest')
+                return MiniflareResponse.json(discovery);
+              assert.equal(request.headers.get('authorization'), 'Bearer TOKEN_CANARY_77881');
+              return request.method === 'POST'
+                ? new MiniflareResponse(null, {
+                    status: 307,
+                    headers: { location: 'https://example.invalid/credential-trap' },
+                  })
+                : MiniflareResponse.json({ messages: [] });
+            },
+          },
+        },
       },
     ],
   });
-  const response = await production.dispatchFetch('http://localhost/mcp', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'MCP-Protocol-Version': '2026-07-28',
-      'MCP-Method': 'tools/call',
-      'MCP-Name': 'execute',
-    },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'tools/call',
-      params: {
-        name: 'execute',
-        arguments: {
-          accessToken: 'TOKEN_CANARY_77881',
-          code: 'return inputs.number + 1',
-          inputs: { number: 41 },
-        },
-        _meta: {
-          'io.modelcontextprotocol/protocolVersion': '2026-07-28',
-          'io.modelcontextprotocol/clientCapabilities': {},
-        },
+  const call = (code: string) =>
+    production.dispatchFetch('http://localhost/mcp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'MCP-Protocol-Version': '2026-07-28',
+        'MCP-Method': 'tools/call',
+        'MCP-Name': 'execute',
       },
-    }),
-  });
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'execute',
+          arguments: {
+            accessToken: 'TOKEN_CANARY_77881',
+            code,
+            inputs: { number: 41 },
+          },
+          _meta: {
+            'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+            'io.modelcontextprotocol/clientCapabilities': {},
+          },
+        },
+      }),
+    });
+  const response = await call('return inputs.number + 1');
   assert.equal(response.status, 200, await response.clone().text());
   const out = (await response.json()) as any;
   assert.equal(out.result.structuredContent.result, 42, JSON.stringify(out));
   assert.equal(out.result.structuredContent.status, 'completed');
+  // Native workerd fetch must accept the redirect policy at both production seams.
+  // A redirected mutation stays unknown, fences another send, and permits a read.
+  const native = await call(`
+    const gmail=google.gmail({version:'v1'});
+    for(let i=0;i<2;i++) {try {await gmail.users.messages.send({userId:'me'});} catch {}}
+    return (await gmail.users.messages.list({userId:'me'})).data;
+  `);
+  const receipt = (await native.json()) as any;
+  const result = receipt.result.structuredContent;
+  assert.equal(result.status, 'completed', JSON.stringify(receipt));
+  assert.deepEqual(result.result, { messages: [] });
+  assert.equal(result.hasUnknownOutcome, true);
+  assert.deepEqual(
+    result.outcomes.map((o: { outcome: string }) => o.outcome),
+    ['unknown', 'not_dispatched', 'acknowledged'],
+  );
+  assert.equal(result.outcomes[0].httpStatus, 307);
+  assert.equal(outbound.length, 3);
+  assert.equal(outbound.filter((u) => u.endsWith('/send')).length, 1);
 });

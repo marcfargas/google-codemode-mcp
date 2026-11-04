@@ -168,7 +168,7 @@ export function createDispatcher(options: DispatcherOptions) {
           const response = await (options.transport ?? fetch)(url, {
             ...init,
             headers,
-            redirect: 'error',
+            redirect: 'manual',
             signal: controller.signal,
           });
           if (closed || timedOut || interrupted.has(record)) {
@@ -176,6 +176,10 @@ export function createDispatcher(options: DispatcherOptions) {
             throw new Error('Dispatch closed');
           }
           record.httpStatus = response.status;
+          if (response.status >= 300 && response.status < 400) {
+            await response.body?.cancel();
+            throw new Error('Google redirects are not followed');
+          }
           if (response.status >= 200 && response.status < 300) record.outcome = 'acknowledged';
           if (!response.body) return response;
           const reader = response.body.getReader();

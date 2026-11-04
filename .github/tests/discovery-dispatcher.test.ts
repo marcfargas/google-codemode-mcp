@@ -165,7 +165,7 @@ test('native request preserves query arrays/body and returns only safe data and 
     transport: async (url, init) => {
       observed.push({ url: String(url), init });
       assert.equal(new Headers(init?.headers).get('Authorization'), `Bearer ${token}`);
-      assert.equal(init?.redirect, 'error');
+      assert.equal(init?.redirect, 'manual');
       return json({ raw: token, nested: { safe: true } });
     },
   });
