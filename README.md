@@ -244,5 +244,7 @@ A successful live run qualifies the production bundle against live Gmail. Hosted
 CPU enforcement, CFA gateway adaptation, and Claude/ChatGPT/OpenClaw integration
 remain separate acceptance work.
 
-Interactive consent and CI secret setup are complete. Live Gmail verification is
-pending its first successful workflow run.
+Live Gmail verification passed locally through `act` and on
+[GitHub Actions](https://github.com/marcfargas/google-codemode-mcp/actions/runs/41755819750)
+for commit `b0e5dba626e162a4af14e14f29f95538926601ca`. Both runs completed
+fixture cleanup with no unknown mutation outcomes.
