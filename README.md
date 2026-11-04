@@ -119,9 +119,11 @@ that flow may rewrite names in the copy. It is a future release convenience, not
 an unchanged-checkout guarantee. Its handling of the Worker Loader binding has
 not been verified, so no active deployment button is advertised yet.
 
-Dry-runs validate bundling and option compatibility. Account permissions, DNS,
-Workers Builds execution, hosted Worker Loader behavior, and CPU-limit enforcement
-still require hosted verification. No hosted deployment has been performed.
+Dry-runs validate bundling and option compatibility. A separate Access-protected
+verification Worker passed hosted synthetic runtime checks on 2026-11-04,
+including native CPU termination, asynchronous timeout, cancellation fences and
+multiple bridge calls. Account/DNS configurations, Workers Builds, and deployment
+of the live Google service remain separate from that bounded qualification.
 
 The [hosted verification harness](.github/hosted/README.md) prepares a separate
 private Worker with fixed synthetic probes, then checks its exact deployed
@@ -131,6 +133,8 @@ documented `HOSTED_*` environment settings. It checks native CPU termination,
 the 15-second asynchronous timeout, late-call fencing, multiple bridge calls and
 healthy follow-ups. Local tests cover these paths except hosted CPU enforcement.
 An external timeout or generic resource error cannot pass the CPU criterion.
+The qualified run observed the native `Worker exceeded CPU time limit.` exception;
+see the [hosted result and its limits](.github/hosted/README.md#qualified-hosted-run-2026-11-04).
 
 ## HTTP connection contract
 
@@ -309,8 +313,10 @@ with depth at most four. Oversized/non-JSON program results return an error whil
 preserving recorded outcomes. Logs are capped to 100 entries of 4,096 characters.
 
 The dynamic Worker requests a 1,000 ms CPU budget. **Local workerd did not enforce
-that cap in a finite overbudget-loop probe**; hosted enforcement remains unverified.
-The asynchronous timer does not interrupt synchronous JavaScript loops.
+that cap in a finite overbudget-loop probe**. The hosted synthetic verification
+Worker subsequently observed the native CPU-limit exception under that configured
+budget. Wall time does not measure exact CPU consumption. The asynchronous timer
+does not interrupt synchronous JavaScript loops.
 
 `requestId` is correlation only. There is no durable submission deduplication,
 receipt lookup, retry recovery, or replay. Losing the outer response or the Worker
@@ -366,9 +372,9 @@ GitHub, as recorded below. The six independent Gmail agent cases completed their
 task outcomes with both required models; the stricter discovery gate still fails
 for Sonnet on attachment and pagination. See the
 [versioned results](.github/eval/README.md#independent-gmail-cases-with-grading-version-2-2026-11-04).
-No hosted deployment has been performed. Gateway source adaptation is locally
-verified in its owning project; hosted binding, CPU enforcement, and all three
-host integrations remain acceptance work. Drive has local synthetic verification; live qualification requires
+The separate hosted synthetic Worker passed CPU/timeout/cancellation and bridge
+checks. Gateway adaptation is deployed in its owning project, but the Code Mode
+backend binding and provider-connected host journeys remain acceptance work. Drive has local synthetic verification; live qualification requires
 the additional test grant described below. Subsequent APIs are Sheets, Docs, and
 Calendar, in that order. Tasks and replay are deferred.
 
@@ -519,9 +525,10 @@ retains downloaded artifacts under `dist/act-artifacts/`. An unknown write may
 leave a fixture without a returned ID. Its run markers support later
 reconciliation; a missing search result is not proof that no write happened.
 
-A successful live run qualifies the production bundle against live Gmail. Hosted Cloudflare
-CPU enforcement, hosted gateway adaptation, and Claude/ChatGPT/OpenClaw integration
-remain separate acceptance work.
+A successful live run qualifies the production bundle against live Gmail.
+The separate hosted synthetic qualification proves runtime limits; hosted live
+Google through the Code Mode gateway and provider-connected Claude/ChatGPT/OpenClaw
+journeys remain separate acceptance work.
 
 Live Gmail verification passed locally through `act` and on
 [GitHub Actions](https://github.com/marcfargas/google-codemode-mcp/actions/runs/41755819750)

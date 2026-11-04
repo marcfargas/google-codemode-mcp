@@ -40,7 +40,8 @@ token ID. They are resource IDs, not the token's Client ID or Client Secret. The
 `preview_worker` would leave its production endpoint unprotected. The only policy
 is Service Auth (`non_identity`) including exactly that service token. Keep other
 Allow, Bypass, Everyone, any-service-token and tag-based alternatives absent.
-The template is not applied automatically or qualified against a live account.
+The template is not applied automatically. The dated hosted run below used its
+resolved Worker and service-token IDs and independently checked live admission.
 
 The runner sends the standard `CF-Access-Client-Id` and
 `CF-Access-Client-Secret` pair through private `HOSTED_ACCESS_HEADERS_JSON`.
@@ -87,6 +88,38 @@ See [Workers permissions](https://developers.cloudflare.com/workers/authorizatio
 [Worker-level Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/),
 [API token permissions](https://developers.cloudflare.com/fundamentals/api/reference/permissions/),
 and [Access service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/).
+
+## Qualified hosted run (2026-11-04)
+
+The retained source candidate from commit `75c8d6549b186f29833cd0831c3b21bf0b18a07e`
+was prepared with source digest
+`8bb8eb1316553097ce3cebc4e29092dc34449aa3bd526841a3c6759e0391fa45`
+and deployed as platform version `0a0ec053-47a7-469a-bae7-1feef622a7d3`.
+The prepared bundle, deployment config, native deployment readback, identity reply,
+and every runtime receipt were checked together. All 11 planned runtime requests
+passed, including healthy follow-ups.
+
+The native dynamic Worker threw `Worker exceeded CPU time limit.` under its
+configured 1,000 ms budget. This qualifies CPU enforcement without deriving exact
+CPU usage from wall time. The 15-second asynchronous timeout and observation
+window, delayed/unawaited dispatch fences, and five sequential synthetic bridge
+reads also passed. No Google, OAuth or model requests occurred.
+
+Live Access readback showed one Worker destination and one Service Auth policy
+including exactly the runner credential, with no overlapping applications. Six
+negative credential cases were denied with 401/403; the correct credential
+returned the expected candidate/version. Two version-preview URLs returned 404,
+previews were disabled, and no custom domains were attached. The unrelated
+service token created for denial verification was deleted and its local secret
+removed. The retained runner token expires on 2026-12-04; later rotation needs
+Access administration through the selected owner path.
+
+This proves the synthetic verification candidate and Access admission. It does
+not deploy the live Google product or qualify its gateway binding, Google tasks,
+or host Skills activation. Deployment with only Worker Editor remains unverified
+until the owner reduces the bootstrap token and a subsequent deploy succeeds.
+Bootstrap Workers Admin and Access rights are no longer needed for the existing
+resources or invoking these tests.
 
 ## Prepare without deployment
 
