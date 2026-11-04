@@ -2,7 +2,91 @@
 
 This harness prepares a separate private Cloudflare Worker that imports the production executor, dispatcher and MCP handler. It runs fixed programs with a synthetic Discovery document and an in-memory GET transport. It never refreshes OAuth, contacts Google, sends mail, mutates user data, or adds a route to the production Worker.
 
-The maintained runner requires an owner-provided protected HTTPS `/mcp` ingress to this verification Worker. The configuration deliberately sets `workers_dev: false` and `preview_urls: false`, with no routes. A private service binding is not directly reachable from the Node runner. An authorized gateway or existing protected ingress must forward to that binding before hosted verification can run. This directory does not implement a public authentication service or automatically create that bridge.
+The maintained runner requires an Access-protected HTTPS `/mcp` endpoint. The
+safe default has `workers_dev: false`, `preview_urls: false`, and no routes. A
+prepared bundle therefore has no public ingress. For the dedicated test Worker,
+install the runner-only Worker-level Access application below before enabling
+its `workers.dev` endpoint. An existing authorized private-binding ingress remains
+usable; this procedure does not create an additional gateway.
+
+## Deployment permissions and runner access
+
+Use one selected Cloudflare account with the required Workers Paid plan. Provide
+its account ID separately as `CLOUDFLARE_ACCOUNT_ID`; deploy authentication uses
+`CLOUDFLARE_API_TOKEN`. These credentials are separate from the Access credential
+used to invoke tests.
+
+| Operation                                                               | Required authority                                                                                                         |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Deploy an existing test Worker                                          | Workers **Editor**, scoped to that individual Worker                                                                       |
+| Initially create the Worker                                             | Workers **Admin** at Workers product scope, in the selected account; bootstrap authority only                              |
+| Create the Access app and policy                                        | Account **Access: Apps and Policies Write** (also labelled Edit in some token interfaces)                                  |
+| Create the runner service token                                         | Account **Access: Service Tokens Write** (also labelled Edit)                                                              |
+| Add or change a custom route/domain, if selected instead of workers.dev | Worker authority plus **Workers Routes Write** on the selected zone; any required DNS changes use separate setup authority |
+
+The steady deployment token needs no Access administration, Google, KV, R2 or D1
+rights. Selecting `workers.dev` avoids zone/DNS provisioning permissions. Worker
+creation and Access setup can be performed by a separate bootstrap custodian;
+keep that broader token out of the invoking runner. Some token interfaces still
+show the older account-wide `Workers Scripts Edit` permission: do not assume it
+is scoped to one Worker. Read back the issued token's actual resource scope and
+prove the first deployment before claiming least-privilege qualification.
+
+[access-application.json](access-application.json) is the proposed Cloudflare
+`POST /accounts/{account_id}/access/apps` body. Copy it outside the checkout and
+replace the two IDs with the actual test Worker ID and dedicated Access service
+token ID. They are resource IDs, not the token's Client ID or Client Secret. The
+`worker` destination protects production and preview URLs of this one Worker;
+`preview_worker` would leave its production endpoint unprotected. The only policy
+is Service Auth (`non_identity`) including exactly that service token. Keep other
+Allow, Bypass, Everyone, any-service-token and tag-based alternatives absent.
+The template is not applied automatically or qualified against a live account.
+
+The runner sends the standard `CF-Access-Client-Id` and
+`CF-Access-Client-Secret` pair through private `HOSTED_ACCESS_HEADERS_JSON`.
+It receives no deployment or Access administration API token. Use a bounded
+service-token expiry and deliver/store its secret only through the selected
+private credential path. This restricts access to holders of the runner credential.
+If requests must originate physically from marcdev, add and verify a supported
+source-network/device constraint; the header pair alone cannot attest a machine.
+
+Provision and verify in this order:
+
+1. Create only the dedicated test Worker, retaining its default disabled public
+   ingress. Record its native Worker ID; do not substitute its deployment version
+   ID or an unrelated production Worker.
+2. Create the dedicated service token and the Worker-level Access app from the
+   template. Read back the destination and every attached policy. Inspect
+   hostname/path applications and overrides too: a more-specific hostname/path
+   Access rule takes precedence over Worker-level protection. Do not change the
+   shared account's default Access policies or strict-mode settings for this test.
+3. Only after protection is confirmed, copy the retained prepared deployment
+   config to another retained file, enable `workers_dev`, and keep previews
+   disabled and routes absent. Retain that exact config and its hash alongside
+   the prepared manifest and deployment receipt; the source digest identifies
+   source/bundle bytes, not Access policy or routing state. Deploy that config.
+4. Before CPU/stress probes, verify missing headers, each header alone, an invalid
+   pair, the correct Client ID with a wrong secret, and an unrelated valid service
+   token cannot reach the verification Worker. Accept edge `401`/`403`, or a
+   verified Access login redirect for older organizations, as denial evidence;
+   a generic failure from the Worker is insufficient. Retain sanitized edge
+   status/request IDs, without response cookies or credentials.
+5. Verify the correct token reaches the expected candidate/version identity and
+   audit alternate routes, domains and preview URLs for bypass. Retain sanitized
+   Access/routing readback and deployment receipts before running the fixed
+   probes below. Current `hosted-verify` grades runtime probes; it does not itself
+   provision or qualify the Access policy or automate these denial checks.
+
+Worker-level Access supports this finite POST protocol; it currently does not
+support WebSocket upgrades. Cloudflare's documented raw API supports Worker
+`destinations` without a hostname; some generated client schemas still require
+`domain`. Use the documented API shape and inspect actual readback rather than
+inventing a custom domain to satisfy a client schema.
+
+See [Workers permissions](https://developers.cloudflare.com/workers/authorization/workers/),
+[Worker-level Access](https://developers.cloudflare.com/workers/configuration/cloudflare-access/),
+[API token permissions](https://developers.cloudflare.com/fundamentals/api/reference/permissions/),
+and [Access service tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/).
 
 ## Prepare without deployment
 
@@ -12,7 +96,7 @@ Run from the checkout with installed pinned dependencies:
 just hosted-prepare /absolute/new/prepared-evidence
 ```
 
-Preparation runs Wrangler's dry run and writes the deployable `worker.js`, `wrangler.json`, `manifest.json`, and `prepare.log` into a new directory outside the checkout. The manifest includes the Git revision, hashes of the actual production and harness source files plus package lock, and the exact bundle hash. Dirty source bytes are therefore represented. The generated config deploys the retained bundle with `no_bundle: true`, binds its source digest, and preserves the private routing configuration and platform version metadata binding. Preparation does not authenticate or deploy.
+Preparation runs Wrangler's dry run and writes the deployable `worker.js`, `wrangler.json`, `manifest.json`, and `prepare.log` into a new directory outside the checkout. The manifest includes the Git revision, hashes of the actual production and harness source files plus package lock, and the exact bundle hash. Dirty source bytes are therefore represented. The generated config deploys the retained bundle with `no_bundle: true`, binds its source digest, and preserves the default private routing configuration and platform version metadata binding. Use the separately retained config procedure above to enable only the protected test endpoint. Preparation does not authenticate or deploy.
 
 After the owner has selected an account and authorized deployment, the prepared config is the deploy input:
 

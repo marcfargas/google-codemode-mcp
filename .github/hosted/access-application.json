@@ -1,0 +1,28 @@
+{
+  "name": "Google Code Mode test runner",
+  "type": "self_hosted",
+  "destinations": [
+    {
+      "type": "worker",
+      "worker_id": "REPLACE_WITH_TEST_WORKER_ID"
+    }
+  ],
+  "app_launcher_visible": false,
+  "allow_authenticate_via_warp": false,
+  "options_preflight_bypass": false,
+  "policies": [
+    {
+      "name": "Dedicated marcdev runner credential",
+      "decision": "non_identity",
+      "include": [
+        {
+          "service_token": {
+            "token_id": "REPLACE_WITH_RUNNER_SERVICE_TOKEN_ID"
+          }
+        }
+      ],
+      "exclude": [],
+      "require": []
+    }
+  ]
+}
