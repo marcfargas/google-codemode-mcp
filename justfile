@@ -15,9 +15,17 @@ verify:
 live:
     node .github/act.mjs live
 
-# One on-demand native agent case; an optional second trial observes caching.
+# One on-demand agent case; an optional second trial observes caching.
 eval $profile $model $proxy_url $output $repeats='1':
     node .github/eval/act.mjs
+
+# Required Sonnet/Terra pair by default; select all for the six-model comparison.
+eval-matrix $profile $proxy_url $output $selection='required':
+    node .github/eval/act.mjs
+
+# Prove isolated runner/file/MCP behavior with synthetic responses only.
+eval-preflight $output:
+    profile=gmail proxy_url=http://127.0.0.1:1 selection=required preflight_only=true node .github/eval/act.mjs
 
 # Regrade one retained trial without Google or model requests.
 eval-regrade $saved $output:

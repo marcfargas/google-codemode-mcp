@@ -334,13 +334,22 @@ a remote run tests its checked-out commit.
 
 ### Agent feasibility gate
 
-`just eval` runs an actual native Claude agent through the built MCP Worker,
-using the local CLIProxyAPI and the dummy account configured below. It runs only
-on demand; ordinary checks never invoke a model.
+The manual model matrix runs agents through the built MCP Worker and local
+CLIProxyAPI, using the dummy account configured below. Ordinary checks never
+invoke models.
 
 ```sh
-just eval gmail claude-haiku-5-5 http://127.0.0.1:8317 /absolute/new/evidence-directory
+just eval-matrix gmail http://127.0.0.1:8317 /absolute/new/evidence-directory
+# Explicitly include probes and references:
+just eval-matrix gmail http://127.0.0.1:8317 /absolute/new/full-matrix-directory all
 ```
+
+Sonnet 5.5 and GPT 6.1 Terra are required. Haiku 5.5 and GPT 6 Luna are probes;
+Opus 5.5 and GPT 6.1 Sol are references. Each selected cell runs once with fresh
+fixtures. Optional score failures are informational; uncertainty, cleanup failures,
+and infrastructure failures stop the campaign. Claude uses native CLI 2.1.318;
+GPT uses an isolated Responses tool loop, which does not qualify the ChatGPT host.
+Single-model runs remain available through `just eval`.
 
 The Gmail case requires discovery, retrieval of the server's `skill://` resource,
 reading and replying to an email, applying a label, and saving its attachment.
@@ -348,8 +357,8 @@ Independent Google readback and exact file bytes determine success. The actor
 cannot access credentials, graders, or expected results. Each trial retains its
 trace, model/cache usage, criteria, and fixture cleanup receipt outside the checkout.
 Limits include five minutes, 18 model requests, 15,000 output tokens reserved
-conservatively, and a $1 native CLI cost estimate; the estimate is not actual
-proxy billing. There are no performer retries or automatic model fallbacks.
+conservatively, and a $1 estimate per cell (native CLI for Claude, recorded published
+token rates for GPT). Estimates are separate from actual proxy billing. There are no performer retries or automatic model fallbacks.
 
 Only Gmail is implemented. Drive, Sheets, Docs, and Calendar remain pending
 coverage targets; selecting them fails before model spending. This is a synthetic
@@ -357,10 +366,13 @@ feasibility check, not acceptance of every host or service. See the
 [gate documentation](.github/eval/README.md) for isolation, usage accounting,
 offline regrading, and manual GitHub setup.
 
-The revised Haiku 5.5 pilot completed all Gmail task outcomes and read the skill,
-including saving the exact attachment bytes. The full gate remains **failed**
-because it skipped method discovery. Both pilot attempts are retained; the gate
-does not treat task success alone as proof of the discovery design.
+The first matrix completed all task outcomes with Sonnet, Terra, and Haiku, but
+all three failed the full discovery/skill gate. Sonnet and Haiku skipped method
+discovery; Terra skipped root discovery and the skill resource. Luna exhausted
+18 turns without completing the task, stopping the campaign before Opus/Sol.
+All attempted cells cleaned up successfully with no unknown mutations. The
+[gate results](.github/eval/README.md#first-model-matrix-2026-11-04) retain these
+failures, observed cache counters, estimates, and the unattempted cells.
 
 ### Initial test consent and CI secrets
 

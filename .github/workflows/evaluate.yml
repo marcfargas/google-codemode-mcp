@@ -9,10 +9,14 @@ on:
         type: string
       model:
         description: Explicit CLIProxyAPI model ID
-        required: true
+        required: false
+        type: string
+      selection:
+        description: Matrix selection (required, all, or comma-separated cell IDs); omit for one model
+        required: false
         type: string
       proxy_url:
-        description: Anthropic-compatible proxy URL reachable from the runner
+        description: Proxy base URL supporting Anthropic Messages and OpenAI Responses
         required: true
         type: string
       output:
@@ -24,6 +28,10 @@ on:
         default: '1'
         type: choice
         options: ['1', '2']
+      preflight_only:
+        description: Verify both runners with synthetic responses only; no OAuth or inference
+        default: false
+        type: boolean
 permissions:
   contents: read
 concurrency:
@@ -33,10 +41,11 @@ jobs:
   evaluate:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
     env:
       EVAL_PROFILE: ${{ inputs.profile }}
       EVAL_MODEL: ${{ inputs.model }}
+      EVAL_SELECTION: ${{ inputs.selection }}
       EVAL_PROXY_URL: ${{ inputs.proxy_url }}
       EVAL_OUTPUT: ${{ inputs.output }}
       EVAL_REPEATS: ${{ inputs.repeats }}
@@ -54,11 +63,14 @@ jobs:
       - run: npm install --global @anthropic-ai/claude-code@2.1.318
       - name: Verify native file tools without provider or Google calls
         run: EVAL_NATIVE_CLI="$(command -v claude)" node --experimental-strip-types --test --test-name-pattern='pinned native' .github/tests/eval-actor.test.ts
+      - name: Verify isolated GPT runner without provider or Google calls
+        run: sudo -E "$(command -v node)" --experimental-strip-types --test --test-name-pattern='isolated Responses' .github/tests/eval-actor.test.ts
       - run: node .github/run.mjs build
       - name: Run isolated native agent and independent outcome checks
-        run: sudo -E "$(command -v node)" --experimental-strip-types .github/eval/run.ts
+        if: inputs.preflight_only != true
+        run: sudo -E "$(command -v node)" --experimental-strip-types .github/eval/campaign.ts
       - name: Retain private evidence even on failure
-        if: always() && !env.ACT
+        if: always() && !env.ACT && inputs.preflight_only != true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: agent-feasibility-${{ github.run_id }}-${{ github.run_attempt }}

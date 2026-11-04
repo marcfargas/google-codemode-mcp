@@ -6,6 +6,7 @@ import {
   chown,
   lstat,
   mkdir,
+  mkdtemp,
   readFile,
   readdir,
   realpath,
@@ -15,6 +16,14 @@ import {
 import { constants } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
+import { build } from 'esbuild';
+import {
+  parseResponsesTranscript,
+  summarizeResponsesUsage,
+  RESPONSES_RUNNER_VERSION,
+} from './responses.ts';
+import type { Runner } from './matrix.ts';
 
 const ACTOR_UID = 61337;
 const CLI_VERSION = '2.1.318';
@@ -22,6 +31,29 @@ const ACTOR_HOME = '/tmp/google-mcp-actor-home';
 const ACTOR_WORKSPACE = '/tmp/google-mcp-actor';
 const SYSTEM_PATH = `${dirname(process.execPath)}:/usr/local/bin:/usr/bin:/bin`;
 const WALL_MS = 300_000;
+export const ACTOR_SYSTEM_PROMPT =
+  'Complete the user task using the connected Google MCP server and files in your working directory. Discover available server capabilities and instructions. When a tool schema requires accessToken, use the literal placeholder injected-by-eval-caller; the trusted caller supplies authentication. You may read and write task files only within your working directory. Report actual outcomes and uncertainty.';
+
+export function parseActorTranscript(
+  text: string,
+  exitCode: number | null,
+  timedOut = false,
+  runner: Runner = 'claude',
+) {
+  return runner === 'responses'
+    ? parseResponsesTranscript(text, exitCode, timedOut)
+    : parseTranscript(text, exitCode, timedOut);
+}
+
+export function summarizeActorUsage(
+  native: unknown[],
+  model: string,
+  runner: Runner = 'claude',
+): any {
+  return runner === 'responses'
+    ? summarizeResponsesUsage(native, model)
+    : summarizeUsage(native, model);
+}
 type ObjectValue = Record<string, unknown>;
 function object(value: unknown): ObjectValue {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -288,7 +320,7 @@ export function actorLaunchArguments(options: {
     '--permission-mode',
     'dontAsk',
     '--system-prompt',
-    'Complete the user task using the connected Google MCP server and files in your working directory. Discover available server capabilities and instructions. When a tool schema requires accessToken, use the literal placeholder injected-by-eval-caller; the trusted caller supplies authentication. You may read and write task files only within your working directory. Report actual outcomes and uncertainty.',
+    ACTOR_SYSTEM_PROMPT,
     '--tools',
     'Read,Write,ListMcpResourcesTool,ReadMcpResourceTool',
     '--allowedTools',
@@ -304,14 +336,48 @@ export function actorLaunchArguments(options: {
   ];
 }
 
-export async function runActor(options: {
+interface ActorOptions {
   prompt: string;
   model: string;
   mcpUrl: string;
   proxyUrl: string;
   output: string;
   workspace?: string;
-}) {
+  runner?: Runner;
+}
+
+export async function runActor(options: ActorOptions) {
+  requireRoot();
+  let runtime: string | undefined;
+  const checkout = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+  const originalCheckout = await lstat(checkout);
+  try {
+    if (options.runner === 'responses') {
+      runtime = await mkdtemp(join(tmpdir(), 'google-mcp-responses-runtime-'));
+      await chmod(runtime, 0o755);
+      await build({
+        entryPoints: [join(dirname(fileURLToPath(import.meta.url)), 'responses.ts')],
+        outfile: join(runtime, 'runner.mjs'),
+        bundle: true,
+        platform: 'node',
+        format: 'esm',
+        target: 'node24',
+        logLevel: 'silent',
+      });
+      await chmod(join(runtime, 'runner.mjs'), 0o644);
+    }
+    return await runIsolatedActor(options, runtime);
+  } finally {
+    try {
+      if (runtime) await rm(runtime, { recursive: true, force: true });
+    } finally {
+      await chown(checkout, originalCheckout.uid, originalCheckout.gid);
+      await chmod(checkout, originalCheckout.mode & 0o7777);
+    }
+  }
+}
+
+async function runIsolatedActor(options: ActorOptions, runtime?: string) {
   requireRoot();
   if (!options.model.trim()) throw new Error('An explicit actor model is required');
   const output = resolve(options.output);
@@ -344,18 +410,37 @@ export async function runActor(options: {
     protectedPaths: [fileURLToPath(import.meta.url), canary],
     output,
   });
-  const cli = await nativeCli();
-  const args = actorLaunchArguments({ model: options.model, mcpUrl, workspace });
-  const env = {
-    ...minimalEnv(),
-    ANTHROPIC_API_KEY: 'local-eval-relay',
-    ANTHROPIC_BASE_URL: proxyUrl,
-    MCP_PROTOCOL_NEGOTIATION: 'auto',
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
-    DISABLE_AUTOUPDATER: '1',
-    CLAUDE_CODE_MAX_RETRIES: '0',
-    CLAUDE_CODE_NONSTREAMING_TIMEOUT_RETRIES: '0',
-  };
+  const runner = options.runner ?? 'claude';
+  const cli =
+    runner === 'claude'
+      ? await nativeCli()
+      : { executable: process.execPath, version: RESPONSES_RUNNER_VERSION };
+  const args =
+    runner === 'claude'
+      ? actorLaunchArguments({ model: options.model, mcpUrl, workspace })
+      : [
+          join(runtime!, 'runner.mjs'),
+          '--responses-runner',
+          JSON.stringify({
+            model: options.model,
+            mcpUrl,
+            proxyUrl,
+            systemPrompt: `${ACTOR_SYSTEM_PROMPT}\nWorking directory: ${workspace}.`,
+          }),
+        ];
+  const env =
+    runner === 'claude'
+      ? {
+          ...minimalEnv(),
+          ANTHROPIC_API_KEY: 'local-eval-relay',
+          ANTHROPIC_BASE_URL: proxyUrl,
+          MCP_PROTOCOL_NEGOTIATION: 'auto',
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+          DISABLE_AUTOUPDATER: '1',
+          CLAUDE_CODE_MAX_RETRIES: '0',
+          CLAUDE_CODE_NONSTREAMING_TIMEOUT_RETRIES: '0',
+        }
+      : { ...minimalEnv() };
   await writeFile(join(output, 'prompt.txt'), options.prompt, { mode: 0o600 });
   await writeFile(
     join(output, 'launch.json'),
@@ -363,13 +448,20 @@ export async function runActor(options: {
       {
         executable: cli.executable,
         cliVersion: cli.version,
+        runner,
+        runnerSha256: runtime
+          ? (await import('node:crypto'))
+              .createHash('sha256')
+              .update(await readFile(join(runtime, 'runner.mjs')))
+              .digest('hex')
+          : null,
         args,
         cwd: workspace,
         uid: ACTOR_UID,
         gid: ACTOR_UID,
         environment: env,
         wallMs: WALL_MS,
-        cliBudgetUsd: 1,
+        cliBudgetUsd: runner === 'claude' ? 1 : null,
         billingGuarantee: false,
       },
       null,
@@ -428,12 +520,13 @@ export async function runActor(options: {
       else stderr.on('finish', done).on('error', fail);
     }),
   ]);
-  const parsed = parseTranscript(
+  const parsed = parseActorTranscript(
     await readFile(join(output, 'performer.jsonl'), 'utf8'),
     exitCode,
     timedOut,
+    runner,
   );
-  const usage = summarizeUsage(parsed.native, options.model);
+  const usage = summarizeActorUsage(parsed.native, options.model, runner);
   let files: Record<string, string> = {};
   try {
     files = await collectFiles(workspace);
@@ -450,6 +543,7 @@ export async function runActor(options: {
     ...parsed,
     usage,
     cliVersion: cli.version,
+    runner,
     isolation,
   };
   await writeFile(join(output, 'actor-result.json'), JSON.stringify(result, null, 2), {

@@ -4,7 +4,7 @@ import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gradeGmail, type GmailExpected, type GmailObservation } from './gmail.ts';
-import { parseTranscript, summarizeUsage } from './actor.ts';
+import { parseActorTranscript, summarizeActorUsage } from './actor.ts';
 import { gradeMechanisms, gradeModel } from './run.ts';
 import type { McpEvent } from './server.ts';
 
@@ -49,10 +49,11 @@ export function gradeSavedEvidence(evidence: {
   );
   const native =
     actor && Array.isArray(actor.native)
-      ? parseTranscript(
+      ? parseActorTranscript(
           actor.native.map((event: unknown) => JSON.stringify(event)).join('\n'),
           actor.exitCode,
           actor.timedOut,
+          source?.runner === 'responses' ? 'responses' : 'claude',
         )
       : null;
   const nativeValid = !!native?.transcript.valid && actor?.transcript?.valid === true;
@@ -131,7 +132,13 @@ export function gradeSavedEvidence(evidence: {
     originalResult: original,
     executionSource: source,
     originalUsage: actor?.usage ?? null,
-    usage: native ? summarizeUsage(native.native, source?.requestedModel ?? '') : null,
+    usage: native
+      ? summarizeActorUsage(
+          native.native,
+          source?.requestedModel ?? '',
+          source?.runner === 'responses' ? 'responses' : 'claude',
+        )
+      : null,
     offline: true,
     liveSystemQualified: false,
   };
@@ -189,7 +196,7 @@ export async function regradeTrial(saved: string, output: string) {
     receipts: receipts ?? [],
     evidenceErrors,
   });
-  const gradingFiles = ['regrade.ts', 'gmail.ts', 'run.ts', 'actor.ts'];
+  const gradingFiles = ['regrade.ts', 'gmail.ts', 'run.ts', 'actor.ts', 'responses.ts'];
   const gradingIdentity = {
     revision:
       spawnSync('git', ['rev-parse', 'HEAD'], { cwd: checkout, encoding: 'utf8' }).stdout.trim() ||
@@ -219,7 +226,7 @@ export async function regradeTrial(saved: string, output: string) {
       `Result: ${report.status.toUpperCase()}. Saved execution: ${execution}.`,
       '',
       `Task outcomes: ${report.taskSuccess ? 'PASS' : 'FAIL'}. Full gate includes mechanism and evidence criteria.`,
-      `Terminal token totals: ${JSON.stringify(report.usage?.totals ?? null)}. CLI-estimated USD: ${JSON.stringify(report.usage?.nativeResults?.map((entry) => entry.cliEstimatedCostUsd) ?? null)}. Provider billing remains unknown.`,
+      `Terminal token totals: ${JSON.stringify(report.usage?.totals ?? null)}. CLI-estimated USD: ${JSON.stringify(report.usage?.nativeResults?.map((entry: any) => entry.cliEstimatedCostUsd) ?? null)}. Provider billing remains unknown.`,
       '',
       'This reuses retained evidence. No Google, model, fixture or cleanup operation ran; it cannot qualify the current live system.',
       '',

@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage } from 'node:http';
 import { appendFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+import { createResponsesHandler } from './responses-relay.ts';
 
 export const TOKEN_SENTINEL = 'injected-by-eval-caller';
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -31,6 +32,7 @@ export async function startEvalServer(options: {
   proxyKey: string;
   model: string;
   output: string;
+  runner?: 'claude' | 'responses';
 }) {
   const audit: McpEvent[] = [];
   const llm: any[] = [];
@@ -48,6 +50,27 @@ export async function startEvalServer(options: {
     value
       .replaceAll(options.accessToken, '[google-token]')
       .replaceAll(options.proxyKey, '[proxy-key]');
+  const responses =
+    options.runner === 'responses'
+      ? createResponsesHandler({
+          ...options,
+          receipts: llm,
+          redact,
+          allowedToolNames: () => [
+            'Read',
+            'Write',
+            'ListMcpResourcesTool',
+            'ReadMcpResourceTool',
+            ...audit.flatMap((event) =>
+              event.method === 'tools/list'
+                ? (event.response.result?.tools ?? []).map(
+                    (tool: any) => `mcp__google__${tool.name}`,
+                  )
+                : [],
+            ),
+          ],
+        })
+      : undefined;
   const server = createServer(async (request, response) => {
     handlers++;
     let ownsExecution = false;
@@ -133,7 +156,19 @@ export async function startEvalServer(options: {
         response.end();
         return;
       }
-      if (path !== '/llm/v1/messages' || request.method !== 'POST') {
+      if (
+        path === '/llm/v1/responses' &&
+        request.method === 'POST' &&
+        options.runner === 'responses'
+      ) {
+        await responses!.handle(request, response);
+        return;
+      }
+      if (
+        path !== '/llm/v1/messages' ||
+        request.method !== 'POST' ||
+        options.runner === 'responses'
+      ) {
         response.writeHead(404);
         response.end();
         return;
@@ -289,6 +324,7 @@ export async function startEvalServer(options: {
     async close() {
       closing ??= (async () => {
         stopped = true;
+        responses?.abort();
         for (const controller of controllers) controller.abort();
         server.closeAllConnections();
         await new Promise<void>((resolve, reject) =>

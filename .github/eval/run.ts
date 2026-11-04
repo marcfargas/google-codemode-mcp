@@ -7,6 +7,9 @@ import { createBuiltWorker } from '../worker-client.ts';
 import { prepareGmailFixture, gradeGmail, type GmailFixture } from './gmail.ts';
 import { runActor } from './actor.ts';
 import { startEvalServer, type McpEvent } from './server.ts';
+import { getCellByModel } from './matrix.ts';
+import { verifyModels } from './catalog.ts';
+import { RESPONSES_RUNNER_VERSION } from './responses.ts';
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -122,9 +125,14 @@ export function gradeModel(model: string, receipts: any[]) {
   };
 }
 
-async function main() {
-  const profile = required('EVAL_PROFILE');
-  const output = resolve(required('EVAL_OUTPUT'));
+export async function runCell(configuration?: {
+  profile: string;
+  model: string;
+  output: string;
+  repeats?: number;
+}) {
+  const profile = configuration?.profile ?? required('EVAL_PROFILE');
+  const output = resolve(configuration?.output ?? required('EVAL_OUTPUT'));
   await mkdir(output, { recursive: true, mode: 0o700 });
   await chmod(output, 0o700);
   await json(join(output, 'coverage.json'), profiles);
@@ -134,13 +142,15 @@ async function main() {
     throw new Error(
       'Run via just eval/act; separate actor OS identity requires the workflow root runner',
     );
-  const model = required('EVAL_MODEL');
+  const model = configuration?.model ?? required('EVAL_MODEL');
+  const cell = getCellByModel(model);
   const proxyUrl = required('EVAL_PROXY_URL');
   if (!/^https?:\/\//.test(proxyUrl)) throw new Error('Proxy URL must use HTTP or HTTPS');
-  const repeats = Number(process.env.EVAL_REPEATS ?? 1);
+  const repeats = Number(configuration?.repeats ?? process.env.EVAL_REPEATS ?? 1);
   if (![1, 2].includes(repeats))
     throw new Error('Select one trial or two fresh cache-observation trials');
   const proxyKey = required('CPA_CLIENT_API_KEY');
+  await json(join(output, 'catalogue.json'), await verifyModels(proxyUrl, proxyKey, [model]));
   const expectedUser = required('GOOGLE_TEST_USER');
   const { installed } = JSON.parse(required('GOOGLE_OAUTH_CLIENT_JSON'));
   const oauth = new OAuth2Client({
@@ -167,8 +177,13 @@ async function main() {
         await Promise.all(
           [
             '.github/eval/run.ts',
+            '.github/eval/campaign.ts',
+            '.github/eval/catalog.ts',
             '.github/eval/server.ts',
             '.github/eval/actor.ts',
+            '.github/eval/responses.ts',
+            '.github/eval/responses-relay.ts',
+            '.github/eval/matrix.ts',
             '.github/eval/gmail.ts',
             'skills/google-workspace/SKILL.md',
             'package-lock.json',
@@ -177,6 +192,10 @@ async function main() {
       ),
       profile,
       requestedModel: model,
+      runner: cell.runner,
+      runnerVersion: cell.runner === 'claude' ? '2.1.318' : RESPONSES_RUNNER_VERSION,
+      role: cell.role,
+      cellId: cell.id,
       repeats,
       createdAt: new Date().toISOString(),
       limits: {
@@ -184,7 +203,8 @@ async function main() {
         modelRequests: 18,
         maxOutputTokensPerRequest: 2048,
         totalOutputTokensUpperBound: 15_000,
-        nativeEstimatedUsd: 1,
+        nativeEstimatedUsd: cell.runner === 'claude' ? 1 : null,
+        publishedRateEstimatedUsd: cell.runner === 'responses' ? 1 : null,
         retries: 0,
       },
     };
@@ -214,6 +234,7 @@ async function main() {
           proxyKey,
           proxyUrl,
           model,
+          runner: cell.runner,
           output: trial,
           dispatch: async (request) => {
             const response = await worker.dispatchFetch(request.url, {
@@ -232,6 +253,7 @@ async function main() {
         const actor = await runActor({
           prompt: fixture.prompt,
           model,
+          runner: cell.runner,
           output: trial,
           mcpUrl: relay.url + '/mcp',
           proxyUrl: relay.url + '/llm',
@@ -264,7 +286,21 @@ async function main() {
         result.status = result.criteria.every((criterion: any) => criterion.status === 'pass')
           ? 'pass'
           : 'fail';
+        if (
+          !observation.complete ||
+          relay.llm.some((receipt) => receipt.error || receipt.status >= 400)
+        ) {
+          result.status = 'error';
+          result.error = 'Independent readback or model transport failed';
+        }
+        if (actor.exitCode !== 0 || actor.timedOut || !actor.transcript.valid) {
+          result.infrastructureAbort = true;
+          result.status = 'error';
+          result.error = 'Actor execution did not complete with a valid successful transcript';
+        }
         result.usage = actor.usage;
+        result.runner = cell.runner;
+        result.runnerVersion = actor.cliVersion;
         result.llmReceipts = relay.llm;
         result.hasUnknownMutation = relay.hasUnknownMutation;
       } catch (error) {
@@ -340,15 +376,19 @@ async function main() {
     console.log(
       `Agent feasibility ${passed ? 'PASS' : 'FAIL'}; ${results.length} trial(s); report ${join(output, 'report.md')}`,
     );
-    if (!passed) process.exitCode = 1;
+    return { passed, results, identity, profile, model, output };
   } finally {
     await worker.dispose();
   }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve('.github/eval/run.ts')) {
-  main().catch(() => {
-    console.error('Agent feasibility infrastructure failed; inspect retained private evidence');
-    process.exitCode = 1;
-  });
+  runCell()
+    .then((run) => {
+      if (!run.passed) process.exitCode = 1;
+    })
+    .catch(() => {
+      console.error('Agent feasibility infrastructure failed; inspect retained private evidence');
+      process.exitCode = 1;
+    });
 }

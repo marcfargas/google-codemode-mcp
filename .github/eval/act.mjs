@@ -5,6 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { localCredentials } from '../secrets.mjs';
+import { getCellByModel, selectCells } from './matrix.ts';
 
 // flock is held by a subprocess until release; the kernel also releases it if
 // this launcher exits unexpectedly. The pathname is shared across checkouts.
@@ -96,9 +97,28 @@ export async function retainCandidateSource(destination) {
 }
 
 async function main() {
-  const { profile, model, proxy_url: proxy, output, repeats = '1' } = process.env;
-  if (!profile || !model || !proxy || !output || !['1', '2'].includes(repeats))
+  const {
+    profile,
+    model,
+    proxy_url: proxy,
+    output,
+    repeats = '1',
+    selection,
+    preflight_only,
+  } = process.env;
+  if (
+    !profile ||
+    (!model && !selection) ||
+    (model && selection) ||
+    !proxy ||
+    !output ||
+    !['1', '2'].includes(repeats)
+  )
     throw new Error('Use just eval PROFILE MODEL PROXY_URL NEW_ABSOLUTE_OUTPUT [1|2]');
+  if (selection) {
+    selectCells(selection);
+    if (repeats !== '1') throw new Error('Matrix uses one attempt per selected cell');
+  } else getCellByModel(model);
   if (profile !== 'gmail')
     throw new Error(
       'Coverage unavailable: only Gmail is implemented; Drive, Sheets, Docs, Calendar remain pending',
@@ -116,10 +136,13 @@ async function main() {
     await mkdir(destination, { mode: 0o700 });
     directory = await mkdtemp(join(tmpdir(), 'codemode-agent-act-'));
     const key =
-      process.env.CPA_CLIENT_API_KEY ??
-      (await readFile(join(homedir(), '.config/cpa-manager-plus/client-key'), 'utf8')).trim();
-    if (!key) throw new Error('Missing CPA_CLIENT_API_KEY');
-    const credentials = { ...(await localCredentials()), CPA_CLIENT_API_KEY: key };
+      preflight_only === 'true'
+        ? ''
+        : (process.env.CPA_CLIENT_API_KEY ??
+          (await readFile(join(homedir(), '.config/cpa-manager-plus/client-key'), 'utf8')).trim());
+    if (!key && preflight_only !== 'true') throw new Error('Missing CPA_CLIENT_API_KEY');
+    const credentials =
+      preflight_only === 'true' ? {} : { ...(await localCredentials()), CPA_CLIENT_API_KEY: key };
     const secrets = join(directory, 'secrets');
     const empty = join(directory, 'empty');
     await writeFile(empty, '', { mode: 0o600 });
@@ -172,13 +195,15 @@ async function main() {
         '--input',
         `profile=${profile}`,
         '--input',
-        `model=${model}`,
+        selection ? `selection=${selection}` : `model=${model}`,
         '--input',
         `proxy_url=${proxy}`,
         '--input',
         'output=/eval-evidence',
         '--input',
         `repeats=${repeats}`,
+        '--input',
+        `preflight_only=${preflight_only === 'true'}`,
         '-P',
         'ubuntu-latest=catthehacker/ubuntu:act-latest',
       ],
