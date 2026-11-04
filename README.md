@@ -311,6 +311,23 @@ Sheets, Docs, and Calendar, in that order. Tasks and replay are deferred.
 
 [Project scope and remaining acceptance](https://github.com/marcfargas/google-codemode-mcp/issues/1).
 
+### Project workflow skills
+
+The developer skills below have one source in `.agents/skills/` for Codex and
+relative aliases in `.claude/skills/` for Claude Code. They are separate from the
+Workspace skill distributed by the MCP server. Reload the host's project skills
+after pulling changes; a catalog entry confirms discovery, not execution.
+
+| Skill                                                                      | Use                                                                                                                       |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| [google-codemode-capture](.agents/skills/google-codemode-capture/SKILL.md) | Retain or retrieve requests, breakdowns, and deferred observations in GitHub                                              |
+| [google-codemode-verify](.agents/skills/google-codemode-verify/SKILL.md)   | Choose and drive the maintained checks, synthetic preflight, or authorized live gate                                      |
+| [google-codemode-docs](.agents/skills/google-codemode-docs/SKILL.md)       | Retrieve knowledge, prepare proposed usage before contract implementation, and reconcile affected docs after verification |
+
+Invoke by name in Codex (`$google-codemode-capture`, for example) or Claude Code
+(`/google-codemode-capture`). The procedures include concrete project operations
+and fallbacks when shared mafe-si skills are unavailable.
+
 ## Workflow verification
 
 All test sources, fixtures, OAuth helpers, and workflow code live under `.github/`.
