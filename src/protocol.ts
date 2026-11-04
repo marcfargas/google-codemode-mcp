@@ -20,13 +20,20 @@ description: Discover Google Workspace API methods and run JavaScript through th
 
 Use \`describe\` to discover the deployment's available APIs, methods, parameters,
 request bodies, response schemas, and snippets. Start with \`describe({})\`, then
-narrow the path, for example \`gmail/v1/users.messages.list\`. Discover methods
-before using them; available methods come from Google's Discovery document.
+read the returned Workspace skill URI through MCP Resources. Follow the returned
+service and resource paths down to each method you need. Describe each method
+before calling it in \`execute\`, including methods familiar from other Google
+clients: this deployment's available methods, parameters, schemas and transport
+limits come from its Discovery document.
 
 Use \`execute\` to submit JavaScript. The trusted caller supplies a short-lived
 OAuth \`accessToken\` as a request argument. The program receives \`google\`, \`inputs\`,
 and deployment-provided \`snippets\`; it does not receive the token. Keep user data
 in \`inputs\` instead of interpolating it into code.
+
+The following illustrates the native client shape after method discovery. It is
+not a substitute for describing \`gmail/v1/users.messages.list\` and checking its
+current parameters and response schema.
 
 \`\`\`js
 const gmail = google.gmail({ version: 'v1' });
@@ -144,13 +151,14 @@ export async function handleMcp(request: Request, app: ProtocolApp): Promise<Res
           supportedProtocolVersions: [MCP_VERSION],
           jsonSchemaValidator: validator,
           instructions:
-            'Discover methods with describe before executing code. Read the Workspace skill.',
+            'Start with describe({}) to discover available services. Read the returned Workspace skill URI through MCP Resources. Follow returned paths and describe each method you need before calling it in execute; do not assume a familiar Google method is supported.',
         },
       );
       server.registerTool(
         'describe',
         {
-          description: 'Discover available Google APIs, methods, schemas, and deployment snippets.',
+          description:
+            'Discover available Google APIs, methods, schemas, and deployment snippets. Start with describe({}), read the returned Workspace skill through MCP Resources, and follow returned paths to inspect each needed method before execute.',
           inputSchema: fromJsonSchema<{ path?: string }>(
             {
               type: 'object',
@@ -173,7 +181,7 @@ export async function handleMcp(request: Request, app: ProtocolApp): Promise<Res
         'execute',
         {
           description:
-            'Run JavaScript with Google APIs and deployment snippets. Inspect returned mutation outcomes before retrying writes.',
+            'Run JavaScript with Google APIs and deployment snippets after reading the Workspace skill and describing each Google method you will call. Use the discovered parameters and schemas. Inspect returned mutation outcomes before retrying writes.',
           inputSchema: fromJsonSchema<ExecuteArguments>(
             {
               type: 'object',

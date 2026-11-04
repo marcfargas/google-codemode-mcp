@@ -10,6 +10,7 @@ import { startEvalServer, type McpEvent } from './server.ts';
 import { getCellByModel } from './matrix.ts';
 import { verifyModels } from './catalog.ts';
 import { RESPONSES_RUNNER_VERSION } from './responses.ts';
+import { RESPONSES_ACCOUNTING_VERSION } from './responses-relay.ts';
 
 const required = (name: string) => {
   const value = process.env[name];
@@ -194,6 +195,7 @@ export async function runCell(configuration?: {
       requestedModel: model,
       runner: cell.runner,
       runnerVersion: cell.runner === 'claude' ? '2.1.318' : RESPONSES_RUNNER_VERSION,
+      accountingVersion: cell.runner === 'responses' ? RESPONSES_ACCOUNTING_VERSION : null,
       role: cell.role,
       cellId: cell.id,
       repeats,

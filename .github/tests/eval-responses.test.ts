@@ -44,6 +44,7 @@ async function harness(
   const workspace = join(directory, 'workspace');
   await mkdir(workspace);
   const mcp: Value[] = [],
+    mcpResults: Value[] = [],
     requests: Value[] = [],
     application: Value[] = [],
     events: Value[] = [];
@@ -101,8 +102,10 @@ async function harness(
           }),
           app,
         );
+        const text = await result.text();
+        mcpResults.push({ method: payload.method, response: JSON.parse(text) });
         response.writeHead(result.status, Object.fromEntries(result.headers));
-        response.end(await result.text());
+        response.end(text);
         return;
       }
       assert.equal(request.url, '/v1/responses');
@@ -129,6 +132,7 @@ async function harness(
     workspace,
     requests,
     mcp,
+    mcpResults,
     application,
     events,
     run: () =>
@@ -241,6 +245,7 @@ test('Responses runner uses actual MCP resources and exact tool schemas, preserv
       assert.deepEqual(payload.reasoning, { effort: 'low' });
       assert.equal(payload.prompt_cache_key, 'google-codemode-gmail-v1');
       assert.deepEqual(payload.tools, fixture.requests[0].tools);
+      assert.equal(payload.instructions, fixture.requests[0].instructions);
     }
     const parsed = parseResponsesTranscript(
       fixture.events.map((event) => JSON.stringify(event)).join('\n'),
@@ -256,6 +261,39 @@ test('Responses runner uses actual MCP resources and exact tool schemas, preserv
       reasoningOutputTokens: 20,
     });
     assert.equal(usage.providerBilledCostUsd, null);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test('first model request receives actual attributed server instructions and resource metadata without skill contents or forced discovery', async () => {
+  const fixture = await harness(() => ({ body: completed([]) }));
+  try {
+    await fixture.run();
+    const discovery = fixture.mcpResults.find((entry) => entry.method === 'server/discover')!
+      .response.result;
+    const catalog = fixture.mcpResults.find((entry) => entry.method === 'resources/list')!.response
+      .result;
+    const expected = {
+      server: 'google',
+      instructions: discovery.instructions,
+      resources: catalog.resources.map((resource: Value) => ({ ...resource, server: 'google' })),
+    };
+    assert.ok(expected.instructions);
+    assert.equal(expected.resources[0].uri, skillUri);
+    assert.deepEqual(
+      JSON.parse(fixture.requests[0].instructions.split('# MCP server context\n')[1]),
+      expected,
+    );
+    assert.ok(fixture.requests[0].instructions.startsWith('Generic caller instructions\n\n'));
+    assert.ok(!JSON.stringify(fixture.requests[0]).includes('# Google Workspace Code Mode'));
+    assert.deepEqual(fixture.events[0].mcpContext, expected);
+    assert.equal(fixture.events[0].runnerVersion, 'responses-loop-2');
+    assert.deepEqual(
+      fixture.mcp.map((request) => request.method),
+      ['server/discover', 'tools/list', 'resources/list'],
+    );
+    assert.deepEqual(fixture.application, []);
   } finally {
     await fixture.close();
   }

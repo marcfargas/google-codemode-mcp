@@ -105,10 +105,21 @@ test('official pinned client discovers, calls tools, and verifies the bundled sk
   );
   try {
     await client.connect(transport);
+    assert.match(client.getInstructions()!, /Start with describe\(\{\}\)/);
+    assert.match(client.getInstructions()!, /MCP Resources/);
+    assert.match(client.getInstructions()!, /describe each method/);
     const tools = await client.listTools();
     assert.deepEqual(
       tools.tools.map((tool) => tool.name),
       ['describe', 'execute', 'gmail_search'],
+    );
+    assert.match(
+      tools.tools.find((tool) => tool.name === 'describe')!.description!,
+      /Start with describe/,
+    );
+    assert.match(
+      tools.tools.find((tool) => tool.name === 'execute')!.description!,
+      /describing each Google method/,
     );
     const described = await client.callTool({
       name: 'describe',

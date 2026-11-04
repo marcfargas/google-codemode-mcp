@@ -19,19 +19,19 @@ const result = (cellId: string, status: MatrixCellResult['status'] = 'pass'): Ma
 test('matrix selects exact declared models in a stable order without fallbacks', () => {
   assert.deepEqual(
     selectCells().map((cell) => cell.id),
-    ['sonnet', 'terra'],
+    ['sonnet', 'sol'],
   );
   assert.deepEqual(
-    selectCells('terra,sonnet,sol').map((cell) => cell.id),
-    ['sonnet', 'terra', 'sol'],
+    selectCells('sol,sonnet,terra').map((cell) => cell.id),
+    ['sonnet', 'sol', 'terra'],
   );
   assert.equal(selectCells('all').length, 6);
-  assert.equal(getCellByModel('gpt-6.1-terra').runner, 'responses');
+  assert.equal(getCellByModel('gpt-6.1-sol').runner, 'responses');
   assert.equal(getCellByModel('claude-haiku-5-5').role, 'probe');
   assert.ok(MATRIX.every((cell) => cell.attempts === 1));
-  for (const selection of ['', 'sonnet,', ',terra', 'sonnet,sonnet', 'fallback', 'required,sol'])
+  for (const selection of ['', 'sonnet,', ',sol', 'sonnet,sonnet', 'fallback', 'required,terra'])
     assert.throws(() => selectCells(selection));
-  assert.throws(() => getCellByModel('gpt-6.1-terra-latest'), /not in/);
+  assert.throws(() => getCellByModel('gpt-6.1-sol-latest'), /not in/);
 });
 
 test('required full-gate passes qualify despite optional model score failures', () => {
@@ -47,16 +47,16 @@ test('required full-gate passes qualify despite optional model score failures', 
 });
 
 test('task success or reference success cannot substitute for a required full-gate failure', () => {
-  const terra = { ...result('terra', 'fail'), taskSuccess: true };
-  const summary = aggregateMatrix(selectCells('sonnet,terra,sol'), [
+  const sol = { ...result('sol', 'fail'), taskSuccess: true };
+  const summary = aggregateMatrix(selectCells('sonnet,sol,terra'), [
     result('sonnet'),
-    terra,
-    result('sol'),
+    sol,
+    result('terra'),
   ]);
   assert.equal(summary.gatedStatus, 'fail');
   assert.equal(summary.passed, false);
-  assert.deepEqual(summary.requiredFailures, ['terra']);
-  assert.equal(summary.rows.find((row) => row.id === 'terra')?.taskSuccess, true);
+  assert.deepEqual(summary.requiredFailures, ['sol']);
+  assert.equal(summary.rows.find((row) => row.id === 'sol')?.taskSuccess, true);
 });
 
 test('partial selections cannot qualify the missing required model', () => {
@@ -65,14 +65,14 @@ test('partial selections cannot qualify the missing required model', () => {
   assert.equal(summary.selectedStatus, 'pass');
   assert.equal(summary.gatedStatus, 'pending');
   assert.equal(summary.passed, false);
-  assert.deepEqual(summary.missingRequired, ['terra']);
+  assert.deepEqual(summary.missingRequired, ['sol']);
 });
 
 test('unattempted selected cells stay explicit even when required models passed', () => {
-  const summary = aggregateMatrix(selectCells('all'), [result('sonnet'), result('terra')]);
+  const summary = aggregateMatrix(selectCells('all'), [result('sonnet'), result('sol')]);
   assert.equal(summary.complete, false);
   assert.equal(summary.gatedStatus, 'pending');
-  assert.deepEqual(summary.unattempted, ['haiku', 'luna', 'opus', 'sol']);
+  assert.deepEqual(summary.unattempted, ['haiku', 'luna', 'opus', 'terra']);
   assert.equal(summary.rows.find((row) => row.id === 'luna')?.status, 'unattempted');
 });
 
@@ -86,9 +86,9 @@ test('optional cells cannot hide unknown mutations, cleanup failures or infrastr
     { infrastructureAbort: true },
     { status: 'error' as const },
   ]) {
-    const summary = aggregateMatrix(selectCells('sonnet,terra,haiku'), [
+    const summary = aggregateMatrix(selectCells('sonnet,sol,haiku'), [
       result('sonnet'),
-      result('terra'),
+      result('sol'),
       { ...result('haiku', 'fail'), ...patch },
     ]);
     assert.equal(summary.gatedStatus, 'fail');
@@ -96,7 +96,7 @@ test('optional cells cannot hide unknown mutations, cleanup failures or infrastr
   }
   const unknown = aggregateMatrix(selectCells('required'), [
     { ...result('sonnet'), hasUnknownMutation: undefined },
-    result('terra'),
+    result('sol'),
   ]);
   assert.equal(unknown.gatedStatus, 'pending');
   assert.deepEqual(unknown.safetyUnknown, ['sonnet']);
@@ -126,7 +126,7 @@ test('aggregation refuses duplicate, unselected and altered manifest evidence', 
   );
   const malformedCleanup = aggregateMatrix(selectCells('required'), [
     { ...result('sonnet'), cleanup: {} as never },
-    result('terra'),
+    result('sol'),
   ]);
   assert.equal(malformedCleanup.gatedStatus, 'pending');
 });

@@ -19,7 +19,7 @@ live:
 eval $profile $model $proxy_url $output $repeats='1':
     node .github/eval/act.mjs
 
-# Required Sonnet/Terra pair by default; select all for the six-model comparison.
+# Required Sonnet/Sol pair by default; select all for the six-model comparison.
 eval-matrix $profile $proxy_url $output $selection='required':
     node .github/eval/act.mjs
 

@@ -344,8 +344,8 @@ just eval-matrix gmail http://127.0.0.1:8317 /absolute/new/evidence-directory
 just eval-matrix gmail http://127.0.0.1:8317 /absolute/new/full-matrix-directory all
 ```
 
-Sonnet 5.5 and GPT 6.1 Terra are required. Haiku 5.5 and GPT 6 Luna are probes;
-Opus 5.5 and GPT 6.1 Sol are references. Each selected cell runs once with fresh
+Sonnet 5.5 and GPT 6.1 Sol are required. Haiku 5.5 and GPT 6 Luna are probes;
+Opus 5.5 and GPT 6.1 Terra are references. Each selected cell runs once with fresh
 fixtures. Optional score failures are informational; uncertainty, cleanup failures,
 and infrastructure failures stop the campaign. Claude uses native CLI 2.1.318;
 GPT uses an isolated Responses tool loop, which does not qualify the ChatGPT host.
@@ -373,6 +373,14 @@ discovery; Terra skipped root discovery and the skill resource. Luna exhausted
 All attempted cells cleaned up successfully with no unknown mutations. The
 [gate results](.github/eval/README.md#first-model-matrix-2026-11-04) retain these
 failures, observed cache counters, estimates, and the unattempted cells.
+
+The current required models each have one passing attempt: Sonnet after fixing
+instruction handoff and clarifying product guidance; Sol after additionally fixing
+conservative budget settlement. Both completed the Gmail task, discovery, skill
+retrieval, and cleanup with zero unknown mutations. These are separate harness
+candidates, not a fresh pair pass or a reliability claim. The earlier failed pair
+remains retained. See the [qualified results](.github/eval/README.md#sol-validation-with-accounting-version-2-2026-11-04)
+for cost/cache evidence and the method criterion's coverage limits.
 
 ### Initial test consent and CI secrets
 

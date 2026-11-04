@@ -4,7 +4,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import test from 'node:test';
-import { createResponsesHandler } from '../eval/responses-relay.ts';
+import { createResponsesHandler, RESPONSES_ACCOUNTING_VERSION } from '../eval/responses-relay.ts';
 
 const MODEL = 'gpt-6.1-terra';
 const tool = { type: 'function', name: 'describe', parameters: { type: 'object' }, strict: false };
@@ -27,6 +27,15 @@ const terminal = (id: string, model = MODEL) => ({
   ],
   usage: { input_tokens: 20, output_tokens: 9, input_tokens_details: { cached_tokens: 12 } },
 });
+
+function assertHeld(receipt: any) {
+  assert.equal(receipt.accountingVersion, RESPONSES_ACCOUNTING_VERSION);
+  assert.equal(receipt.settlementEligible, false);
+  assert.equal(receipt.refundUsd, 0);
+  assert.equal(receipt.settledUsd, null);
+  assert.equal(receipt.heldUsd, receipt.reservationUsd);
+  assert.ok(receipt.settlementReason.length > 0);
+}
 
 async function harness(
   respond: (body: any, response: ServerResponse, request: IncomingMessage) => unknown,
@@ -110,6 +119,13 @@ test('Responses relay preserves cache controls, terminal usage and model identit
     assert.equal(receipt.cacheReadInputTokens, 12);
     assert.equal(receipt.cacheCreationInputTokens, null);
     assert.equal(receipt.totalOutputTokensOrUpperBound, 9);
+    assert.equal(receipt.accountingVersion, 2);
+    assert.equal(receipt.settlementEligible, true);
+    assert.equal(receipt.settlementReason, 'settled_verified_terminal');
+    assert.equal(receipt.settledUsd, (20 * 1 + 9 * 5) / 1_000_000);
+    assert.equal(receipt.heldUsd, 0);
+    assert.ok(receipt.refundUsd > 0);
+    assert.equal(receipt.totalCommittedEstimateUsd, receipt.estimatedUsdUpperBound);
     assert.equal(receipt.providerBilledCostUsd, null);
     assert.ok(receipt.usagePublishedRateEstimateUsd > 0);
     assert.ok(receipt.estimatedUsdUpperBound >= receipt.usagePublishedRateEstimateUsd);
@@ -211,6 +227,11 @@ test('Responses SSE terminal completion deduplicates repeated terminal usage wit
     assert.equal((await gate.invoke({ ...payload(), stream: true })).status, 502);
     assert.equal(gate.receipts[1].duplicateResponse, true);
     assert.equal(gate.receipts[1].complete, false);
+    assertHeld(gate.receipts[1]);
+    assert.equal(
+      gate.receipts[1].totalCommittedEstimateUsd,
+      gate.receipts[0].settledUsd + gate.receipts[1].reservationUsd,
+    );
   } finally {
     await gate.close();
   }
@@ -239,6 +260,11 @@ test('incomplete Responses retain full output reservations and stop before the a
     assert.equal(gate.receipts.at(-1).totalOutputTokensOrUpperBound, 15_000);
     assert.ok(gate.receipts.every((receipt) => receipt.complete === false));
     assert.equal(gate.receipts[0].incompleteDetails.reason, 'max_output_tokens');
+    assert.ok(gate.receipts.every((receipt) => !receipt.settlementEligible));
+    assert.equal(
+      gate.receipts.at(-1).totalCommittedEstimateUsd,
+      gate.receipts.reduce((sum, receipt) => sum + receipt.reservationUsd, 0),
+    );
   } finally {
     await gate.close();
   }
@@ -254,16 +280,27 @@ test('model mismatch is retained and returned as a transport failure without sil
     assert.equal(gate.receipts[0].modelMismatch, true);
     assert.equal(gate.receipts[0].error, 'model_identity_mismatch');
     assert.equal(gate.receipts[0].usagePublishedRateEstimateUsd, null);
+    assertHeld(gate.receipts[0]);
   } finally {
     await gate.close();
   }
 });
 
-test('published-rate cost reservation blocks a large third request before spending', async () => {
+test('high actual usage still blocks a large third request before spending', async () => {
   let count = 0;
   const model = 'gpt-6.1-sol';
   const gate = await harness(
-    (_body, response) => response.end(JSON.stringify(terminal(`cost-${++count}`, model))),
+    (_body, response) =>
+      response.end(
+        JSON.stringify({
+          ...terminal(`cost-${++count}`, model),
+          usage: {
+            input_tokens: 200_000,
+            output_tokens: 2048,
+            input_tokens_details: { cached_tokens: 0 },
+          },
+        }),
+      ),
     model,
   );
   try {
@@ -278,6 +315,8 @@ test('published-rate cost reservation blocks a large third request before spendi
     assert.match(await rejected.text(), /estimate ceiling/);
     assert.equal(gate.upstream.length, 2);
     assert.ok(gate.receipts.at(-1).estimatedUsdUpperBound < 1);
+    assert.ok(gate.receipts.every((receipt) => receipt.settlementEligible));
+    assert.ok(gate.receipts.at(-1).estimatedUsdUpperBound > 0.8);
   } finally {
     await gate.close();
   }
@@ -304,6 +343,8 @@ test('active request rejects overlapping inference; abort retains its failure re
       (await readFile(join(gate.output, 'model-receipts.jsonl'), 'utf8')).trim(),
     );
     assert.equal(saved.complete, false);
+    assertHeld(saved);
+    assert.equal(saved.estimatedUsdUpperBound, saved.reservationUsd);
     assert.equal((await gate.invoke()).status, 400);
     assert.equal(gate.upstream.length, 1);
   } finally {
@@ -340,6 +381,7 @@ test('conflicting terminal states and trailing error events cannot complete or r
       assert.equal(gate.receipts[0].complete, false);
       assert.equal(gate.receipts[0].totalOutputTokensOrUpperBound, 2048);
       assert.ok(gate.receipts[0].error);
+      assertHeld(gate.receipts[0]);
     } finally {
       await gate.close();
     }
@@ -369,6 +411,7 @@ test('missing response IDs and invalid output telemetry cannot release output re
     try {
       await (await gate.invoke()).text();
       assert.equal(gate.receipts[0].totalOutputTokensOrUpperBound, 2048);
+      assertHeld(gate.receipts[0]);
       if (!patch.id && 'id' in patch) assert.equal(gate.receipts[0].complete, false);
       if (
         patch.usage &&
@@ -405,5 +448,149 @@ test('completed one-token requests still stop at the explicit request ceiling', 
     assert.equal(gate.receipts.at(-1).totalOutputTokensOrUpperBound, 18);
   } finally {
     await gate.close();
+  }
+});
+
+test('settled input usage admits twelve-plus growing Sol requests that permanent byte charges would reject', async () => {
+  // Aggregate shapes from the observed failure, with entirely synthetic text.
+  const shapes = [
+    [5268, 1216, 18],
+    [6431, 1440, 39],
+    [10639, 2306, 24],
+    [11589, 2496, 25],
+    [14257, 3031, 26],
+    [22170, 4559, 27],
+    [51218, 10317, 92],
+    [53329, 10859, 27],
+    [80826, 16324, 83],
+    [87564, 18430, 27],
+    [108648, 24446, 29],
+    [110000, 25000, 30],
+    [115000, 26000, 35],
+  ];
+  const model = 'gpt-6.1-sol';
+  let call = 0;
+  const gate = await harness((_body, response) => {
+    const [, input_tokens, output_tokens] = shapes[call];
+    response.end(
+      JSON.stringify({
+        ...terminal(`settled-sol-${++call}`, model),
+        usage: { input_tokens, output_tokens, input_tokens_details: { cached_tokens: 0 } },
+      }),
+    );
+  }, model);
+  try {
+    for (const [bytes] of shapes) {
+      const body = { ...payload(model), instructions: '' };
+      body.instructions = 'x'.repeat(bytes - Buffer.byteLength(JSON.stringify(body)));
+      assert.equal(Buffer.byteLength(JSON.stringify(body)), bytes);
+      const response = await gate.invoke(body);
+      assert.equal(response.status, 200, await response.text());
+    }
+    assert.equal(gate.upstream.length, 13);
+    assert.ok(gate.receipts.every((receipt) => receipt.settlementEligible));
+    const oldCommittedAfterEleven = gate.receipts
+      .slice(0, 11)
+      .reduce(
+        (sum, receipt) =>
+          sum +
+          (receipt.inputTokenUpperBound * 2 + receipt.rawUsage.output_tokens * 10) / 1_000_000,
+        0,
+      );
+    assert.ok(oldCommittedAfterEleven + gate.receipts[11].reservationUsd > 1);
+    const actualUncached = gate.receipts.reduce((sum, receipt) => sum + receipt.settledUsd, 0);
+    assert.ok(actualUncached < 0.4);
+    assert.ok(Math.abs(gate.receipts.at(-1).totalCommittedEstimateUsd - actualUncached) < 1e-12);
+    assert.equal(
+      gate.receipts.at(-1).totalOutputTokensOrUpperBound,
+      shapes.reduce((sum, shape) => sum + shape[2], 0),
+    );
+  } finally {
+    await gate.close();
+  }
+});
+
+test('missing cache detail settles at uncached rates while cache-discount usage remains unknown', async () => {
+  const gate = await harness((_body, response) =>
+    response.end(
+      JSON.stringify({
+        ...terminal('missing-cache'),
+        usage: { input_tokens: 20, output_tokens: 9 },
+      }),
+    ),
+  );
+  try {
+    const response = await gate.invoke();
+    assert.equal(response.status, 200);
+    await response.text();
+    const receipt = gate.receipts[0];
+    assert.equal(receipt.settlementEligible, true);
+    assert.equal(receipt.settledUsd, (20 * 1 + 9 * 5) / 1_000_000);
+    assert.equal(receipt.usagePublishedRateEstimateUsd, null);
+    assert.equal(receipt.cumulativeUsagePublishedRateEstimateUsd, null);
+    assert.equal(receipt.cacheReadInputTokens, null);
+    assert.equal(receipt.cacheCreationInputTokens, null);
+  } finally {
+    await gate.close();
+  }
+});
+
+test('ineligible identities, terminal classes and input/cache telemetry retain both complete reservations', async () => {
+  const scenarios: { patch?: any; httpStatus?: number; reason?: string }[] = [
+    { patch: { model: undefined } },
+    { patch: { model: 'wrong-model' } },
+    { patch: { id: undefined } },
+    { patch: { status: 'incomplete' } },
+    { patch: { status: 'failed' } },
+    { httpStatus: 500 },
+    { patch: { usage: { output_tokens: 9 } }, reason: 'missing_or_nonpositive_input_tokens' },
+    {
+      patch: { usage: { input_tokens: 0, output_tokens: 9 } },
+      reason: 'missing_or_nonpositive_input_tokens',
+    },
+    { patch: { usage: { input_tokens: -1, output_tokens: 9 } } },
+    { patch: { usage: { input_tokens: 1.5, output_tokens: 9 } } },
+    { patch: { usage: { input_tokens: 1_000_000, output_tokens: 9 } } },
+    { patch: { usage: { input_tokens: 20 } }, reason: 'missing_or_nonpositive_output_tokens' },
+    {
+      patch: {
+        usage: { input_tokens: 20, output_tokens: 9, input_tokens_details: { cached_tokens: 21 } },
+      },
+    },
+    {
+      patch: {
+        usage: { input_tokens: 20, output_tokens: 9, input_tokens_details: { cached_tokens: -1 } },
+      },
+    },
+    {
+      patch: {
+        usage: { input_tokens: 20, output_tokens: 9, input_tokens_details: { cached_tokens: 0.5 } },
+      },
+    },
+    {
+      patch: {
+        usage: {
+          input_tokens: 20,
+          output_tokens: 9,
+          input_tokens_details: { cached_tokens: null },
+        },
+      },
+    },
+  ];
+  for (const scenario of scenarios) {
+    const gate = await harness((_body, response) => {
+      response.writeHead(scenario.httpStatus ?? 200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ ...terminal('ineligible'), ...scenario.patch }));
+    });
+    try {
+      await (await gate.invoke()).text();
+      const receipt = gate.receipts[0];
+      assertHeld(receipt);
+      assert.equal(receipt.totalOutputTokensOrUpperBound, 2048);
+      assert.equal(receipt.totalCommittedEstimateUsd, receipt.reservationUsd);
+      if (scenario.reason) assert.equal(receipt.settlementReason, scenario.reason);
+    } finally {
+      await gate.close();
+    }
   }
 });

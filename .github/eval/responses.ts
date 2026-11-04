@@ -3,7 +3,7 @@ import { lstat, mkdir, open, realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
-export const RESPONSES_RUNNER_VERSION = 'responses-loop-1';
+export const RESPONSES_RUNNER_VERSION = 'responses-loop-2';
 const FILE_LIMIT = 1_048_576;
 type Event = Record<string, any>;
 type FunctionTool = {
@@ -287,7 +287,15 @@ export async function runResponsesLoop(options: {
     const listed = await client.listTools();
     if (listed.nextCursor)
       throw new Error('Paginated tool catalog unsupported by this small runner');
-    await client.listResources(); // Discover catalog, without reading any skill contents.
+    const resources = await client.listResources();
+    // Expose the server's instructions and resource descriptors as a host would,
+    // without reading skills or performing model-requested discovery on its behalf.
+    const mcpContext = {
+      server: 'google',
+      instructions: client.getInstructions() ?? null,
+      resources: resources.resources.map((resource) => ({ ...resource, server: 'google' })),
+    };
+    const instructions = `${options.systemPrompt}\n\n# MCP server context\n${JSON.stringify(mcpContext)}`;
     const names = new Map(listed.tools.map((tool) => [`mcp__google__${tool.name}`, tool.name]));
     if (
       names.size !== listed.tools.length ||
@@ -309,6 +317,7 @@ export async function runResponsesLoop(options: {
       runnerVersion: RESPONSES_RUNNER_VERSION,
       model: options.model,
       tools: tools.map((tool) => tool.name),
+      mcpContext,
     });
     const input: Event[] = [{ role: 'user', content: options.prompt }];
     const seenCalls = new Set<string>();
@@ -320,7 +329,7 @@ export async function runResponsesLoop(options: {
         signal: AbortSignal.timeout(90_000),
         body: JSON.stringify({
           model: options.model,
-          instructions: options.systemPrompt,
+          instructions,
           tools,
           input,
           store: false,

@@ -7,13 +7,20 @@ description: Discover Google Workspace API methods and run JavaScript through th
 
 Use `describe` to discover the deployment's available APIs, methods, parameters,
 request bodies, response schemas, and snippets. Start with `describe({})`, then
-narrow the path, for example `gmail/v1/users.messages.list`. Discover methods
-before using them; available methods come from Google's Discovery document.
+read the returned Workspace skill URI through MCP Resources. Follow the returned
+service and resource paths down to each method you need. Describe each method
+before calling it in `execute`, including methods familiar from other Google
+clients: this deployment's available methods, parameters, schemas and transport
+limits come from its Discovery document.
 
 Use `execute` to submit JavaScript. The trusted caller supplies a short-lived
 OAuth `accessToken` as a request argument. The program receives `google`, `inputs`,
 and deployment-provided `snippets`; it does not receive the token. Keep user data
 in `inputs` instead of interpolating it into code.
+
+The following illustrates the native client shape after method discovery. It is
+not a substitute for describing `gmail/v1/users.messages.list` and checking its
+current parameters and response schema.
 
 ```js
 const gmail = google.gmail({ version: 'v1' });

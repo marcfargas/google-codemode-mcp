@@ -13,6 +13,8 @@ const hash = (value: string) => createHash('sha256').update(value).digest('hex')
 const integer = (value: unknown): value is number =>
   typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 
+export const RESPONSES_ACCOUNTING_VERSION = 2;
+
 export const RESPONSES_PRICING = Object.freeze({
   version: 1,
   source: 'https://developers.openai.com/api/docs/pricing',
@@ -190,8 +192,8 @@ export function createResponsesHandler(options: {
       );
       const serialized = JSON.stringify(payload);
       const inputBytes = Buffer.byteLength(serialized);
-      // UTF-8 bytes plus framing allowance is deliberately more conservative
-      // than a tokenizer estimate. Input reservations are never discounted.
+      // Reserve UTF-8 bytes plus framing before dispatch. Fully verified terminal
+      // usage can settle that reservation at uncached input rates afterward.
       const inputTokenUpperBound = inputBytes + 256;
       const reservationUsd =
         (inputTokenUpperBound * rates.input + payload.max_output_tokens * rates.output) / 1_000_000;
@@ -212,7 +214,13 @@ export function createResponsesHandler(options: {
         systemHash: hash(JSON.stringify(payload.instructions ?? null)),
         toolsHash: hash(JSON.stringify(payload.tools)),
         maxTokens: payload.max_output_tokens,
+        accountingVersion: RESPONSES_ACCOUNTING_VERSION,
         reservationUsd,
+        settledUsd: null,
+        heldUsd: reservationUsd,
+        refundUsd: 0,
+        settlementEligible: false,
+        settlementReason: 'awaiting_verified_terminal',
         pricing: { ...RESPONSES_PRICING, models: undefined, rates },
         providerBilledCostUsd: null,
         complete: false,
@@ -305,32 +313,31 @@ export function createResponsesHandler(options: {
             ['error', 'response.failed', 'response.incomplete'].includes(event.type),
           );
         const output = terminal?.usage?.output_tokens;
-        if (
-          record.complete &&
-          integer(output) &&
-          output > 0 &&
-          output <= payload.max_output_tokens
-        ) {
-          const refund = payload.max_output_tokens - output;
-          reservedOutput -= refund;
-          estimatedUsdUpperBound -= (refund * rates.output) / 1_000_000;
-        }
         const input = terminal?.usage?.input_tokens;
         const cached = terminal?.usage?.input_tokens_details?.cached_tokens;
+        const cachedPresent =
+          terminal?.usage?.input_tokens_details != null &&
+          Object.hasOwn(terminal.usage.input_tokens_details, 'cached_tokens');
+        const inputValid = integer(input) && input > 0 && input <= inputTokenUpperBound;
+        const outputValid = integer(output) && output > 0 && output <= payload.max_output_tokens;
+        const cacheValid = !cachedPresent || (integer(cached) && inputValid && cached <= input);
+        const identityValid =
+          terminal?.model === options.model &&
+          record.servedModels.length === 1 &&
+          record.servedModels[0] === options.model;
         record.invalidUsage =
           (output != null && (!integer(output) || output > payload.max_output_tokens)) ||
           (input != null && (!integer(input) || input > inputTokenUpperBound)) ||
-          (cached != null && (!integer(cached) || (integer(input) && cached > input)));
+          (cachedPresent && !cacheValid);
         if (
           !record.invalidUsage &&
           !duplicateResponse &&
           !record.conflictingTerminals &&
-          record.servedModels.length === 1 &&
-          record.servedModels[0] === options.model &&
-          integer(input) &&
-          integer(output) &&
-          integer(cached) &&
-          cached <= input
+          identityValid &&
+          inputValid &&
+          outputValid &&
+          cachedPresent &&
+          cacheValid
         ) {
           record.usagePublishedRateEstimateUsd =
             ((input - cached) * rates.input + cached * rates.cachedInput + output * rates.output) /
@@ -340,7 +347,7 @@ export function createResponsesHandler(options: {
           record.usagePublishedRateEstimateUsd = null;
           completeUsage = false;
         }
-        record.cacheReadInputTokens = integer(cached) ? cached : null;
+        record.cacheReadInputTokens = cachedPresent && cacheValid ? cached : null;
         record.cacheCreationInputTokens = null;
         record.modelMismatch = record.servedModels.some((model: string) => model !== options.model);
         if (record.modelMismatch) record.error = 'model_identity_mismatch';
@@ -350,9 +357,40 @@ export function createResponsesHandler(options: {
         else if (terminal?.status === 'failed' || events.some((event) => event.type === 'error'))
           record.error = 'upstream_response_error';
         else if (!upstream.ok) record.error = 'upstream_http_error';
+        record.settlementEligible =
+          record.complete &&
+          !record.error &&
+          identityValid &&
+          inputValid &&
+          outputValid &&
+          cacheValid;
+        const heldReasons: [boolean, string][] = [
+          [!upstream.ok, 'upstream_http_error'],
+          [duplicateResponse, 'response_identity_reused'],
+          [record.conflictingTerminals, 'conflicting_response_terminals'],
+          [!terminal, 'missing_unique_terminal'],
+          [terminal?.status !== 'completed', `terminal_${terminal?.status ?? 'unknown'}`],
+          [!record.complete, 'terminal_not_verified_complete'],
+          [!identityValid, 'terminal_model_unverified'],
+          [record.invalidUsage, 'invalid_usage_telemetry'],
+          [!inputValid, 'missing_or_nonpositive_input_tokens'],
+          [!outputValid, 'missing_or_nonpositive_output_tokens'],
+          [!cacheValid, 'invalid_cached_tokens'],
+        ];
+        record.settlementReason = record.settlementEligible
+          ? 'settled_verified_terminal'
+          : (heldReasons.find(([applies]) => applies)?.[1] ?? 'terminal_not_eligible');
+        if (record.settlementEligible) {
+          record.settledUsd = (input * rates.input + output * rates.output) / 1_000_000;
+          record.heldUsd = 0;
+          record.refundUsd = reservationUsd - record.settledUsd;
+          reservedOutput -= payload.max_output_tokens - output;
+          estimatedUsdUpperBound -= record.refundUsd;
+        }
         record.finishedAt = new Date().toISOString();
         record.totalOutputTokensOrUpperBound = reservedOutput;
         record.estimatedUsdUpperBound = estimatedUsdUpperBound;
+        record.totalCommittedEstimateUsd = estimatedUsdUpperBound;
         record.cumulativeUsagePublishedRateEstimateUsd = completeUsage ? usageEstimatedUsd : null;
         await append('model-receipts.jsonl', record);
         response.writeHead(record.error ? 502 : upstream.status, {
@@ -360,11 +398,21 @@ export function createResponsesHandler(options: {
         });
         response.end(text);
       } catch (error) {
+        if (record.settlementEligible) {
+          estimatedUsdUpperBound += record.refundUsd;
+          reservedOutput += payload.max_output_tokens - record.rawUsage.output_tokens;
+        }
         record.error = 'upstream_failure';
         record.complete = false;
+        record.settlementEligible = false;
+        record.settlementReason = stopped ? 'evaluation_aborted' : 'upstream_or_receipt_failure';
+        record.settledUsd = null;
+        record.heldUsd = reservationUsd;
+        record.refundUsd = 0;
         record.finishedAt = new Date().toISOString();
         record.totalOutputTokensOrUpperBound = reservedOutput;
         record.estimatedUsdUpperBound = estimatedUsdUpperBound;
+        record.totalCommittedEstimateUsd = estimatedUsdUpperBound;
         record.cumulativeUsagePublishedRateEstimateUsd = null;
         completeUsage = false;
         await append('model-receipts.jsonl', record);

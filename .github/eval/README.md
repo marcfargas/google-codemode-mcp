@@ -9,9 +9,17 @@ just eval-matrix gmail http://127.0.0.1:8317 /absolute/new/full-matrix-directory
 
 | Role      | Claude (native CLI 2.1.318)    | GPT (Responses runner)    |
 | --------- | ------------------------------ | ------------------------- |
-| Required  | `claude-sonnet-5-5` (`sonnet`) | `gpt-6.1-terra` (`terra`) |
+| Required  | `claude-sonnet-5-5` (`sonnet`) | `gpt-6.1-sol` (`sol`)     |
 | Probe     | `claude-haiku-5-5` (`haiku`)   | `gpt-6-luna` (`luna`)     |
-| Reference | `claude-opus-5-5` (`opus`)     | `gpt-6.1-sol` (`sol`)     |
+| Reference | `claude-opus-5-5` (`opus`)     | `gpt-6.1-terra` (`terra`) |
+
+Matrix version 2 selects Sonnet and Sol as the required pair. Version 1 results
+retain their original Sonnet/Terra roles and are not reclassified.
+
+The Responses runner supplies the server's actual instructions and resource metadata to the model. Skill contents still
+require a model-requested resource read. Shared tool descriptions and root
+navigation explain starting at the service catalog, reading the Workspace skill,
+and inspecting methods before executing. Grading and budgets remain unchanged.
 
 The optional last argument selects `required` (default), `all`, or comma-separated
 cell IDs. Cells run sequentially in manifest order, once each, with fresh fixtures
@@ -23,7 +31,7 @@ retain unattempted cells. A subset cannot qualify the absent required pair.
 For a single model, use its exact manifest ID:
 
 ```sh
-just eval gmail gpt-6.1-terra http://127.0.0.1:8317 /absolute/new/single-model-directory
+just eval gmail gpt-6.1-sol http://127.0.0.1:8317 /absolute/new/single-model-directory
 ```
 
 Requires Docker, `act`, `just`, Node 24, the existing test OAuth grant, and a running
@@ -35,7 +43,7 @@ advertised model IDs are checked before OAuth or fixtures; metadata availability
 does not establish successful inference.
 
 Claude runs through the pinned native CLI. GPT runs through a small isolated
-Responses loop (`responses-loop-1`), with tools copied from the actual MCP server,
+Responses loop (`responses-loop-2`), with tools copied from the actual MCP server,
 resource-list/read tools, and bounded UTF-8 workspace Read/Write tools. It sends
 self-contained history with storage disabled and preserves returned reasoning
 items and function outputs. It has no shell or built-in remote tools. This is a
@@ -98,8 +106,10 @@ Each cell has a five-minute wall deadline, at most 18 model requests, at most
 2,048 output tokens per request, and a conservative 15,000 total output allowance.
 Claude additionally has a $1 native CLI estimate ceiling. GPT reserves input bytes
 plus framing and output allowance against a $1 published-rate estimate ceiling;
-input reservations are never refunded and output reservations are refunded only
-from verified completed usage. Six cells therefore allow up to six $1 estimates,
+accounting version 2 settles both input and output reservations only after a
+unique completed response passes model identity and usage validation. Budget
+settlement uses the uncached input rate, even when cache reads are reported.
+Missing or uncertain usage retains both reservations. Six cells therefore allow up to six $1 estimates,
 not a $1 campaign budget. These limits are not proxy billing guarantees.
 
 Requested and response-reported identities, input/output/cache tokens, estimates,
@@ -181,3 +191,66 @@ Terra's saved evidence was also regraded offline: task pass and the same two
 mechanism failures, without additional Google or model requests. No retry or
 fallback was run. Task feasibility is demonstrated for three tested performers;
 complete discovery/skill compliance and target host qualification remain open.
+
+## Sonnet/Sol pair after instruction repair (2026-11-04)
+
+Matrix version 2 ran one fresh attempt per required cell with unchanged grading,
+limits, and fixtures. Sonnet passed all 17 existing criteria, including the Gmail
+task, root discovery, method discovery and actual skill retrieval. Sol passed
+root/method discovery and skill retrieval, but did not complete the task: the
+relay rejected request 12 before dispatch because its conservative published-rate
+reservation would exceed $1. The required-pair gate remains **failed**.
+
+Sol had 11 completed model requests. Its observed-usage estimate was $0.0821732;
+the relay had retained $0.91368 in conservative reservations before rejecting the
+next request. Input bytes plus framing deliberately overestimate token counts and
+are charged without cache discounts or input refunds. This result identifies a
+harness budget limitation, not inability of the model to perform the task. Neither
+the ceiling nor accounting was changed to obtain a passing run. No retry occurred.
+Sonnet's native CLI estimate was $0.121344. Observed cache-read tokens were 64,400
+for Sonnet and 59,392 for Sol; provider billing remains unknown. Both cells had
+matching model identities, successful cleanup, and zero unknown mutations.
+
+The instruction handoff defect was on the project side: the former GPT runner
+never supplied the server instructions or resource metadata to the model. The
+corrected runner exposes these without reading the skill on the model's behalf.
+Shared product guidance was clarified in the same candidate. This combined change
+and a different GPT model do not isolate a single cause of changed behavior.
+
+The current method criterion verifies that a method description was retrieved;
+it does not verify every called method or enforce ordering. Sonnet first used
+memorized list/get calls, then described the send, modify, and attachment methods
+before its second execution. Its existing-gate pass therefore does not prove full
+adherence to the instruction to describe every method before use. A stricter
+criterion needs its own declared version and retained baseline, rather than
+retroactively changing these results.
+
+Accounting version 2 keeps the same $1 ceiling and pre-request byte/output
+reservations. For a unique, fully validated completed response from the selected
+model, settle both input and output reservations from reported token counts,
+using the uncached input rate for the budget. Missing counts or uncertain,
+incomplete, failed, mismatched, or conflicting responses retain both reservations.
+The cache-discounted usage estimate and unknown provider billing remain separate.
+Receipts record reservation, settlement eligibility/reason, refund, and cumulative
+committed estimate. A subsequent Sol validation uses a separate candidate and
+retains the preceding pair as failed.
+
+## Sol validation with accounting version 2 (2026-11-04)
+
+One fresh Sol attempt passed all 17 existing gate criteria after the reviewed
+budget repair: Gmail task, exact UTF-8 file, root and method discovery, actual
+skill read, model identity, and mutation certainty. Sixteen model requests
+completed. The committed estimate at uncached input rates was $0.671908; the
+observed cache-discounted usage estimate was $0.1354088, with 330,224 input tokens,
+282,368 cached input tokens, and 1,146 output tokens. Actual proxy billing remains
+unknown. All receipts settled from verified completed responses under the same
+$1 ceiling. Cleanup succeeded, with zero unknown mutations. Offline regrading
+reproduced the pass without further Google or model operations.
+
+Sonnet's preceding pass and this Sol pass use identical product, skill, fixtures,
+and grading, but different GPT accounting candidates. They demonstrate one
+successful attempt for each required model, not a fresh same-candidate pair pass
+or reliability. The earlier pair remains failed in its original evidence. The
+instruction handoff and budget reservation defects were harness defects; shared
+product guidance also changed before the first pair. The method criterion's
+coverage limit described above still applies.

@@ -198,6 +198,7 @@ export class DiscoveryCatalog {
     if (!path)
       return {
         services: [{ name: 'gmail', versions: ['v1'], paths: ['gmail/v1'] }],
+        next: 'Read the skill URI through MCP Resources, then follow service and resource paths with describe to each needed method for its signature and schemas before execute.',
         skill: 'skill://google-codemode-mcp/google-workspace/SKILL.md',
       };
     if (path === 'gmail') return { service: 'gmail', versions: ['v1'], paths: ['gmail/v1'] };

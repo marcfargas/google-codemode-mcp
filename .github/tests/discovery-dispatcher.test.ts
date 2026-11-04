@@ -93,6 +93,7 @@ test('Discovery is lazy, progressive, and resolves methods absent from a handwri
   const root = await dynamic.describe();
   assert.deepEqual(root, {
     services: [{ name: 'gmail', versions: ['v1'], paths: ['gmail/v1'] }],
+    next: 'Read the skill URI through MCP Resources, then follow service and resource paths with describe to each needed method for its signature and schemas before execute.',
     skill: 'skill://google-codemode-mcp/google-workspace/SKILL.md',
   });
   assert.deepEqual((await dynamic.describe('gmail')).paths, ['gmail/v1']);
