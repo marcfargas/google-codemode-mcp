@@ -195,8 +195,12 @@ export class DiscoveryCatalog {
   }
 
   async describe(path = ''): Promise<Record<string, unknown>> {
-    if (!path) return { services: [{ name: 'gmail', versions: ['v1'] }] };
-    if (path === 'gmail') return { service: 'gmail', versions: ['v1'] };
+    if (!path)
+      return {
+        services: [{ name: 'gmail', versions: ['v1'], paths: ['gmail/v1'] }],
+        skill: 'skill://google-codemode-mcp/google-workspace/SKILL.md',
+      };
+    if (path === 'gmail') return { service: 'gmail', versions: ['v1'], paths: ['gmail/v1'] };
     const document = await this.document();
     const methods = await this.methods();
     const method = methods.get(path);
@@ -223,12 +227,13 @@ export class DiscoveryCatalog {
     }
     const prefix = path === 'gmail/v1' ? '' : path.slice('gmail/v1/'.length) + '.';
     if (path !== 'gmail/v1' && !path.startsWith('gmail/v1/')) {
-      throw new Error('Unknown discovery path');
+      throw new Error('Unknown discovery path. Call describe({}) and follow its returned paths.');
     }
     const matching = [...methods.values()].filter((value) =>
       value.path.slice(9).startsWith(prefix),
     );
-    if (!matching.length) throw new Error('Unknown discovery path');
+    if (!matching.length)
+      throw new Error('Unknown discovery path. Call describe({}) and follow its returned paths.');
     const resources = new Set<string>();
     const direct: { path: string; description?: string; mutation: boolean }[] = [];
     for (const entry of matching) {

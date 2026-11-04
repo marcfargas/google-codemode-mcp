@@ -90,8 +90,22 @@ test('Discovery is lazy, progressive, and resolves methods absent from a handwri
       return json(document);
     },
   });
-  assert.deepEqual(await dynamic.describe(), { services: [{ name: 'gmail', versions: ['v1'] }] });
+  const root = await dynamic.describe();
+  assert.deepEqual(root, {
+    services: [{ name: 'gmail', versions: ['v1'], paths: ['gmail/v1'] }],
+    skill: 'skill://google-codemode-mcp/google-workspace/SKILL.md',
+  });
+  assert.deepEqual((await dynamic.describe('gmail')).paths, ['gmail/v1']);
   assert.equal(fetched, 0);
+  const versionPath = (root.services as { paths: string[] }[])[0].paths[0];
+  const version = await dynamic.describe(versionPath);
+  const resource = await dynamic.describe((version.resources as string[])[0]);
+  const nested = await dynamic.describe((resource.resources as string[])[0]);
+  const method = await dynamic.describe((nested.methods as { path: string }[])[0].path);
+  assert.match(method.signature as string, /Promise/);
+  assert.ok(method.responseSchema);
+  for (const invalid of ['gmail.users.messages.get', 'drive/v3', 'gmail/v1/nonexistent'])
+    await assert.rejects(dynamic.describe(invalid), /follow its returned paths/);
   assert.deepEqual((await dynamic.describe('gmail/v1')).resources, ['gmail/v1/users']);
   assert.deepEqual((await dynamic.describe('gmail/v1/users')).resources, [
     'gmail/v1/users.messages',

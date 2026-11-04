@@ -1,0 +1,73 @@
+name: Agent feasibility
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: Service profile (Gmail implemented; others are coverage failures)
+        required: true
+        default: gmail
+        type: string
+      model:
+        description: Explicit CLIProxyAPI model ID
+        required: true
+        type: string
+      proxy_url:
+        description: Anthropic-compatible proxy URL reachable from the runner
+        required: true
+        type: string
+      output:
+        description: Evidence directory (local act mounts an external directory)
+        default: dist/agent-evidence
+        type: string
+      repeats:
+        description: One trial, or two fresh fixtures for cache observation
+        default: '1'
+        type: choice
+        options: ['1', '2']
+permissions:
+  contents: read
+concurrency:
+  group: live-gmail-test-account
+  cancel-in-progress: false
+jobs:
+  evaluate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      EVAL_PROFILE: ${{ inputs.profile }}
+      EVAL_MODEL: ${{ inputs.model }}
+      EVAL_PROXY_URL: ${{ inputs.proxy_url }}
+      EVAL_OUTPUT: ${{ inputs.output }}
+      EVAL_REPEATS: ${{ inputs.repeats }}
+      CPA_CLIENT_API_KEY: ${{ secrets.CPA_CLIENT_API_KEY }}
+      GOOGLE_TEST_USER: ${{ secrets.GOOGLE_TEST_USER }}
+      GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+      GOOGLE_TEST_REFRESH_TOKEN: ${{ secrets.GOOGLE_TEST_REFRESH_TOKEN }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm install --global @anthropic-ai/claude-code@2.1.318
+      - name: Verify native file tools without provider or Google calls
+        run: EVAL_NATIVE_CLI="$(command -v claude)" node --experimental-strip-types --test --test-name-pattern='pinned native' .github/tests/eval-actor.test.ts
+      - run: node .github/run.mjs build
+      - name: Run isolated native agent and independent outcome checks
+        run: sudo -E "$(command -v node)" --experimental-strip-types .github/eval/run.ts
+      - name: Retain private evidence even on failure
+        if: always() && !env.ACT
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: agent-feasibility-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ inputs.output }}
+          if-no-files-found: error
+          retention-days: 7
+      - name: Return local evidence ownership
+        if: always() && env.ACT
+        run: |
+          if [[ -n "${EVAL_OWNER_UID:-}" && -n "${EVAL_OWNER_GID:-}" ]]; then
+            sudo chown -R "$EVAL_OWNER_UID:$EVAL_OWNER_GID" /eval-evidence
+          fi

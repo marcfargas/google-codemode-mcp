@@ -332,6 +332,36 @@ uses explicit env/secret files, and does not bind-mount the repository or expose
 its account-password file to the container. It tests current working-tree bytes;
 a remote run tests its checked-out commit.
 
+### Agent feasibility gate
+
+`just eval` runs an actual native Claude agent through the built MCP Worker,
+using the local CLIProxyAPI and the dummy account configured below. It runs only
+on demand; ordinary checks never invoke a model.
+
+```sh
+just eval gmail claude-haiku-5-5 http://127.0.0.1:8317 /absolute/new/evidence-directory
+```
+
+The Gmail case requires discovery, retrieval of the server's `skill://` resource,
+reading and replying to an email, applying a label, and saving its attachment.
+Independent Google readback and exact file bytes determine success. The actor
+cannot access credentials, graders, or expected results. Each trial retains its
+trace, model/cache usage, criteria, and fixture cleanup receipt outside the checkout.
+Limits include five minutes, 18 model requests, 15,000 output tokens reserved
+conservatively, and a $1 native CLI cost estimate; the estimate is not actual
+proxy billing. There are no performer retries or automatic model fallbacks.
+
+Only Gmail is implemented. Drive, Sheets, Docs, and Calendar remain pending
+coverage targets; selecting them fails before model spending. This is a synthetic
+feasibility check, not acceptance of every host or service. See the
+[gate documentation](.github/eval/README.md) for isolation, usage accounting,
+offline regrading, and manual GitHub setup.
+
+The revised Haiku 5.5 pilot completed all Gmail task outcomes and read the skill,
+including saving the exact attachment bytes. The full gate remains **failed**
+because it skipped method discovery. Both pilot attempts are retained; the gate
+does not treat task success alone as proof of the discovery design.
+
 ### Initial test consent and CI secrets
 
 The supplied installed-app client defaults to

@@ -16,9 +16,9 @@ export interface ExecutionReceipt<T = unknown> {
 }
 
 /** Exercise the deployed bundle locally; Google outbound traffic is not mocked. */
-export async function openBuiltWorker() {
+export async function createBuiltWorker() {
   const bundle = await readFile('dist/worker.js', 'utf8');
-  const worker = new Miniflare({
+  return new Miniflare({
     workers: [
       {
         config: {
@@ -35,6 +35,10 @@ export async function openBuiltWorker() {
       },
     ],
   });
+}
+
+export async function openBuiltWorker() {
+  const worker = await createBuiltWorker();
   const client = new Client(
     { name: 'live-gmail-verification', version: '1' },
     { capabilities: {}, versionNegotiation: { mode: { pin: '2026-07-28' } } },

@@ -15,6 +15,14 @@ verify:
 live:
     node .github/act.mjs live
 
+# One on-demand native agent case; an optional second trial observes caching.
+eval $profile $model $proxy_url $output $repeats='1':
+    node .github/eval/act.mjs
+
+# Regrade one retained trial without Google or model requests.
+eval-regrade $saved $output:
+    node .github/eval/regrade.ts "$saved" "$output"
+
 # One-time installed-app consent; credentials stay outside the repository.
 oauth *args:
     node .github/oauth.mjs {{args}}

@@ -154,7 +154,13 @@ export async function handleMcp(request: Request, app: ProtocolApp): Promise<Res
           inputSchema: fromJsonSchema<{ path?: string }>(
             {
               type: 'object',
-              properties: { path: { type: 'string' } },
+              properties: {
+                path: {
+                  type: 'string',
+                  description:
+                    'Omit to list services. Follow returned paths to inspect versions, resources, methods, or schemas. Version paths use service/version; resource and method paths use service/version/resource.method.',
+                },
+              },
               additionalProperties: false,
             },
             validator,
