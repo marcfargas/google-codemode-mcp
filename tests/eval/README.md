@@ -349,7 +349,7 @@ download and rename checks through the locally built Worker: exact file bytes,
 metadata preservation, native mutation identity/fields and independent readback.
 Both fixture cleanups passed, with zero unknown mutations.
 
-Four paid actor attempts ran, one per required model/case, without retries:
+The original four planned actor attempts ran once per required model/case:
 
 | Case     | Sonnet 5.5           | Sol 6.1                                      |
 | -------- | -------------------- | -------------------------------------------- |
@@ -374,11 +374,25 @@ tokens, with a native CLI estimate of $0.0390245. Actual proxy billing is unknow
 these estimates use different sources and do not establish relative model cost.
 
 All four attempts had successful fixture cleanup and zero unknown mutations.
-The original Sol download **ERROR** and failed campaign remain unchanged; no
-download was repeated. This is partial qualification across two runner candidates,
-not a passing complete Drive suite. A fresh Sol download attempt on the repaired
-runner is still needed for full case coverage. Hosted Drive and actual target-host
-activation remain unverified.
+The original Sol download **ERROR** and failed campaign remain unchanged.
+
+After explicit authorization, one additional Sol download attempt ran on clean
+`84ef1bb` with `responses-loop-3`, the same five-minute/$1-estimate caps and no
+automatic retries. It passed all 13 criteria, including exact downloaded bytes,
+ordered discovery, actual skill retrieval, model identity and successful terminal
+completion. Offline regrading reproduced the pass without inference. Its 11
+responses reported 184,075 input tokens, including 155,392 cached tokens, and 705
+output tokens. The largest request was 133,336 bytes. The observed published-rate
+estimate was $0.0799552; actual proxy billing remains unknown. Cleanup passed,
+with zero unknown mutations.
+
+Both required models now have passing download and rename cases across retained
+runs. This is qualified case coverage across runner candidates, not a fresh
+complete-suite pass or reliability evidence. All five executed actors had
+successful cleanup and zero unknown mutations. Conditional Drive updates and
+live multi-page traversal remain unverified; the bounded fixtures do not prove
+those broader acceptance items. Hosted Drive and actual target-host activation
+also remain unverified.
 
 ## Native Codex capability probe
 
