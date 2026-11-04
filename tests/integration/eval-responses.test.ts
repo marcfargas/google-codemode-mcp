@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { handleMcp, type ProtocolApp } from '../../src/protocol.ts';
+import { createResponsesHandler } from '../eval/responses-relay.ts';
 import {
   createWorkspaceFiles,
   parseResponsesBody,
@@ -39,6 +40,7 @@ const completed = (output: Value[], id = 'response-1') => ({
 
 async function harness(
   responder: (payload: Value, index: number, workspace: string) => { body: unknown; sse?: boolean },
+  options: { description?: Value; cappedRelay?: boolean } = {},
 ) {
   const directory = await mkdtemp(join(tmpdir(), 'eval-responses-'));
   const workspace = join(directory, 'workspace');
@@ -66,7 +68,7 @@ async function harness(
     ],
     describe: async (args) => {
       application.push({ name: 'describe', args });
-      return { synthetic: true };
+      return options.description ?? { synthetic: true };
     },
     execute: async (args) => {
       application.push({ name: 'execute', args });
@@ -84,8 +86,13 @@ async function harness(
       hasUnknownOutcome: false,
     }),
   };
+  let relay: ReturnType<typeof createResponsesHandler> | undefined;
   const server = createServer(async (request, response) => {
     try {
+      if (request.url === '/v1/responses' && relay) {
+        await relay.handle(request, response);
+        return;
+      }
       let raw = '';
       for await (const chunk of request) raw += chunk;
       const payload = raw ? JSON.parse(raw) : {};
@@ -114,8 +121,11 @@ async function harness(
         response.end(text);
         return;
       }
-      assert.equal(request.url, '/v1/responses');
-      assert.equal(request.headers.authorization, 'Bearer local-eval-relay');
+      assert.equal(request.url, relay ? '/provider/v1/responses' : '/v1/responses');
+      assert.equal(
+        request.headers.authorization,
+        relay ? 'Bearer synthetic-upstream' : 'Bearer local-eval-relay',
+      );
       requests.push(payload);
       const result = responder(payload, requests.length, workspace);
       response.writeHead(200, {
@@ -126,14 +136,34 @@ async function harness(
           ? `event: response.completed\ndata: ${JSON.stringify({ type: 'response.completed', response: result.body })}\n\n`
           : JSON.stringify(result.body),
       );
-    } catch {
-      response.writeHead(500);
-      response.end();
+    } catch (error) {
+      response.writeHead(400, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ error: error instanceof Error ? error.message : 'failed' }));
     }
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  if (options.cappedRelay)
+    relay = createResponsesHandler({
+      proxyUrl: url + '/provider',
+      proxyKey: 'synthetic-upstream',
+      model: 'gpt-6.1-terra',
+      output: directory,
+      receipts: [],
+      redact: (value) => value,
+      allowedToolNames: () =>
+        requests[0]?.tools.map((tool: Value) => tool.name) ?? [
+          'mcp__google__describe',
+          'mcp__google__execute',
+          'mcp__google__gmail_fixture',
+          'ListMcpResourcesTool',
+          'ReadMcpResourceTool',
+          'Read',
+          'Write',
+        ],
+    });
   return {
+    url,
     directory,
     workspace,
     requests,
@@ -152,6 +182,7 @@ async function harness(
         emit: (event) => events.push(event),
       }),
     close: async () => {
+      relay?.abort();
       server.closeAllConnections();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await rm(directory, { recursive: true, force: true });
@@ -272,6 +303,68 @@ test('Responses runner uses actual MCP resources and exact tool schemas, preserv
   }
 });
 
+test('large MCP descriptions complete through the fixed relay cap with complete raw audits', async () => {
+  const description = {
+    schemas: { File: { type: 'object', properties: { name: { type: 'string' } } } },
+    description: 'x'.repeat(52_000) + 'Café — 東京 \\"\n',
+  };
+  const fixture = await harness(
+    (_payload, index) => ({
+      body: completed(
+        index <= 3
+          ? [call('mcp__google__describe', { path: 'drive/v3/files.get' }, `describe-${index}`)]
+          : [],
+        `large-${index}`,
+      ),
+    }),
+    { description, cappedRelay: true },
+  );
+  try {
+    await fixture.run();
+    assert.equal(fixture.requests.length, 4);
+    const events = fixture.events.filter((event) => event.type === 'responses.tool');
+    assert.equal(events.length, 3);
+    for (const event of events) {
+      assert.equal(event.output.content[0].text, JSON.stringify(description));
+      assert.deepEqual(event.output.structuredContent, description);
+    }
+    const latest = fixture.requests.at(-1)!;
+    const original = structuredClone(latest);
+    for (const item of latest.input.filter((item: Value) => item.type === 'function_call_output')) {
+      const event = events.find((event) => event.callId === item.call_id)!;
+      const { content: _duplicate, ...expected } = event.output;
+      assert.deepEqual(JSON.parse(item.output), expected);
+      original.input.find(
+        (entry: Value) => entry.call_id === item.call_id && entry.type === 'function_call_output',
+      ).output = JSON.stringify(event.output);
+    }
+    assert.ok(Buffer.byteLength(JSON.stringify(original)) > 262_144);
+    for (const request of fixture.requests)
+      assert.ok(Buffer.byteLength(JSON.stringify(request)) < 262_144);
+    assert.deepEqual(latest.tools, fixture.requests[0].tools);
+    assert.equal(latest.instructions, fixture.requests[0].instructions);
+    const refused = await fetch(fixture.url + '/v1/responses', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer local-eval-relay', 'Content-Type': 'application/json' },
+      body: JSON.stringify(original),
+    });
+    assert.equal(refused.status, 400);
+    assert.match(
+      ((await refused.json()) as Value).error,
+      /Responses input exceeds evaluation limit/,
+    );
+    assert.equal(fixture.requests.length, 4);
+    const recorded = (await readFile(join(fixture.directory, 'model-requests.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(recorded.at(-1).payload, latest);
+    assert.equal(fixture.events.at(-1)?.status, 'success');
+  } finally {
+    await fixture.close();
+  }
+});
+
 test('first model request receives actual attributed server instructions and resource metadata without skill contents or forced discovery', async () => {
   const fixture = await harness(() => ({ body: completed([]) }));
   try {
@@ -294,7 +387,7 @@ test('first model request receives actual attributed server instructions and res
     assert.ok(fixture.requests[0].instructions.startsWith('Generic caller instructions\n\n'));
     assert.ok(!JSON.stringify(fixture.requests[0]).includes('# Google Workspace Code Mode'));
     assert.deepEqual(fixture.events[0].mcpContext, expected);
-    assert.equal(fixture.events[0].runnerVersion, 'responses-loop-2');
+    assert.equal(fixture.events[0].runnerVersion, 'responses-loop-3');
     assert.deepEqual(
       fixture.mcp.map((request) => request.method),
       ['server/discover', 'tools/list', 'resources/list'],

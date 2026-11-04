@@ -77,14 +77,21 @@ advertised model IDs are checked before OAuth or fixtures; metadata availability
 does not establish successful inference.
 
 Claude runs through the pinned native CLI. GPT runs through a small isolated
-Responses loop (`responses-loop-2`), with tools copied from the actual MCP server,
+Responses loop (`responses-loop-3`), with tools copied from the actual MCP server,
 resource-list/read tools, and bounded UTF-8 workspace Read/Write tools. It sends
 self-contained history with storage disabled and preserves returned reasoning
-items and function outputs. It has no shell or built-in remote tools. This is a
+items and tool-result data. It has no shell or built-in remote tools. This is a
 model feasibility comparison across two runners, not native Codex, ChatGPT, or
 OpenClaw host qualification. Native Codex reached the MCP revision in a probe,
 but its available configuration did not establish the narrow tool surface used
 by this evaluation.
+
+In `responses-loop-3`, when an MCP tool result's sole plain
+text block exactly duplicates its structured JSON, send the structured copy and
+all other envelope fields to the model. Retain the complete raw result in audit
+events. Other content, host tools, discovery schemas and all gate limits remain
+unchanged. This removes redundant history; it does not guarantee that a longer
+discovery trajectory fits the request cap.
 
 Before live trials, synthetic loopback checks exercise both runners, including
 actual bundled GPT process isolation and file access refusals. Run these alone
@@ -334,6 +341,44 @@ unattempted cells, the original Sonnet/Sol budget failure, and the subsequent
 qualified accounting repair remain retained in the historical sections above.
 Actual target hosts, gateway deployment, hosted Cloudflare limits and Drive live
 behavior are separate acceptance boundaries.
+
+## Drive live qualification (2026-11-04)
+
+With the additional `drive.file` grant, `just live-drive` passed authenticated
+download and rename checks through the locally built Worker: exact file bytes,
+metadata preservation, native mutation identity/fields and independent readback.
+Both fixture cleanups passed, with zero unknown mutations.
+
+Four paid actor attempts ran, one per required model/case, without retries:
+
+| Case     | Sonnet 5.5           | Sol 6.1                                      |
+| -------- | -------------------- | -------------------------------------------- |
+| Download | All 13 criteria pass | Task, discovery and skill pass; runner error |
+| Rename   | All 13 criteria pass | All 13 criteria pass                         |
+
+The initial campaign stopped after Sol's download task completed: its terminal
+request was 262,621 bytes, exceeding the 262,144-byte relay cap. `responses-loop-2`
+serialized each MCP description's structured data and identical text fallback.
+The reviewed `responses-loop-3` repair removes only that exact duplicate from
+model-facing history, preserving the full raw audit and every other envelope
+field. Offline reconstruction matched all nine accepted request hashes and reduced
+the rejected next request to 130,255 bytes. Limits, discovery schemas and grading
+version 2 did not change. A longer trajectory can still reach the cap.
+
+The two unused rename attempts then passed on the repaired candidate. Sol used
+`responses-loop-3`; Sonnet used the unchanged native Claude runner. Sol's largest
+rename request was 178,035 bytes. Its nine responses reported 118,158 input tokens,
+including 76,672 cached tokens, and 572 output tokens; the observed published-rate
+estimate was $0.0963592. Sonnet reported 25,525 cache-read and 6,478 cache-creation
+tokens, with a native CLI estimate of $0.0390245. Actual proxy billing is unknown;
+these estimates use different sources and do not establish relative model cost.
+
+All four attempts had successful fixture cleanup and zero unknown mutations.
+The original Sol download **ERROR** and failed campaign remain unchanged; no
+download was repeated. This is partial qualification across two runner candidates,
+not a passing complete Drive suite. A fresh Sol download attempt on the repaired
+runner is still needed for full case coverage. Hosted Drive and actual target-host
+activation remain unverified.
 
 ## Native Codex capability probe
 

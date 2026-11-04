@@ -3,7 +3,7 @@ import { lstat, mkdir, open, realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 
-export const RESPONSES_RUNNER_VERSION = 'responses-loop-2';
+export const RESPONSES_RUNNER_VERSION = 'responses-loop-3';
 const FILE_LIMIT = 1_048_576;
 type Event = Record<string, any>;
 type FunctionTool = {
@@ -17,6 +17,40 @@ const object = (value: unknown): value is Event =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 const counter = (value: unknown) =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+
+/** Omit only MCP's exact JSON text fallback from the model-facing result. */
+export function projectMcpToolResult(value: unknown): unknown {
+  if (
+    !object(value) ||
+    !Object.hasOwn(value, 'content') ||
+    !Object.hasOwn(value, 'structuredContent') ||
+    !object(value.structuredContent) ||
+    !Array.isArray(value.content) ||
+    value.content.length !== 1
+  )
+    return value;
+  const block = value.content[0];
+  if (!object(block)) return value;
+  const keys = Reflect.ownKeys(block).filter((key) =>
+    Object.prototype.propertyIsEnumerable.call(block, key),
+  );
+  if (
+    keys.length !== 2 ||
+    !keys.includes('type') ||
+    !keys.includes('text') ||
+    block.type !== 'text' ||
+    typeof block.text !== 'string'
+  )
+    return value;
+  try {
+    if (block.text !== JSON.stringify(value.structuredContent)) return value;
+  } catch {
+    return value;
+  }
+  const projected = { ...value };
+  delete projected.content;
+  return projected;
+}
 
 export function parseResponsesTranscript(text: string, exitCode: number | null, timedOut = false) {
   const native: Event[] = [];
@@ -381,12 +415,14 @@ export async function runResponsesLoop(options: {
       }
       for (const call of calls) {
         let output: unknown;
+        let mcpResult = false;
         try {
           const args = JSON.parse(call.arguments);
           if (!object(args)) throw new Error('Tool arguments must be an object');
-          if (names.has(call.name))
+          if (names.has(call.name)) {
             output = await client.callTool({ name: names.get(call.name)!, arguments: args });
-          else if (call.name === 'Read') output = await files.Read(args);
+            mcpResult = true;
+          } else if (call.name === 'Read') output = await files.Read(args);
           else if (call.name === 'Write') output = await files.Write(args);
           else if (call.name === 'ListMcpResourcesTool') {
             if (
@@ -415,7 +451,7 @@ export async function runResponsesLoop(options: {
         input.push({
           type: 'function_call_output',
           call_id: call.call_id,
-          output: JSON.stringify(output),
+          output: JSON.stringify(mcpResult ? projectMcpToolResult(output) : output),
         });
       }
     }

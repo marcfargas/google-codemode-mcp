@@ -379,8 +379,12 @@ cases with Sonnet and Sol, including strict discovery and skill retrieval. See t
 The separate hosted synthetic Worker passed CPU/timeout/cancellation and bridge
 checks. The protected test Worker also ran the actual product against Gmail,
 using test-account tokens directly. Gateway adaptation is deployed in its owning project, but the Code Mode
-backend binding and provider-connected host journeys remain acceptance work. Drive has local synthetic verification; live qualification requires
-the additional test grant described below. Subsequent APIs are Sheets, Docs, and
+backend binding and provider-connected host journeys remain acceptance work. Drive's
+authenticated download/rename checks passed, as did Sonnet's download and both
+models' rename agent cases. Sol's download task completed, but its runner failed
+at the request-size cap; full Drive agent qualification remains open. See the
+[Drive results](tests/eval/README.md#drive-live-qualification-2026-11-04).
+Subsequent APIs are Sheets, Docs, and
 Calendar, in that order. Tasks and replay are deferred.
 
 [Project scope and remaining acceptance](https://github.com/marcfargas/google-codemode-mcp/issues/1).
