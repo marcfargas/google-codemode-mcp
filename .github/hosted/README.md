@@ -121,6 +121,16 @@ until the owner reduces the bootstrap token and a subsequent deploy succeeds.
 Bootstrap Workers Admin and Access rights are no longer needed for the existing
 resources or invoking these tests.
 
+A subsequent redeployment succeeded with the owner's reported non-Admin,
+Worker-scoped Editor configuration, which retained Access permission entries.
+Version `b4013671-7b58-4dbc-97db-eb05d95afd2d` served the same retained bundle at
+100%; identity matched, missing credentials returned 403 and a wrong secret
+returned 401. Access application/policy reads returned 403 with that token.
+Token-policy introspection was unavailable, so this proves the supplied reduced
+configuration works, rather than a credential containing only Editor. The 11
+runtime probes above retain their original version identity; stress was not
+repeated for this deployment.
+
 ## Prepare without deployment
 
 Run from the checkout with installed pinned dependencies:
