@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       profile:
-        description: Service profile (Gmail implemented; others are coverage failures)
+        description: Service profile (Gmail and Drive implemented; others are coverage failures)
         required: true
         default: gmail
         type: string
@@ -13,6 +13,10 @@ on:
         type: string
       selection:
         description: Matrix selection (required, all, or comma-separated cell IDs); omit for one model
+        required: false
+        type: string
+      cases:
+        description: Independent service cases (all or comma-separated IDs); omit for default case
         required: false
         type: string
       proxy_url:
@@ -41,11 +45,12 @@ jobs:
   evaluate:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 75
     env:
       EVAL_PROFILE: ${{ inputs.profile }}
       EVAL_MODEL: ${{ inputs.model }}
       EVAL_SELECTION: ${{ inputs.selection }}
+      EVAL_CASES: ${{ inputs.cases }}
       EVAL_PROXY_URL: ${{ inputs.proxy_url }}
       EVAL_OUTPUT: ${{ inputs.output }}
       EVAL_REPEATS: ${{ inputs.repeats }}

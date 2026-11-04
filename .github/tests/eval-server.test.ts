@@ -4,8 +4,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { startEvalServer, TOKEN_SENTINEL, type McpEvent } from '../eval/server.ts';
-import { gradeMechanisms, gradeModel } from '../eval/run.ts';
+import { startEvalServer, TOKEN_SENTINEL } from '../eval/server.ts';
+import { gradeModel } from '../eval/run.ts';
 
 test('agent relay injects tokens only at the trusted boundary and fences unknown writes across executions', async () => {
   const output = await mkdtemp(join(tmpdir(), 'eval-relay-'));
@@ -25,6 +25,7 @@ test('agent relay injects tokens only at the trusted boundary and fences unknown
         result: {
           structuredContent: {
             hasUnknownOutcome: true,
+            outcomesComplete: true,
             outcomes: [
               { path: 'gmail/v1/users.messages.send', mutation: true, outcome: 'unknown' },
             ],
@@ -130,59 +131,6 @@ test('LLM relay forwards cache controls, preserves receipts and limits requests 
   }
 });
 
-test('mechanism grading rejects no-ops, missing skill retrieval and unknown writes', () => {
-  assert.ok(
-    gradeMechanisms([])
-      .filter((criterion) => criterion.id !== 'actor_mutation_surface')
-      .every((criterion) => criterion.status === 'fail'),
-  );
-  const audit: McpEvent[] = [
-    {
-      method: 'tools/call',
-      params: { name: 'describe', arguments: {} },
-      status: 200,
-      response: { result: { structuredContent: { services: [{ name: 'gmail' }] } } },
-    },
-    {
-      method: 'tools/call',
-      params: { name: 'describe', arguments: { path: 'gmail/v1/users.messages.get' } },
-      status: 200,
-      response: { result: { structuredContent: { signature: 'get(params)' } } },
-    },
-    {
-      method: 'resources/read',
-      params: { uri: 'skill://google-codemode-mcp/google-workspace/SKILL.md' },
-      status: 200,
-      response: { result: { contents: [{ text: '# Google Workspace Code Mode' }] } },
-    },
-    {
-      method: 'tools/call',
-      params: { name: 'execute' },
-      status: 200,
-      response: {
-        result: {
-          structuredContent: {
-            outcomes: [
-              { path: 'gmail/v1/users.messages.send', mutation: true, outcome: 'acknowledged' },
-            ],
-          },
-        },
-      },
-    },
-  ];
-  assert.ok(gradeMechanisms(audit).every((criterion) => criterion.status === 'pass'));
-  audit.push({
-    ...audit[3],
-    response: {
-      result: { structuredContent: { outcomes: [{ mutation: true, outcome: 'unknown' }] } },
-    },
-  });
-  assert.equal(
-    gradeMechanisms(audit).find((criterion) => criterion.id === 'send_ledger')?.status,
-    'fail',
-  );
-});
-
 test('model identity requires complete receipts from the selected model', () => {
   assert.equal(gradeModel('selected', []).status, 'unknown');
   assert.equal(
@@ -265,7 +213,9 @@ test('a concurrent execution cannot pass the outer fence', async () => {
       entered();
       await waiting;
       return Response.json({
-        result: { structuredContent: { outcomes: [], hasUnknownOutcome: false } },
+        result: {
+          structuredContent: { outcomes: [], outcomesComplete: true, hasUnknownOutcome: false },
+        },
       });
     },
   });
@@ -404,6 +354,129 @@ test('closing aborts upstream inference and waits for its retained failure recei
     await relay.close();
     proxy.closeAllConnections();
     await new Promise<void>((resolve) => proxy.close(() => resolve()));
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test('relay ordinals reflect full response completion across overlapping discovery and execution', async () => {
+  const output = await mkdtemp(join(tmpdir(), 'eval-order-'));
+  let entered!: () => void;
+  const entering = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  let finish!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const relay = await startEvalServer({
+    output,
+    model: 'model',
+    accessToken: 'secret',
+    proxyKey: 'key',
+    proxyUrl: 'http://127.0.0.1:1',
+    dispatch: async (request) => {
+      const rpc = (await request.json()) as any;
+      if (rpc.params.name === 'describe') {
+        return new Response(
+          new ReadableStream({
+            async start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"result":'));
+              entered();
+              await waiting;
+              controller.enqueue(
+                new TextEncoder().encode(
+                  '{"structuredContent":{"path":"gmail/v1/users.messages.get","signature":"get(params)"}}}',
+                ),
+              );
+              controller.close();
+            },
+          }),
+        );
+      }
+      return Response.json({
+        result: {
+          structuredContent: { outcomes: [], outcomesComplete: true, hasUnknownOutcome: false },
+        },
+      });
+    },
+  });
+  const invoke = (name: string) =>
+    fetch(relay.url + '/mcp', {
+      method: 'POST',
+      body: JSON.stringify({
+        method: 'tools/call',
+        params: {
+          name,
+          arguments:
+            name === 'describe'
+              ? { path: 'gmail/v1/users.messages.get' }
+              : { accessToken: TOKEN_SENTINEL },
+        },
+      }),
+    });
+  try {
+    const discovery = invoke('describe');
+    await entering;
+    assert.equal(relay.audit[0].startedOrdinal, 1);
+    assert.equal(relay.audit[0].completedOrdinal, undefined);
+    await (await invoke('execute')).text();
+    assert.equal(relay.audit[1].startedOrdinal, 2);
+    assert.equal(relay.audit[1].completedOrdinal, 3);
+    finish();
+    await (await discovery).text();
+    assert.equal(relay.audit[0].completedOrdinal, 4);
+    const retained = (await readFile(join(output, 'mcp.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(retained, [relay.audit[1], relay.audit[0]]);
+    const attempts = (await readFile(join(output, 'mcp-attempts.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(
+      attempts.map((event) => [event.startedOrdinal, event.completedOrdinal]),
+      [
+        [1, undefined],
+        [2, undefined],
+      ],
+    );
+  } finally {
+    finish();
+    await relay.close();
+    await rm(output, { recursive: true, force: true });
+  }
+});
+
+test('unparseable response retains the started ordinal without a fabricated completion', async () => {
+  const output = await mkdtemp(join(tmpdir(), 'eval-order-invalid-'));
+  const relay = await startEvalServer({
+    output,
+    model: 'model',
+    accessToken: 'secret',
+    proxyKey: 'key',
+    proxyUrl: 'http://127.0.0.1:1',
+    dispatch: async () => new Response('{unfinished'),
+  });
+  try {
+    await (
+      await fetch(relay.url + '/mcp', {
+        method: 'POST',
+        body: JSON.stringify({
+          method: 'tools/call',
+          params: { name: 'execute', arguments: { accessToken: TOKEN_SENTINEL } },
+        }),
+      })
+    ).text();
+    assert.equal(relay.audit[0].startedOrdinal, 1);
+    assert.equal(relay.audit[0].completedOrdinal, undefined);
+    assert.equal(relay.hasUnknownMutation, true);
+    assert.deepEqual(
+      JSON.parse((await readFile(join(output, 'mcp.jsonl'), 'utf8')).trim()),
+      relay.audit[0],
+    );
+  } finally {
+    await relay.close();
     await rm(output, { recursive: true, force: true });
   }
 });

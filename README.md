@@ -1,7 +1,7 @@
 # google-codemode-mcp
 
 Google Workspace APIs through native Google Discovery and server-side Code Mode.
-The first usable local slice supports **Gmail v1** on Cloudflare Workers.
+The local product supports **Gmail v1 and Drive v3** on Cloudflare Workers.
 
 The MCP endpoint is `/mcp`, targeting revision **2026-07-28** directly. Each message
 is an independent HTTP POST with a finite JSON response. There are no protocol
@@ -24,9 +24,11 @@ workflow checks directly on the host. `just build` prepares a Wrangler deploymen
 publishing it.
 
 The service expects the authenticated gateway/caller to supply short-lived Google
-OAuth credentials through the `accessToken` tool argument. The existing CFA
-gateway currently projects Google credentials into an Authorization header; it
-needs an adapter to populate this argument. The deployed MCP service does not acquire,
+OAuth credentials through the `accessToken` tool argument. The CFA gateway's
+separate `google-codemode` adapter hides this input from agents and injects the
+caller's Google grant for execution. Its source and synthetic integration tests
+are implemented in `bgbl-mcp-gateway`; hosted binding and caller acceptance remain
+unverified. The deployed MCP service does not acquire,
 refresh, or retain credentials. Request arguments are visible to the submitting
 host; keep credential injection in the trusted caller.
 
@@ -121,6 +123,15 @@ Dry-runs validate bundling and option compatibility. Account permissions, DNS,
 Workers Builds execution, hosted Worker Loader behavior, and CPU-limit enforcement
 still require hosted verification. No hosted deployment has been performed.
 
+The [hosted verification harness](.github/hosted/README.md) prepares a separate
+private Worker with fixed synthetic probes, then checks its exact deployed
+version through an existing protected ingress. Run `just hosted-prepare OUTPUT`
+without credentials; after deployment, `just hosted-verify OUTPUT` uses the
+documented `HOSTED_*` environment settings. It checks native CPU termination,
+the 15-second asynchronous timeout, late-call fencing, multiple bridge calls and
+healthy follow-ups. Local tests cover these paths except hosted CPU enforcement.
+An external timeout or generic resource error cannot pass the CPU criterion.
+
 ## HTTP connection contract
 
 Send JSON-RPC to `POST /mcp`. Every request includes
@@ -177,6 +188,11 @@ this protocol revision or use an adapting gateway.
 
 ## Discover, then execute
 
+Selected method `parameters`, generated declarations, and runtime validation share
+one supported top-level parameter policy. Descriptions identify excluded native
+parameters and their reasons; native request-body fields remain intact. A method
+requiring an excluded parameter is marked unsupported and has no callable signature.
+
 The two core tools are `describe` and `execute`. Deployment snippets can add tools.
 Start with `describe({})`, then progressively select a service, resource, or method:
 
@@ -192,7 +208,7 @@ alternatives, source/revision, transport support, and documentation links. Metho
 come from Google's Discovery document; there is no handwritten method catalog.
 Successful documents are cached for the Worker isolate's lifetime. Failed loads
 can be retried. The first slice accepts no revision pin or refresh command.
-Executions that use Discovery report the loaded source and revision.
+Executions report an array of all loaded service sources and revisions.
 
 Submit an async JavaScript function body:
 
@@ -217,16 +233,57 @@ still have `nextPageToken`; programs decide whether to fetch another page.
 
 The dispatcher reuses Google's dynamic Node Discovery client and validates native
 parameters at its boundary. Credential arguments, SDK transport options, arbitrary
-headers/URLs, callbacks, streams, and media overrides are rejected. Sandbox
-networking is denied by workerd. JSON requests/responses are supported, including
-Gmail base64url message/attachment fields. Media uploads/downloads and artifacts
-are not implemented in this slice. Scope availability for opaque tokens is
+headers/URLs, callbacks, streams, and unsupported media overrides are rejected.
+Sandbox networking is denied by workerd. JSON requests/responses include Gmail
+base64url message/attachment fields. Drive media reads use the bounded channel
+below. Media uploads and durable artifacts remain unavailable. Scope availability for opaque tokens is
 `unknown`; Discovery scopes describe alternatives and do not grant access.
+
+### Drive metadata and bounded files
+
+Discover `drive/v3/files.list`, `drive/v3/files.get`, or `drive/v3/files.update`
+before using `google.drive({version: 'v3'})`. Native JSON metadata and PATCH
+request bodies are preserved. For example, `files.update({fileId: inputs.id,
+requestBody: {name: inputs.name}})` renames an existing file.
+
+Methods declaring `runtime.mediaDownload` expose their media selection and byte
+limit. `files.get({fileId: inputs.id, alt: 'media'})` returns `.data` as
+`{encoding: 'base64', data, size, mimeType, sha256}`. `data` is standard base64;
+`size` and SHA-256 describe the original bytes, including arbitrary binary files.
+`files.export` uses this envelope directly, with a discovered export MIME type.
+Downloads are limited to **131072 raw bytes** and the execution's overall output
+limit still applies. Metadata reads retain Google's normal JSON `.data` shape.
+The host decodes the bytes when saving a file; this Worker has no durable artifact
+store. Gmail attachments continue to use Google's native base64url JSON fields.
+
+`just oauth --drive` requests `gmail.modify` and `drive.file` for the dedicated
+test user. The latter covers files created by this OAuth client; it does not grant
+access to every file in the account. Enable Drive API in that client's GCP project.
+`just live-drive` verifies the built Worker with owned file fixtures, exact byte
+readback, a native rename and cleanup. The manual agent suite is:
+
+```sh
+just eval-gmail http://127.0.0.1:8317 /absolute/new/gmail-evidence
+just eval-drive http://127.0.0.1:8317 /absolute/new/drive-evidence
+```
+
+Gmail selects six independent cases and the required Sonnet/Sol pair (12 attempts,
+maximum $12 in per-attempt estimates). Drive selects download and rename (four
+attempts, maximum $4 in estimates). Each attempt retains the five-minute wall,
+request/output and $1 estimate limits. Provider billing remains separate. These
+commands are on demand; ordinary checks make no model or Google requests.
+
+Grading version 2 requires every ledger method, including snippet calls and
+failed calls, to have a successful matching description completed before that
+execution starts. Root discovery and the actual Workspace resource read must
+complete before the first execution. Trusted relay ordinals establish ordering;
+missing/truncated evidence stays unknown. Old trial results remain unchanged,
+and offline regrades write separate evidence without new Google or model calls.
 
 ## Mutation outcomes
 
 Each execution returns `requestId`, `status`, `result`, bounded `logs`, `outcomes`,
-`hasUnknownOutcome`, and Discovery provenance. The trusted dispatcher records call
+`outcomesComplete`, `hasUnknownOutcome`, and Discovery provenance. The trusted dispatcher records call
 outcomes even when the program catches an exception:
 
 | Outcome          | Meaning                                                                                                      |
@@ -288,8 +345,9 @@ The official MCP Skills extension and Resources expose
 [skills/google-workspace/SKILL.md](skills/google-workspace/SKILL.md). It is also a
 standard skill directory suitable for host packaging. Claude, ChatGPT, and
 OpenClaw remain the host targets; their concrete tool, Code Mode, and Skills paths
-still need qualification. The existing gateway's Skills forwarding is also
-unverified.
+still need qualification. The gateway now implements namespaced Resources and
+native Skills forwarding, with local SDK and workerd proof; activation in each
+target host remains unverified.
 
 The separate [Google Developer Knowledge MCP](https://developers.google.com/knowledge/mcp)
 is configured for this project's Codex environment in `.codex/config.toml`. Its
@@ -304,10 +362,15 @@ isolation, failure outcomes, timeout/unawaited-call fencing, snippets, and the
 actual Wrangler build. Workspace responses are synthetic in these checks.
 
 Live Gmail reads, labels, drafts, and controlled self-send passed locally and on
-GitHub, as recorded below. No hosted deployment has been performed. Gateway
-adaptation, hosted CPU enforcement, and all three host integrations remain
-acceptance work. Subsequent APIs are Drive,
-Sheets, Docs, and Calendar, in that order. Tasks and replay are deferred.
+GitHub, as recorded below. The six independent Gmail agent cases completed their
+task outcomes with both required models; the stricter discovery gate still fails
+for Sonnet on attachment and pagination. See the
+[versioned results](.github/eval/README.md#independent-gmail-cases-with-grading-version-2-2026-11-04).
+No hosted deployment has been performed. Gateway source adaptation is locally
+verified in its owning project; hosted binding, CPU enforcement, and all three
+host integrations remain acceptance work. Drive has local synthetic verification; live qualification requires
+the additional test grant described below. Subsequent APIs are Sheets, Docs, and
+Calendar, in that order. Tasks and replay are deferred.
 
 [Project scope and remaining acceptance](https://github.com/marcfargas/google-codemode-mcp/issues/1).
 
@@ -377,7 +440,7 @@ Limits include five minutes, 18 model requests, 15,000 output tokens reserved
 conservatively, and a $1 estimate per cell (native CLI for Claude, recorded published
 token rates for GPT). Estimates are separate from actual proxy billing. There are no performer retries or automatic model fallbacks.
 
-Only Gmail is implemented. Drive, Sheets, Docs, and Calendar remain pending
+Gmail and Drive profiles are implemented. Sheets, Docs, and Calendar remain pending
 coverage targets; selecting them fails before model spending. This is a synthetic
 feasibility check, not acceptance of every host or service. See the
 [gate documentation](.github/eval/README.md) for isolation, usage accounting,
@@ -391,13 +454,16 @@ All attempted cells cleaned up successfully with no unknown mutations. The
 [gate results](.github/eval/README.md#first-model-matrix-2026-11-04) retain these
 failures, observed cache counters, estimates, and the unattempted cells.
 
-The current required models each have one passing attempt: Sonnet after fixing
+Under the earlier grading version, each required model had one passing attempt: Sonnet after fixing
 instruction handoff and clarifying product guidance; Sol after additionally fixing
 conservative budget settlement. Both completed the Gmail task, discovery, skill
 retrieval, and cleanup with zero unknown mutations. These are separate harness
 candidates, not a fresh pair pass or a reliability claim. The earlier failed pair
 remains retained. See the [qualified results](.github/eval/README.md#sol-validation-with-accounting-version-2-2026-11-04)
-for cost/cache evidence and the method criterion's coverage limits.
+for cost/cache evidence and the earlier method criterion's coverage limits. The
+current grader requires every used method to be described before execution; the
+[independent case results](.github/eval/README.md#independent-gmail-cases-with-grading-version-2-2026-11-04)
+retain the remaining Sonnet discovery failures and the corrected pagination grades.
 
 ### Initial test consent and CI secrets
 
@@ -454,7 +520,7 @@ leave a fixture without a returned ID. Its run markers support later
 reconciliation; a missing search result is not proof that no write happened.
 
 A successful live run qualifies the production bundle against live Gmail. Hosted Cloudflare
-CPU enforcement, CFA gateway adaptation, and Claude/ChatGPT/OpenClaw integration
+CPU enforcement, hosted gateway adaptation, and Claude/ChatGPT/OpenClaw integration
 remain separate acceptance work.
 
 Live Gmail verification passed locally through `act` and on

@@ -5,7 +5,10 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { gradeGmail, type GmailExpected, type GmailObservation } from './gmail.ts';
 import { parseActorTranscript, summarizeActorUsage } from './actor.ts';
-import { gradeMechanisms, gradeModel } from './run.ts';
+import { gradeModel } from './run.ts';
+import { gradeMechanisms, GRADING_VERSION } from './mechanisms.ts';
+import { getGmailCase } from './cases.ts';
+import { getDriveCase, gradeDrive, type DriveExpected, type DriveObservation } from './drive.ts';
 import type { McpEvent } from './server.ts';
 
 type RecordValue = Record<string, any>;
@@ -14,17 +17,54 @@ const json = (file: string, value: unknown) =>
   writeFile(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
 
 export function gradeSavedEvidence(evidence: {
-  expected: GmailExpected | null;
-  observation: GmailObservation | null;
+  expected: GmailExpected | DriveExpected | null;
+  observation: GmailObservation | DriveObservation | null;
   files: Record<string, string> | null;
   actor: RecordValue | null;
   audit: McpEvent[];
+  attempts?: McpEvent[] | null;
   receipts: RecordValue[];
   source: RecordValue | null;
   original: RecordValue | null;
   evidenceErrors: string[];
 }) {
   const { expected, observation, files, actor, audit, receipts, source, original } = evidence;
+  let currentCaseVersion: number | null = null;
+  try {
+    currentCaseVersion = (
+      source?.profile === 'drive' ? getDriveCase(expected?.caseId) : getGmailCase(expected?.caseId)
+    ).version;
+  } catch {
+    evidence.evidenceErrors.push('Unknown retained case identity');
+  }
+  // Attempt records survive a process ending before the completed-response log.
+  // Retain unmatched starts so an abandoned final execution cannot disappear.
+  const retainedAudit = [...audit];
+  const attempts = evidence.attempts;
+  if (Array.isArray(attempts)) {
+    const seen = new Set<number>();
+    for (const attempt of attempts) {
+      const matches = audit.filter(
+        (event) =>
+          attempt?.startedOrdinal !== undefined && event?.startedOrdinal === attempt.startedOrdinal,
+      );
+      if (
+        !attempt ||
+        attempt.completedOrdinal !== undefined ||
+        attempt.status !== 0 ||
+        attempt.response?.pending !== true ||
+        seen.has(attempt.startedOrdinal!) ||
+        matches.length !== 1 ||
+        matches[0].method !== attempt.method ||
+        JSON.stringify(matches[0].params) !== JSON.stringify(attempt.params)
+      )
+        retainedAudit.push(attempt);
+      if (attempt) seen.add(attempt.startedOrdinal!);
+    }
+    for (const event of audit)
+      if (!seen.has(event?.startedOrdinal!))
+        retainedAudit.push({ ...event, completedOrdinal: undefined });
+  }
   const safeGrade = (
     id: string,
     grade: () => { id: string; status: string; evidence: string }[],
@@ -38,7 +78,9 @@ export function gradeSavedEvidence(evidence: {
   };
   const task = safeGrade('task_evidence', () =>
     expected
-      ? gradeGmail(expected, observation, files ?? {})
+      ? 'fileId' in expected
+        ? gradeDrive(expected, observation as DriveObservation | null, files ?? {}, retainedAudit)
+        : gradeGmail(expected, observation as GmailObservation | null, files ?? {}, retainedAudit)
       : [
           {
             id: 'task_evidence',
@@ -70,7 +112,9 @@ export function gradeSavedEvidence(evidence: {
     !!original?.error ||
     !!original?.relayCloseError ||
     !!original?.cleanupError;
-  const outerUnknown = audit.some((event) => event.response?.outerUnknown === true);
+  const outerUnknown = retainedAudit.some(
+    (event) => event?.response?.outerUnknown === true || event?.response?.pending === true,
+  );
   const mutationCertain = original?.hasUnknownMutation === false && !outerUnknown;
   const fileAgreement =
     actor &&
@@ -79,7 +123,22 @@ export function gradeSavedEvidence(evidence: {
       JSON.stringify(Object.entries(files).sort());
   const criteria = [
     ...task,
-    ...safeGrade('mechanism_evidence', () => gradeMechanisms(audit)),
+    ...safeGrade('mechanism_evidence', () => {
+      const criteria = gradeMechanisms(
+        retainedAudit,
+        (source?.profile === 'drive'
+          ? getDriveCase(expected?.caseId)
+          : getGmailCase(expected?.caseId)
+        ).policy,
+      );
+      return attempts === null
+        ? criteria.map((criterion) => ({
+            ...criterion,
+            status: 'unknown',
+            evidence: 'Retained MCP attempt log unavailable; complete dispatch coverage is unknown',
+          }))
+        : criteria;
+    }),
     ...safeGrade('model_identity', () => [
       gradeModel(typeof source?.requestedModel === 'string' ? source.requestedModel : '', receipts),
     ]),
@@ -121,6 +180,9 @@ export function gradeSavedEvidence(evidence: {
     },
   ];
   return {
+    gradingVersion: GRADING_VERSION,
+    caseId: expected?.caseId ?? 'combined',
+    currentCaseVersion,
     status:
       originalError || (cleanupKnown && !cleanupClean)
         ? 'error'
@@ -184,6 +246,7 @@ export async function regradeTrial(saved: string, output: string) {
   const files = await load('files.json');
   const actor = await load('actor-result.json');
   const audit = await load('mcp.jsonl', undefined, true);
+  const attempts = await load('mcp-attempts.jsonl', undefined, true);
   const receipts = await load('model-receipts.jsonl', undefined, true);
   const result = gradeSavedEvidence({
     source,
@@ -193,10 +256,20 @@ export async function regradeTrial(saved: string, output: string) {
     files,
     actor,
     audit: audit ?? [],
+    attempts,
     receipts: receipts ?? [],
     evidenceErrors,
   });
-  const gradingFiles = ['regrade.ts', 'gmail.ts', 'run.ts', 'actor.ts', 'responses.ts'];
+  const gradingFiles = [
+    'regrade.ts',
+    'mechanisms.ts',
+    'gmail.ts',
+    'drive.ts',
+    'cases.ts',
+    'run.ts',
+    'actor.ts',
+    'responses.ts',
+  ];
   const gradingIdentity = {
     revision:
       spawnSync('git', ['rev-parse', 'HEAD'], { cwd: checkout, encoding: 'utf8' }).stdout.trim() ||

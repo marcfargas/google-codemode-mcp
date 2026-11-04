@@ -3,16 +3,20 @@ import { mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { localCredentials } from './secrets.mjs';
+import { acquireLocalEvalLock } from './eval/act.mjs';
 
 const target = process.argv[2] ?? 'check';
-if (!['check', 'live'].includes(target)) throw new Error('Use check or live');
+if (!['check', 'live', 'live-drive'].includes(target))
+  throw new Error('Use check, live, or live-drive');
+const live = target.startsWith('live');
+const release = live ? await acquireLocalEvalLock() : undefined;
 const directory = await mkdtemp(join(tmpdir(), 'google-codemode-act-'));
 try {
   const empty = join(directory, 'empty');
   const secrets = join(directory, 'secrets');
   const event = join(directory, 'event.json');
   await writeFile(empty, '', { mode: 0o600 });
-  const credentials = target === 'live' ? await localCredentials() : {};
+  const credentials = live ? await localCredentials() : {};
   await writeFile(
     secrets,
     Object.entries(credentials)
@@ -33,9 +37,9 @@ try {
     { mode: 0o600 },
   );
   const artifacts = join(process.cwd(), 'dist', 'act-artifacts');
-  if (target === 'live') await mkdir(artifacts, { recursive: true });
+  if (live) await mkdir(artifacts, { recursive: true });
   const args = [
-    target === 'live' ? 'workflow_dispatch' : 'push',
+    live ? 'workflow_dispatch' : 'push',
     '-W',
     `.github/workflows/${target}.yml`,
     '-j',
@@ -49,7 +53,7 @@ try {
     event,
     '-P',
     'ubuntu-latest=catthehacker/ubuntu:act-latest',
-    ...(target === 'live' ? ['--artifact-server-path', artifacts] : []),
+    ...(live ? ['--artifact-server-path', artifacts] : []),
     '--container-daemon-socket',
     '-',
   ];
@@ -60,5 +64,9 @@ try {
   });
   process.exitCode = status;
 } finally {
-  await rm(directory, { recursive: true, force: true });
+  try {
+    await rm(directory, { recursive: true, force: true });
+  } finally {
+    await release?.();
+  }
 }

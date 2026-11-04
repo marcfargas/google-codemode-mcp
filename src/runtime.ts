@@ -4,6 +4,7 @@ import type { DiscoveryCatalog } from './discovery.ts';
 import { createDispatcher } from './dispatcher.ts';
 import { validateSnippetInput } from './snippets.ts';
 import type { SnippetDefinition } from './snippets.ts';
+import { SERVICES } from './services.ts';
 
 export interface ExecutionArguments {
   accessToken: string;
@@ -59,12 +60,12 @@ function __nativeProxy(parts) {
     }
   });
 }
-const google = Object.freeze({gmail(options) {
-  if (!options || options.version !== 'v1' || Object.keys(options).some(k => k !== 'version')) {
-    throw new Error('Use google.gmail({version: "v1"}); client transport overrides are forbidden');
+const google = Object.freeze(Object.fromEntries(${JSON.stringify(Object.values(SERVICES).map(({ name, version }) => ({ name, version })))}.map(service => [service.name, function(options) {
+  if (!options || options.version !== service.version || Object.keys(options).some(k => k !== 'version')) {
+    throw new Error('Use the discovered Google service version; client transport overrides are forbidden');
   }
-  return __nativeProxy(['gmail/v1/']);
-}});
+  return __nativeProxy([service.name + '/' + service.version + '/']);
+}])));
 const snippets = Object.freeze({run: async (name, input = {}) => {
   const outcome = await hostBridge.snippet(name, input);
   if (!outcome.ok) throw new Error(outcome.error);
@@ -167,6 +168,7 @@ export async function executeProgram(options: {
           .map((s) => s.slice(0, 4096))
       : [],
     outcomes: dispatcher.outcomes,
+    outcomesComplete: dispatcher.outcomesComplete,
     hasUnknownOutcome: dispatcher.hasUnknownOutcome,
     discovery: catalog.provenance,
     scopeAvailability: 'unknown',

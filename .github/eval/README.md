@@ -1,5 +1,38 @@
 # Agent feasibility gate
 
+## Independent cases and grading version 2
+
+Grading version 2 requires each native method in the trusted execution
+ledger to have a matching successful description completed before execution
+starts. Root discovery and the actual Workspace resource read must also finish
+before the first execution. This includes Google calls inside snippets. Older
+traces without causal ordering remain unqualified under the new criterion; their
+original grades stay unchanged.
+
+Independent cases cover read/search, reply, attachment, labels, pagination,
+and safe failure handling. Each has fresh fixtures and an actor workspace, exact
+answer/file or independent Google state checks, case-specific mutation limits,
+and cleanup. One required Sonnet/Sol attempt per case permits twelve attempts,
+each retaining the existing five-minute and $1 estimate caps: at most $12 in
+estimates, separate from proxy billing. Ordinary checks remain inference-free.
+
+Run the six-case required-pair suite with `just eval-gmail PROXY_URL NEW_OUTPUT`.
+Optional trailing arguments select comma-separated cases and model cells; the
+$12 maximum above describes the default required-pair campaign, not arbitrary
+larger selections. `just eval-matrix gmail ...` retains the legacy combined case.
+Hosted Cloudflare and actual host/gateway acceptance remain separate from local
+runner results.
+
+Drive has two independent cases: `read-file` and `rename-file`. Run
+`just eval-drive PROXY_URL NEW_OUTPUT` after `just oauth --drive` and enabling
+Drive API. The default required pair permits four attempts, each under its $1
+estimate/five-minute caps. Fixtures are app-created files under `drive.file`,
+with independent content/metadata/parents checks and known-ID cleanup. The agent
+file case uses UTF-8 content because runner Write tools accept text; synthetic
+native-SDK tests separately verify arbitrary binary and JSON-MIME downloads.
+The server media envelope is bounded to 131072 raw bytes; uploads/artifact storage
+remain deferred.
+
 Run the required pair, or explicitly select all six cells:
 
 ```sh
@@ -19,7 +52,8 @@ retain their original Sonnet/Terra roles and are not reclassified.
 The Responses runner supplies the server's actual instructions and resource metadata to the model. Skill contents still
 require a model-requested resource read. Shared tool descriptions and root
 navigation explain starting at the service catalog, reading the Workspace skill,
-and inspecting methods before executing. Grading and budgets remain unchanged.
+and inspecting methods before executing. Budgets remain unchanged; grading
+version 2 adds complete method coverage and causal ordering.
 
 The optional last argument selects `required` (default), `all`, or comma-separated
 cell IDs. Cells run sequentially in manifest order, once each, with fresh fixtures
@@ -80,11 +114,11 @@ or expected file. It must use server discovery and the actual `skill://` resourc
 Independent Gmail readback and file hashes grade the result. Task success and
 discovery/skill evidence are separate criteria; both must pass the gate.
 
-Drive (find/read a fixture file), Sheets (read/update a fixture cell), Docs
-(read/append to a fixture document), and Calendar (find/update a fixture event)
-are named coverage targets. They are unsupported by the current product and
+Sheets (read/update a fixture cell), Docs (read/append to a fixture document),
+and Calendar (find/update a fixture event) are named coverage targets. They are
+unsupported by the current product and
 must remain visible as pending. Selecting an unsupported service profile (including profile `all`) fails
-coverage before spending on a model. Gmail success does not qualify those APIs.
+coverage before spending on a model. Gmail or Drive success does not qualify those APIs.
 
 The trusted harness replaces a documented `accessToken` placeholder through a
 loopback HTTP relay. It also supplies proxy authentication outside the acting
@@ -102,15 +136,15 @@ transport, model, task, mechanism, and cleanup failures. Unknown mutations fail
 the attempt and stop later actor calls; no send is retried. Cleanup uses known
 fixture IDs and preserves unreconciled markers.
 
-Each cell has a five-minute wall deadline, at most 18 model requests, at most
+Each case/model attempt has a five-minute wall deadline, at most 18 model requests, at most
 2,048 output tokens per request, and a conservative 15,000 total output allowance.
 Claude additionally has a $1 native CLI estimate ceiling. GPT reserves input bytes
 plus framing and output allowance against a $1 published-rate estimate ceiling;
 accounting version 2 settles both input and output reservations only after a
 unique completed response passes model identity and usage validation. Budget
 settlement uses the uncached input rate, even when cache reads are reported.
-Missing or uncertain usage retains both reservations. Six cells therefore allow up to six $1 estimates,
-not a $1 campaign budget. These limits are not proxy billing guarantees.
+Missing or uncertain usage retains both reservations. The default Gmail suite allows twelve $1 estimates and Drive four; a legacy
+six-model single-case matrix allows six. None has a $1 campaign-wide budget. These limits are not proxy billing guarantees.
 
 Requested and response-reported identities, input/output/cache tokens, estimates,
 and provider billing remain separate. GPT estimates use recorded Standard token
@@ -217,13 +251,13 @@ corrected runner exposes these without reading the skill on the model's behalf.
 Shared product guidance was clarified in the same candidate. This combined change
 and a different GPT model do not isolate a single cause of changed behavior.
 
-The current method criterion verifies that a method description was retrieved;
+That run's version 1 method criterion verifies that a method description was retrieved;
 it does not verify every called method or enforce ordering. Sonnet first used
 memorized list/get calls, then described the send, modify, and attachment methods
 before its second execution. Its existing-gate pass therefore does not prove full
 adherence to the instruction to describe every method before use. A stricter
-criterion needs its own declared version and retained baseline, rather than
-retroactively changing these results.
+criterion now has its own declared version 2 and retained baseline; these
+historical results remain unchanged.
 
 Accounting version 2 keeps the same $1 ceiling and pre-request byte/output
 reservations. For a unique, fully validated completed response from the selected
@@ -254,3 +288,50 @@ or reliability. The earlier pair remains failed in its original evidence. The
 instruction handoff and budget reservation defects were harness defects; shared
 product guidance also changed before the first pair. The method criterion's
 coverage limit described above still applies.
+
+## Independent Gmail cases with grading version 2 (2026-11-04)
+
+Both required models completed all six task outcomes. The full discovery gate
+remains **failed**: Sonnet used `gmail/v1/users.messages.get` before describing it
+in the attachment and pagination cases. Sol passed all six current case grades.
+
+| Case          | Sonnet task             | Sonnet full gate       | Sol task                    | Sol full gate               |
+| ------------- | ----------------------- | ---------------------- | --------------------------- | --------------------------- |
+| Read/search   | Pass                    | Pass                   | Pass                        | Pass                        |
+| Reply         | Pass                    | Pass                   | Pass                        | Pass                        |
+| Attachment    | Pass                    | Fail: method discovery | Pass                        | Pass                        |
+| Labels        | Pass                    | Pass                   | Pass                        | Pass                        |
+| Pagination    | Pass, offline corrected | Fail: method discovery | Pass, offline corrected     | Pass, offline corrected     |
+| Missing email | Pass                    | Pass                   | Pass, separate continuation | Pass, separate continuation |
+
+The original twelve-cell campaign remains failed in its retained evidence. Its
+pagination oracle incorrectly expected exactly three pages for three messages;
+Google returned an empty fourth final page. Case version 2 accepts a complete
+native continuation chain including empty pages, while still requiring one result
+per requested page, every fixture ID/code exactly once, and unchanged mailbox
+state. Offline regrading of both saved traces corrected task success and Sol's
+full grade without new model or Google calls. Sonnet's method failure survived.
+
+The original Sol missing-email fixture received HTTP 400 for a random ID and
+aborted before launching the actor. Its repaired version 2 uses a representable
+16-digit ID and still requires a preflight HTTP 404; unexpected responses stop
+before inference. One continuation failed during synthetic runner preflight on
+a temporary source syntax error. After correction, exactly one Sol actor attempt
+ran for the remaining case and passed. No completed actor trial was repeated.
+All twelve executed actors had matching model identities, successful cleanup
+and zero unknown mutations. This is qualified evidence across retained trials,
+offline regrades and a continuation, not a fresh same-candidate suite pass.
+
+Across those six attempts per model, Sonnet reported 291,089 cache-read input
+tokens and 85,845 cache-creation input tokens, with a native CLI estimate of
+$0.4453949. Sol reported 514,669 input tokens including 347,136 cached tokens,
+and 2,804 output tokens; its observed published-rate estimate was $0.3978196.
+GPT cache creation and actual provider billing remain unknown. Estimates use
+different sources and do not establish relative model cost. The existing per-cell
+caps were unchanged, and no inference ran to regrade saved results.
+
+Earlier Haiku configuration/discovery failures, the first matrix failures and
+unattempted cells, the original Sonnet/Sol budget failure, and the subsequent
+qualified accounting repair remain retained in the historical sections above.
+Actual target hosts, gateway deployment, hosted Cloudflare limits and Drive live
+behavior are separate acceptance boundaries.

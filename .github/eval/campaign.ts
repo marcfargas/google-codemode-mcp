@@ -4,21 +4,37 @@ import { fileURLToPath } from 'node:url';
 import { selectCells, aggregateMatrix, MATRIX_VERSION, type MatrixCellResult } from './matrix.ts';
 import { runCell } from './run.ts';
 import { verifyModels } from './catalog.ts';
+import { getGmailCase, selectGmailCases } from './cases.ts';
+import { GRADING_VERSION } from './mechanisms.ts';
+import { getDriveCase, selectDriveCases } from './drive.ts';
 
 const json = (file: string, value: unknown) =>
   writeFile(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
 
-export async function runCampaign(dependencies = { runCell, verifyModels }) {
+async function runMatrix(
+  dependencies: { runCell: typeof runCell; verifyModels: typeof verifyModels },
+  configuration?: { output: string; caseId: string },
+) {
   if (!process.env.EVAL_SELECTION) {
     const result = await dependencies.runCell();
-    return result.passed;
+    return {
+      selectedStatus: result.passed ? 'pass' : 'fail',
+      safetyFailures: [],
+      safetyUnknown: [],
+    };
   }
   const cells = selectCells(process.env.EVAL_SELECTION);
   if (process.env.EVAL_MODEL) throw new Error('Select a matrix or one model, not both');
-  if (process.env.EVAL_PROFILE !== 'gmail') throw new Error('Only Gmail has implemented coverage');
+  const profile = process.env.EVAL_PROFILE;
+  if (!['gmail', 'drive'].includes(profile!))
+    throw new Error('Selected service has no implemented coverage');
   if ((process.env.EVAL_REPEATS ?? '1') !== '1')
     throw new Error('Matrix uses one declared attempt per cell');
-  const output = resolve(process.env.EVAL_OUTPUT!);
+  const output = resolve(configuration?.output ?? process.env.EVAL_OUTPUT!);
+  const selectedCase =
+    profile === 'gmail'
+      ? getGmailCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'combined')
+      : getDriveCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'read-file');
   await mkdir(output, { recursive: true, mode: 0o700 });
   const catalogue = await dependencies.verifyModels(
     process.env.EVAL_PROXY_URL!,
@@ -27,8 +43,11 @@ export async function runCampaign(dependencies = { runCell, verifyModels }) {
   );
   await json(join(output, 'matrix-source.json'), {
     matrixVersion: MATRIX_VERSION,
+    gradingVersion: GRADING_VERSION,
+    caseId: selectedCase.id,
+    caseVersion: selectedCase.version,
     cells,
-    profile: 'gmail',
+    profile: profile!,
     catalogue,
     attemptsPerCell: 1,
     estimatedUsdCeilingPerCell: 1,
@@ -42,10 +61,11 @@ export async function runCampaign(dependencies = { runCell, verifyModels }) {
   for (const cell of cells) {
     try {
       const result = await dependencies.runCell({
-        profile: 'gmail',
+        profile: profile!,
         model: cell.model,
         output: join(output, cell.id),
         repeats: 1,
+        caseId: selectedCase.id,
       });
       results.push({ ...result.results[0], cellId: cell.id });
     } catch {
@@ -67,7 +87,7 @@ export async function runCampaign(dependencies = { runCell, verifyModels }) {
   const result = { ...aggregateMatrix(cells, results), results, stopReason };
   await json(join(output, 'matrix-results.json'), result);
   const report = [
-    '# Gmail agent model matrix',
+    `# ${profile} agent model matrix`,
     '',
     `Required-pair gate: ${result.gatedStatus.toUpperCase()}. Selected run: ${result.selectedStatus.toUpperCase()}.`,
     '',
@@ -84,14 +104,125 @@ export async function runCampaign(dependencies = { runCell, verifyModels }) {
     '',
     'Reports and raw usage: CELL/trial-1/result.json, actor-result.json and model-receipts.jsonl. Estimates are not proxy billing. Cache reads are provider-reported observations. Different runners do not isolate model-only effects or qualify Claude/ChatGPT/OpenClaw hosts.',
     '',
-    'Only Gmail coverage exists. Drive, Sheets, Docs and Calendar remain pending.',
+    'Gmail and Drive profiles exist. Sheets, Docs and Calendar remain pending.',
     '',
   ].join('\n');
   await writeFile(join(output, 'report.md'), report, { mode: 0o600 });
   console.log(
-    `Gmail matrix required-pair ${result.gatedStatus}; report ${join(output, 'report.md')}`,
+    `${profile} matrix required-pair ${result.gatedStatus}; report ${join(output, 'report.md')}`,
   );
-  return result.selectedStatus === 'pass';
+  return result;
+}
+
+/** One fresh case/model attempt each; score failures do not trigger retries. */
+export async function runCampaign(dependencies = { runCell, verifyModels }) {
+  if (!process.env.EVAL_CASES) return (await runMatrix(dependencies)).selectedStatus === 'pass';
+  if (!process.env.EVAL_SELECTION || process.env.EVAL_MODEL)
+    throw new Error('A case suite requires an explicit model selection');
+  const cases =
+    process.env.EVAL_PROFILE === 'gmail'
+      ? selectGmailCases(process.env.EVAL_CASES)
+      : process.env.EVAL_PROFILE === 'drive'
+        ? selectDriveCases(process.env.EVAL_CASES)
+        : (() => {
+            throw new Error('Unsupported suite profile');
+          })();
+  const cells = selectCells(process.env.EVAL_SELECTION);
+  const output = resolve(process.env.EVAL_OUTPUT!);
+  await mkdir(output, { recursive: true, mode: 0o700 });
+  const source = {
+    suiteVersion: 1,
+    gradingVersion: GRADING_VERSION,
+    cases,
+    cells,
+    attemptsPerCaseModel: 1,
+    estimatedUsdCeilingTotal: cases.length * cells.length,
+    providerBilledCostUsd: null,
+  };
+  await json(join(output, 'suite-source.json'), source);
+  const results: {
+    caseId: string;
+    selectedStatus: string;
+    gatedStatus?: string;
+    safetyFailures: string[];
+    safetyUnknown: string[];
+  }[] = [];
+  let stopReason: string | null = null;
+  for (const selectedCase of cases) {
+    try {
+      const result = await runMatrix(dependencies, {
+        output: join(output, selectedCase.id),
+        caseId: selectedCase.id,
+      });
+      results.push({ caseId: selectedCase.id, ...result });
+      if (result.safetyFailures.length || result.safetyUnknown.length) {
+        stopReason = `Safety or infrastructure evidence incomplete after ${selectedCase.id}`;
+        break;
+      }
+    } catch {
+      results.push({
+        caseId: selectedCase.id,
+        selectedStatus: 'error',
+        safetyFailures: ['infrastructure'],
+        safetyUnknown: [],
+      });
+      stopReason = `Case infrastructure failed at ${selectedCase.id}; inspect retained evidence`;
+      break;
+    } finally {
+      await json(join(output, 'suite-results.json'), {
+        ...source,
+        results,
+        stopReason,
+        unattempted: cases
+          .filter((item) => !results.some((row) => row.caseId === item.id))
+          .map((item) => item.id),
+      });
+    }
+  }
+  const passed =
+    results.length === cases.length && results.every((row) => row.selectedStatus === 'pass');
+  const requiredPairStatus =
+    results.length === cases.length && results.every((row) => row.gatedStatus === 'pass')
+      ? 'pass'
+      : results.some((row) => row.gatedStatus === 'fail')
+        ? 'fail'
+        : 'pending';
+  await json(join(output, 'suite-results.json'), {
+    ...source,
+    results,
+    stopReason,
+    selectedStatus: passed ? 'pass' : 'fail',
+    requiredPairStatus,
+    unattempted: cases
+      .filter((item) => !results.some((row) => row.caseId === item.id))
+      .map((item) => item.id),
+  });
+  await writeFile(
+    join(output, 'report.md'),
+    [
+      `# ${process.env.EVAL_PROFILE} independent case suite`,
+      '',
+      `Selected suite: ${passed ? 'PASS' : 'FAIL'}. One fresh attempt per case/model; grading version ${GRADING_VERSION}.`,
+      '',
+      `Required-pair gate across all selected cases: ${requiredPairStatus.toUpperCase()}.`,
+      '',
+      '| Case | Selected gate |',
+      '| --- | --- |',
+      ...cases.map(
+        (item) =>
+          `| ${item.id} | ${results.find((row) => row.caseId === item.id)?.selectedStatus ?? 'unattempted'} |`,
+      ),
+      '',
+      stopReason ?? 'All selected case/model attempts completed.',
+      '',
+      `Maximum estimate: $${source.estimatedUsdCeilingTotal}; provider billing remains unknown. Per-attempt caps and safety stops are unchanged.`,
+      '',
+      'Per-case matrix reports retain required-pair qualification, model identity, cache usage, task/mechanism criteria and cleanup. Historical failures remain unchanged. These local runners do not qualify actual hosts or hosted Cloudflare.',
+      '',
+    ].join('\n'),
+    { mode: 0o600 },
+  );
+  return passed;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -1,6 +1,6 @@
 ---
 name: google-codemode-verify
-description: Verify a Google Code Mode change with the maintained just and GitHub workflows; distinguish credential-free checks, synthetic runner proof, live Gmail, paid agent gates, and unverified hosts or Cloudflare deployment.
+description: Verify a Google Code Mode change with the maintained just and GitHub workflows; distinguish credential-free checks, synthetic runner proof, live Gmail/Drive, paid agent gates, and unverified hosts or Cloudflare deployment.
 ---
 
 # Verify a candidate
@@ -27,14 +27,19 @@ readiness at the failed boundary and restart only trial-owned state when warrant
 
 ## Select the smallest useful proof
 
-| Goal                                                      | Maintained command                                                | What it establishes                                                                     |
-| --------------------------------------------------------- | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| Ordinary change check                                     | `just check`                                                      | Check workflow in `act`: typecheck, Wrangler dry-run, credential-free tests, formatting |
-| Fast host feedback / unavailable compatible Docker runner | `just verify`                                                     | Same `.github/run.mjs check` steps on this host; no claim of `act` compatibility        |
-| Runner/MCP/file plumbing                                  | `just eval-preflight /absolute/new/evidence`                      | Both isolated runners with synthetic responses; no model, OAuth, or Google calls        |
-| Saved trial grading                                       | `just eval-regrade /absolute/saved/trial-1 /absolute/new/regrade` | Offline current grader against retained evidence, preserving original results           |
-| Real Gmail behavior                                       | `just live`                                                       | Manual credentialed Gmail workflow through locally built Worker                         |
-| Agent feasibility                                         | `just eval-matrix gmail PROXY_URL /absolute/new/evidence`         | Manual paid Sonnet/Sol required pair, one fresh attempt each                            |
+| Goal                                                      | Maintained command                                                | What it establishes                                                                      |
+| --------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Ordinary change check                                     | `just check`                                                      | Check workflow in `act`: typecheck, Wrangler dry-run, credential-free tests, formatting  |
+| Fast host feedback / unavailable compatible Docker runner | `just verify`                                                     | Same `.github/run.mjs check` steps on this host; no claim of `act` compatibility         |
+| Runner/MCP/file plumbing                                  | `just eval-preflight /absolute/new/evidence`                      | Both isolated runners with synthetic responses; no model, OAuth, or Google calls         |
+| Saved trial grading                                       | `just eval-regrade /absolute/saved/trial-1 /absolute/new/regrade` | Offline current grader against retained evidence, preserving original results            |
+| Real Gmail behavior                                       | `just live`                                                       | Manual credentialed Gmail workflow through locally built Worker                          |
+| Real Drive behavior                                       | `just live-drive`                                                 | Manual credentialed Drive download/rename through locally built Worker                   |
+| Agent feasibility                                         | `just eval-matrix gmail PROXY_URL /absolute/new/evidence`         | Manual paid Sonnet/Sol required pair, one fresh attempt each                             |
+| Independent Gmail cases                                   | `just eval-gmail PROXY_URL /absolute/new/evidence`                | Six cases, one fresh attempt per model/case, up to twelve $1 estimates                   |
+| Independent Drive cases                                   | `just eval-drive PROXY_URL /absolute/new/evidence`                | Two cases after Drive consent, one fresh attempt per model/case, up to four $1 estimates |
+| Prepare private hosted probes                             | `just hosted-prepare /absolute/new/prepared`                      | Exact source/bundle identity and private dry-run; no deployment                          |
+| Hosted runtime limits                                     | `just hosted-verify /absolute/new/evidence`                       | Selected deployed version via protected ingress; requires documented `HOSTED_*` inputs   |
 
 All maintained helpers/tests live under `.github/`, commands in `justfile`; there is
 no root `scripts/`, root `tests/`, or npm task layer. Keep new verification support
@@ -46,10 +51,12 @@ self-send. Prerequisites are the matching installed-app client, test user, and
 refresh grant. Resolve through `.github/secrets.mjs` and README's local setup;
 `.test.env` is ignored and client/token overrides are `GOOGLE_OAUTH_CLIENT_FILE`
 and `GOOGLE_TEST_TOKEN_FILE`. Inspect existence/readability without printing contents.
-Missing consent is a prerequisite gap; don't automatically run OAuth, enable APIs,
-install GitHub secrets, or change scopes. Serialize use of the shared account;
-GitHub workflows share a concurrency group but `just live` has no local account
-lock. Check for other local/remote holders before credentialed trials.
+Missing consent is a prerequisite gap. OAuth, API enablement, GitHub secret
+installation and scope changes need their task's existing authority. Drive needs
+the additional `drive.file` grant obtained through `just oauth --drive`; the live
+fixture creates/deletes only owned files. Serialize the shared account: all live
+GitHub workflows use one concurrency group and local live/eval launchers share a
+cross-checkout lock. Check remote holders before local credentialed trials.
 
 Agent trials additionally need the authorized proxy/model selection and credentials
 described in the gate docs. Its local launcher locks across checkouts. Follow its
@@ -66,12 +73,16 @@ changing cases/grading, rather than weakening expectations to turn a run green.
 Inspect the exit status **and** meaningful results: test failures/skips, runner
 isolation refusals and exact file bytes, task versus discovery/skill criteria,
 model identity, mutation outcomes, and cleanup. A retrieved `skill://` resource is
-not proof of host activation. Current discovery grading checks a method retrieval,
-not every used method or ordering. Gmail feasibility does not qualify Drive,
+not proof of host activation. Grading version 2 requires every trusted ledger
+method to have a matching description completed before execution starts, including
+failed and snippet calls. Root discovery and actual skill retrieval must precede
+the first execution. Missing ordinals or incomplete ledgers stay unknown; offline
+regrades preserve original results. Gmail feasibility does not qualify Drive,
 Sheets, Docs, Calendar, target hosts, binary artifacts, or hosted Cloudflare CPU
 enforcement. Pending profiles fail before spending; don't silently substitute Gmail.
 
-Live receipts are written as `dist/live-gmail-receipt.json` inside the workflow;
+Live receipts are written as `dist/live-gmail-receipt.json` or
+`dist/live-drive-receipt.json` inside the selected workflow;
 local `act` retrieves artifacts under `dist/act-artifacts`, remote uploads last
 seven days. Copy needed receipts to retained evidence before another build/run.
 Record actual SHA/diff separately; don't infer identity from a requested SHA field.

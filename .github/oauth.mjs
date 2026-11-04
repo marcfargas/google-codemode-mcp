@@ -112,6 +112,10 @@ async function automate(url, expectedUser) {
 
 let server, browser, pasteInput;
 try {
+  const requestedScopes = [
+    'https://www.googleapis.com/auth/gmail.modify',
+    ...(process.argv.includes('--drive') ? ['https://www.googleapis.com/auth/drive.file'] : []),
+  ];
   const credentials = await localCredentials({ requireToken: false });
   const config = JSON.parse(credentials.GOOGLE_OAUTH_CLIENT_JSON).installed;
   const state = randomBytes(32).toString('hex');
@@ -168,7 +172,8 @@ try {
   const url = oauth.generateAuthUrl({
     access_type: 'offline',
     prompt: 'consent',
-    scope: ['https://www.googleapis.com/auth/gmail.modify'],
+    scope: requestedScopes,
+    include_granted_scopes: true,
     state,
     code_challenge: codeChallenge,
     code_challenge_method: 'S256',
@@ -228,8 +233,8 @@ try {
     }
     if (!tokens.refresh_token || !tokens.access_token)
       throw new Error('Google did not issue an offline refresh grant');
-    if (!tokens.scope?.split(' ').includes('https://www.googleapis.com/auth/gmail.modify'))
-      throw new Error('Consent did not grant gmail.modify');
+    if (!requestedScopes.every((scope) => tokens.scope?.split(' ').includes(scope)))
+      throw new Error('Consent did not grant all requested test scopes');
     const profile = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
       headers: { Authorization: `Bearer ${tokens.access_token}` },
       redirect: 'error',

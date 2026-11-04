@@ -1,5 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
+import { getGmailCase, type GmailCaseId } from './cases.ts';
+import type { McpEvent } from './server.ts';
 
 export interface GmailCriterion {
   id: string;
@@ -22,6 +24,7 @@ export interface GmailManifest {
   writes: GmailWrite[];
 }
 export interface GmailExpected {
+  caseId?: GmailCaseId;
   account: string;
   subject: string;
   sourceId: string;
@@ -35,6 +38,13 @@ export interface GmailExpected {
   historyId: string;
   confirmationCode: string;
   attachment: { filename: string; sha256: string; bytes: number; attachmentId: string };
+  pagination?: {
+    sourceId: string;
+    threadId: string;
+    confirmationCode: string;
+    initialLabels: string[];
+  }[];
+  missingId?: string;
 }
 export interface GmailObservedMessage {
   id: string;
@@ -58,6 +68,7 @@ export interface GmailObservation {
   newDraftIds: string[];
   complete: boolean;
   errors: string[];
+  additionalSources?: GmailObservedMessage[];
 }
 export interface GmailCleanup {
   failures: string[];
@@ -137,7 +148,7 @@ function normalizedText(value: string) {
 }
 
 /** Pure grader: only independent Google readback and captured local file bytes count. */
-export function gradeGmail(
+function gradeCombinedGmail(
   expected: GmailExpected,
   observation: GmailObservation | null,
   files: Record<string, string>,
@@ -257,7 +268,10 @@ export function gradeGmail(
       )
       .map((change) => change.id),
   );
-  const sourceLabels = sorted([...new Set([...expected.initialSourceLabels, expected.labelId])]);
+  const applyLabel = expected.caseId !== 'reply';
+  const sourceLabels = sorted([
+    ...new Set([...expected.initialSourceLabels, ...(applyLabel ? [expected.labelId] : [])]),
+  ]);
   const labelsUnchanged = equal(
     [...observation.labels].sort((a, b) => a.id.localeCompare(b.id)),
     [...expected.initialLabels].sort((a, b) => a.id.localeCompare(b.id)),
@@ -270,13 +284,17 @@ export function gradeGmail(
       return false;
     if (change.id === expected.sourceId) {
       return (
-        change.kind === 'labelsAdded' && change.labels.every((label) => label === expected.labelId)
+        applyLabel &&
+        change.kind === 'labelsAdded' &&
+        change.labels.every((label) => label === expected.labelId)
       );
     }
     // System delivery and draft transitions are permitted; trashing or custom
     // label changes beyond the requested fixture label are extra effects.
     return change.labels.every((label) =>
-      ['DRAFT', 'SENT', 'INBOX', 'UNREAD', expected.labelId].includes(label),
+      ['DRAFT', 'SENT', 'INBOX', 'UNREAD', ...(applyLabel ? [expected.labelId] : [])].includes(
+        label,
+      ),
     );
   });
   add(
@@ -292,10 +310,287 @@ export function gradeGmail(
       ) &&
       replies.every((reply) =>
         reply.labels.every((label) =>
-          ['SENT', 'INBOX', 'UNREAD', expected.labelId].includes(label),
+          ['SENT', 'INBOX', 'UNREAD', ...(applyLabel ? [expected.labelId] : [])].includes(label),
         ),
       ),
     'Source labels, label catalog, remaining drafts and all paginated history changes checked.',
+  );
+  return criteria;
+}
+
+interface GmailOutcome {
+  path: string;
+  mutation: boolean;
+  outcome: string;
+  httpStatus?: number;
+  resourceId?: string;
+  pagination?: {
+    requestedPageToken?: string;
+    nextPageToken?: string;
+    maxResults?: number;
+    query?: string;
+  };
+}
+
+function trustedOutcomes(audit: McpEvent[] | undefined): GmailOutcome[] | null {
+  if (!audit) return null;
+  const executions = audit.filter(
+    (event) => event.method === 'tools/call' && event.params?.name !== 'describe',
+  );
+  if (!executions.length) return null;
+  const outcomes: GmailOutcome[] = [];
+  for (const event of executions) {
+    const receipt = event.response?.result?.structuredContent;
+    if (
+      event.status < 200 ||
+      event.status >= 300 ||
+      event.response?.error ||
+      event.response?.result?.isError ||
+      receipt?.outcomesComplete !== true ||
+      !Array.isArray(receipt.outcomes)
+    )
+      return null;
+    for (const outcome of receipt.outcomes) {
+      if (
+        !outcome ||
+        typeof outcome.path !== 'string' ||
+        typeof outcome.mutation !== 'boolean' ||
+        !['not_dispatched', 'rejected', 'acknowledged', 'unknown'].includes(outcome.outcome)
+      )
+        return null;
+      outcomes.push(outcome);
+    }
+  }
+  return outcomes;
+}
+
+/** Case outcomes use fixture secrets, independent readback, captured bytes and relay ledgers. */
+export function gradeGmail(
+  expected: GmailExpected,
+  observation: GmailObservation | null,
+  files: Record<string, string>,
+  audit?: McpEvent[],
+): GmailCriterion[] {
+  const selected = getGmailCase(expected.caseId);
+  if (selected.id === 'combined') return gradeCombinedGmail(expected, observation, files);
+  if (selected.id === 'reply') {
+    const criteria = gradeCombinedGmail(expected, observation, files).filter(
+      (entry) => !['attachment_file', 'only_requested_file', 'original_label'].includes(entry.id),
+    );
+    criteria.push({
+      id: 'only_requested_file',
+      status: Object.keys(files).length === 0 ? 'pass' : 'fail',
+      evidence: 'The reply task requests no workspace files.',
+    });
+    return criteria;
+  }
+  const criteria: GmailCriterion[] = [];
+  const add = (id: string, result: boolean | null, evidence: string) =>
+    criteria.push({ id, status: result === null ? 'unknown' : result ? 'pass' : 'fail', evidence });
+  const requested =
+    selected.id === 'attachment'
+      ? [expected.attachment.filename]
+      : ['read-search', 'pagination', 'failure'].includes(selected.id)
+        ? ['answer.json']
+        : [];
+  add(
+    'only_requested_file',
+    equal(Object.keys(files).sort(), requested),
+    'Captured output filenames compared with this independent task.',
+  );
+  let answer: any = null;
+  try {
+    answer = JSON.parse(Buffer.from(files['answer.json'], 'base64').toString('utf8'));
+  } catch {
+    // A missing, malformed or oversized-by-the-runner answer cannot supply outcome evidence.
+  }
+  if (selected.id === 'read-search')
+    add(
+      'read_answer',
+      !!answer &&
+        equal(Object.keys(answer).sort(), ['confirmationCode', 'messageId']) &&
+        answer.messageId === expected.sourceId &&
+        answer.confirmationCode === expected.confirmationCode,
+      'Exact source ID and unpredictable body-only confirmation code required.',
+    );
+  if (selected.id === 'attachment') {
+    const encoded = files[expected.attachment.filename];
+    const bytes = typeof encoded === 'string' ? Buffer.from(encoded, 'base64') : null;
+    add(
+      'attachment_file',
+      !!bytes &&
+        bytes.length === expected.attachment.bytes &&
+        hash(bytes) === expected.attachment.sha256,
+      'Exact UTF-8 attachment length and SHA-256 compared with fixture bytes.',
+    );
+  }
+  const outcomes = trustedOutcomes(audit);
+  if (selected.id === 'read-search')
+    add(
+      'search_and_read',
+      outcomes === null
+        ? null
+        : outcomes.some(
+            (outcome) =>
+              outcome.path === 'gmail/v1/users.messages.list' &&
+              outcome.outcome === 'acknowledged' &&
+              outcome.pagination?.query?.includes(expected.subject),
+          ) &&
+            outcomes.some(
+              (outcome) =>
+                outcome.path === 'gmail/v1/users.messages.get' &&
+                outcome.outcome === 'acknowledged' &&
+                outcome.resourceId === expected.sourceId,
+            ),
+      'Trusted native receipts must show a subject search and a read of its actual source message.',
+    );
+  if (selected.id === 'failure') {
+    add(
+      'safe_failure_answer',
+      typeof expected.missingId === 'string' &&
+        !!answer &&
+        equal(Object.keys(answer).sort(), ['messageId', 'status']) &&
+        answer.messageId === expected.missingId &&
+        answer.status === 'not_found',
+      'The missing message must be reported as not_found in the exact requested shape.',
+    );
+    add(
+      'observed_not_found',
+      outcomes === null
+        ? null
+        : !!expected.missingId &&
+            outcomes.some(
+              (outcome) =>
+                outcome.path === 'gmail/v1/users.messages.get' &&
+                outcome.resourceId === expected.missingId &&
+                !outcome.mutation &&
+                outcome.outcome === 'rejected' &&
+                outcome.httpStatus === 404,
+            ),
+      'A trusted rejected read must identify the requested missing message and HTTP 404.',
+    );
+  }
+  if (selected.id === 'pagination') {
+    const messages = [
+      { messageId: expected.sourceId, confirmationCode: expected.confirmationCode },
+      ...(expected.pagination ?? []).map((entry) => ({
+        messageId: entry.sourceId,
+        confirmationCode: entry.confirmationCode,
+      })),
+    ];
+    const canonical = (values: { messageId: string; confirmationCode: string }[]) =>
+      values
+        .map(({ messageId, confirmationCode }) => ({ messageId, confirmationCode }))
+        .sort((a, b) => a.messageId.localeCompare(b.messageId));
+    add(
+      'complete_page_answer',
+      messages.length === 3 &&
+        !!answer &&
+        equal(Object.keys(answer).sort(), ['count', 'messages']) &&
+        answer.count === messages.length &&
+        Array.isArray(answer.messages) &&
+        answer.messages.every(
+          (entry: any) =>
+            entry &&
+            equal(Object.keys(entry).sort(), ['confirmationCode', 'messageId']) &&
+            typeof entry.messageId === 'string' &&
+            typeof entry.confirmationCode === 'string',
+        ) &&
+        equal(canonical(answer.messages), canonical(messages)),
+      'All three distinct fixture message IDs and body codes required, with exact count.',
+    );
+    const pages = outcomes?.filter(
+      (outcome) =>
+        outcome.path === 'gmail/v1/users.messages.list' &&
+        outcome.outcome === 'acknowledged' &&
+        outcome.pagination?.query?.includes(expected.subject),
+    );
+    let continued: boolean | null = outcomes === null ? null : false;
+    if (pages && pages.length >= messages.length && pages.length <= 100 && messages.length === 3) {
+      const used = new Set<string>();
+      continued = pages.every((page, index) => {
+        const current = page.pagination!;
+        const previous = pages[index - 1]?.pagination;
+        const token = current.requestedPageToken ?? '';
+        if (used.has(token)) return false;
+        used.add(token);
+        return (
+          !page.mutation &&
+          current.maxResults === 1 &&
+          current.query === pages[0].pagination!.query &&
+          (index === 0 ? !token : !!token && token === previous?.nextPageToken) &&
+          (index === pages.length - 1 ? !current.nextPageToken : !!current.nextPageToken)
+        );
+      });
+    }
+    add(
+      'actual_pagination',
+      continued,
+      'Trusted native list receipts must form a complete continuation chain, including empty pages, at maxResults=1.',
+    );
+  }
+  add(
+    'readback',
+    observation === null ? null : observation.complete,
+    observation
+      ? `Independent readback errors: ${observation.errors.length}.`
+      : 'Independent Gmail observation unavailable.',
+  );
+  if (selected.id === 'labels')
+    add(
+      'original_label',
+      observation === null
+        ? null
+        : !!observation.source &&
+            observation.source.id === expected.sourceId &&
+            observation.source.threadId === expected.threadId &&
+            observation.source.labels.includes(expected.labelId),
+      'Existing fixture label membership checked on the original message.',
+    );
+  if (!observation) {
+    add('no_extra_effects', null, 'Independent Gmail observation unavailable.');
+    return criteria;
+  }
+  const applyLabel = selected.id === 'labels';
+  const sources = [
+    { id: expected.sourceId, threadId: expected.threadId, labels: expected.initialSourceLabels },
+    ...(expected.pagination ?? []).map((entry) => ({
+      id: entry.sourceId,
+      threadId: entry.threadId,
+      labels: entry.initialLabels,
+    })),
+  ];
+  const readSources = [observation.source, ...(observation.additionalSources ?? [])];
+  const sourcesUnchanged = sources.every((source) => {
+    const found = readSources.find((entry) => entry?.id === source.id);
+    return (
+      found?.threadId === source.threadId &&
+      equal(
+        sorted(found.labels),
+        sorted([...new Set([...source.labels, ...(applyLabel ? [expected.labelId] : [])])]),
+      )
+    );
+  });
+  add(
+    'no_extra_effects',
+    observation.complete &&
+      sourcesUnchanged &&
+      observation.thread.length === 1 &&
+      observation.thread[0].id === expected.sourceId &&
+      observation.newDraftIds.length === 0 &&
+      equal(
+        [...observation.labels].sort((a, b) => a.id.localeCompare(b.id)),
+        [...expected.initialLabels].sort((a, b) => a.id.localeCompare(b.id)),
+      ) &&
+      observation.history.every(
+        (change) =>
+          applyLabel &&
+          change.id === expected.sourceId &&
+          change.threadId === expected.threadId &&
+          change.kind === 'labelsAdded' &&
+          change.labels.every((label) => label === expected.labelId),
+      ),
+    'All fixture sources, thread, label catalogue, drafts and complete history checked for extra effects.',
   );
   return criteria;
 }
@@ -304,8 +599,10 @@ export function gradeGmail(
 export async function prepareGmailFixture(options: {
   accessToken: string;
   expectedUser: string;
+  caseId?: GmailCaseId;
   onEvent?: (manifest: GmailManifest) => void | Promise<void>;
 }): Promise<GmailFixture> {
+  const selected = getGmailCase(options.caseId);
   if (!/^[^\s@<>\r\n]+@[^\s@<>\r\n]+$/.test(options.expectedUser))
     throw new Error('Invalid expected Gmail test account');
   const run = randomUUID();
@@ -491,6 +788,13 @@ export async function prepareGmailFixture(options: {
     if (!inserted.id) throw new Error('Gmail seed message ID missing');
     const full = await read<GoogleMessage>(`messages/${pathId(inserted.id)}?format=full`);
     const source = observed(full);
+    if (
+      selected.id !== 'combined' &&
+      (!source.mimeComplete ||
+        source.plainText.length !== 1 ||
+        normalizedText(source.plainText[0]) !== `Please confirm this code: ${code}`)
+    )
+      throw new Error('Gmail source body preflight differs from seed code');
     const attachment = parts(full.payload).find((part) => part.filename === filename);
     const actualMessageId = header(source, 'message-id');
     if (
@@ -510,10 +814,70 @@ export async function prepareGmailFixture(options: {
       hash(Buffer.from(downloaded.data, 'base64url')) !== hash(attachmentBytes)
     )
       throw new Error('Independent Gmail attachment preflight differs from seed bytes');
+    const pagination: NonNullable<GmailExpected['pagination']> = [];
+    if (selected.id === 'pagination') {
+      for (let page = 2; page <= 3; page++) {
+        const confirmationCode = randomBytes(9).toString('hex');
+        const extraMime = [
+          `From: ${options.expectedUser}`,
+          `To: ${options.expectedUser}`,
+          `Subject: ${manifest.subject} page ${page}`,
+          `Message-ID: <fixture-${run}-${page}@test.invalid>`,
+          'MIME-Version: 1.0',
+          'Content-Type: text/plain; charset=UTF-8',
+          'Content-Transfer-Encoding: base64',
+          '',
+          Buffer.from(`Please confirm this code: ${confirmationCode}\n`).toString('base64'),
+          '',
+        ].join('\r\n');
+        const extra = await mutate<GoogleMessage>(
+          'seed.message',
+          'messages?internalDateSource=receivedTime',
+          'POST',
+          { raw: Buffer.from(extraMime).toString('base64url'), labelIds: ['INBOX', 'UNREAD'] },
+          (value) => {
+            if (value.id) manifest.messageIds.push(value.id);
+          },
+        );
+        if (!extra.id) throw new Error('Gmail pagination seed ID missing');
+        const hydrated = observed(
+          await read<GoogleMessage>(`messages/${pathId(extra.id)}?format=full`),
+        );
+        if (
+          !hydrated.id ||
+          !hydrated.threadId ||
+          !hydrated.mimeComplete ||
+          hydrated.plainText.length !== 1 ||
+          normalizedText(hydrated.plainText[0]) !==
+            `Please confirm this code: ${confirmationCode}` ||
+          manifest.messageIds.filter((id) => id === hydrated.id).length !== 1
+        )
+          throw new Error('Gmail pagination seed readback differs from source');
+        pagination.push({
+          sourceId: hydrated.id,
+          threadId: hydrated.threadId,
+          confirmationCode,
+          initialLabels: hydrated.labels,
+        });
+      }
+    }
+    let missingId: string | undefined;
+    if (selected.id === 'failure') {
+      missingId = '1' + randomBytes(7).toString('hex') + '0';
+      const absent = await fetch(API + `messages/${pathId(missingId)}?format=full`, {
+        headers: { Authorization: `Bearer ${options.accessToken}` },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(15_000),
+      });
+      await absent.body?.cancel();
+      if (absent.status !== 404)
+        throw new Error('Gmail missing-message preflight did not return HTTP 404');
+    }
     const initialLabels = await labels();
     const baseline = await read<{ historyId?: string }>('profile');
     if (!baseline.historyId) throw new Error('Gmail history baseline missing');
     expected = {
+      caseId: selected.id,
       account: options.expectedUser,
       subject: manifest.subject,
       sourceId: source.id,
@@ -532,6 +896,8 @@ export async function prepareGmailFixture(options: {
         bytes: attachmentBytes.length,
         attachmentId: attachment.body.attachmentId,
       },
+      ...(pagination.length ? { pagination } : {}),
+      ...(missingId ? { missingId } : {}),
     };
   } catch (error) {
     // The caller receives incremental manifest events even when preparation cannot return a fixture.
@@ -578,13 +944,31 @@ export async function prepareGmailFixture(options: {
     } catch {
       fail('source');
     }
+    if (expected.pagination?.length) {
+      result.additionalSources = [];
+      for (const source of expected.pagination) {
+        try {
+          result.additionalSources.push(
+            await hydrate(
+              await read<GoogleMessage>(`messages/${pathId(source.sourceId)}?format=full`),
+            ),
+          );
+        } catch {
+          fail('pagination_source');
+        }
+      }
+    }
     try {
       for (let attempt = 0; attempt < 4; attempt++) {
         const thread = await read<{ messages?: GoogleMessage[] }>(
           `threads/${pathId(expected.threadId)}?format=full`,
         );
         result.thread = await Promise.all((thread.messages ?? []).map(hydrate));
-        if (result.thread.some((message) => message.id !== expected.sourceId)) break;
+        if (
+          !['combined', 'reply'].includes(selected.id) ||
+          result.thread.some((message) => message.id !== expected.sourceId)
+        )
+          break;
         if (attempt < 3) await delay(500);
       }
       // Only messages whose independently read headers reference this fixture become cleanup targets.
@@ -679,10 +1063,32 @@ export async function prepareGmailFixture(options: {
     return result;
   }
   return {
-    prompt: `Find the email with subject "${expected.subject}". Read its confirmation code and reply to that email in the same conversation. Your reply must contain exactly "Confirmed: " followed by the code from the email, with no quoted message or other text. Apply the existing label "${expected.labelName}" to the original email. Save its attachment in the current workspace using the attachment's original filename, preserving every byte.`,
+    prompt: gmailPrompt(expected),
     expected,
     manifest,
     observe,
     cleanup,
   };
+}
+
+function gmailPrompt(expected: GmailExpected): string {
+  const find = `Find the email with subject "${expected.subject}".`;
+  const reply =
+    'Read its confirmation code and reply to that email in the same conversation. Your reply must contain exactly "Confirmed: " followed by the code from the email, with no quoted message or other text.';
+  switch (expected.caseId) {
+    case 'read-search':
+      return `${find} Read its confirmation code. Write only answer.json in the current workspace with exactly the fields {"messageId":"the email ID","confirmationCode":"the code from its body"}. Preserve the mailbox state.`;
+    case 'reply':
+      return `${find} ${reply} Preserve the original email's labels. Create no workspace files.`;
+    case 'attachment':
+      return `${find} Save its attachment in the current workspace using the attachment's original filename, preserving every byte. Save only that file and preserve the mailbox state.`;
+    case 'labels':
+      return `${find} Apply the existing label "${expected.labelName}" to that original email. Preserve its other labels. Create no workspace files.`;
+    case 'pagination':
+      return `Find every email whose subject contains "${expected.subject}". Retrieve one search result per page and continue until no pages remain. Read each email's confirmation code. Write only answer.json with exactly {"count":the total,"messages":[{"messageId":"an email ID","confirmationCode":"the code from its body"}]} listing each result once. Preserve the mailbox state.`;
+    case 'failure':
+      return `Try to read email ID "${expected.missingId}". If Google reports it missing, write only answer.json with exactly {"messageId":"${expected.missingId}","status":"not_found"}. Preserve the mailbox state.`;
+    default:
+      return `${find} ${reply} Apply the existing label "${expected.labelName}" to the original email. Save its attachment in the current workspace using the attachment's original filename, preserving every byte.`;
+  }
 }

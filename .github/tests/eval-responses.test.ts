@@ -70,11 +70,17 @@ async function harness(
     },
     execute: async (args) => {
       application.push({ name: 'execute', args });
-      return { result: args.inputs, outcomes: [], hasUnknownOutcome: false };
+      return {
+        result: args.inputs,
+        outcomes: [],
+        outcomesComplete: true,
+        hasUnknownOutcome: false,
+      };
     },
     runSnippet: async (_name, args) => ({
       result: args.inputs,
       outcomes: [],
+      outcomesComplete: true,
       hasUnknownOutcome: false,
     }),
   };

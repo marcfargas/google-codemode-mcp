@@ -19,6 +19,9 @@ async function body(request: IncomingMessage) {
 }
 
 export interface McpEvent {
+  /** One relay-owned sequence, shared by request starts and parsed completions. */
+  startedOrdinal?: number;
+  completedOrdinal?: number;
   method: string;
   params: any;
   status: number;
@@ -36,6 +39,7 @@ export async function startEvalServer(options: {
 }) {
   const audit: McpEvent[] = [];
   const llm: any[] = [];
+  let ordinal = 0;
   let unknownMutation = false;
   let stopped = false;
   let requests = 0;
@@ -94,6 +98,7 @@ export async function startEvalServer(options: {
           ownsExecution = true;
         }
         pendingMcp = {
+          startedOrdinal: ++ordinal,
           method: rpc.method,
           params: original,
           status: 0,
@@ -124,6 +129,7 @@ export async function startEvalServer(options: {
         let parsed: any;
         try {
           parsed = JSON.parse(text);
+          pendingMcp.completedOrdinal = ++ordinal;
         } catch {
           parsed = { invalidJson: true };
           if (execution) unknownMutation = true;
@@ -131,7 +137,9 @@ export async function startEvalServer(options: {
         const receipt = parsed.result?.structuredContent;
         if (
           execution &&
-          (!Array.isArray(receipt?.outcomes) || typeof receipt?.hasUnknownOutcome !== 'boolean')
+          (!Array.isArray(receipt?.outcomes) ||
+            receipt?.outcomesComplete !== true ||
+            typeof receipt?.hasUnknownOutcome !== 'boolean')
         )
           unknownMutation = true;
         if (

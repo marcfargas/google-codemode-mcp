@@ -7,7 +7,7 @@ test('deployment snippet metadata validates inputs, identifiers, services and to
   validateSnippetInput(snippet, {});
   assert.throws(() => validateSnippetInput(snippet, { maxResults: 0 }));
   assert.throws(() => validateSnippets([{ ...snippet, tool: { name: 'execute' } }]));
-  assert.throws(() => validateSnippets([{ ...snippet, services: ['drive/v3'] }]));
+  assert.throws(() => validateSnippets([{ ...snippet, services: ['sheets/v4'] }]));
   assert.throws(() => validateSnippets([snippet, snippet]));
   assert.ok(Object.isFrozen(snippet.inputSchema));
 });

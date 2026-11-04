@@ -92,7 +92,10 @@ test('Discovery is lazy, progressive, and resolves methods absent from a handwri
   });
   const root = await dynamic.describe();
   assert.deepEqual(root, {
-    services: [{ name: 'gmail', versions: ['v1'], paths: ['gmail/v1'] }],
+    services: [
+      { name: 'gmail', versions: ['v1'], paths: ['gmail/v1'] },
+      { name: 'drive', versions: ['v3'], paths: ['drive/v3'] },
+    ],
     next: 'Read the skill URI through MCP Resources, then follow service and resource paths with describe to each needed method for its signature and schemas before execute.',
     skill: 'skill://google-codemode-mcp/google-workspace/SKILL.md',
   });
@@ -105,7 +108,7 @@ test('Discovery is lazy, progressive, and resolves methods absent from a handwri
   const method = await dynamic.describe((nested.methods as { path: string }[])[0].path);
   assert.match(method.signature as string, /Promise/);
   assert.ok(method.responseSchema);
-  for (const invalid of ['gmail.users.messages.get', 'drive/v3', 'gmail/v1/nonexistent'])
+  for (const invalid of ['gmail.users.messages.get', 'sheets/v4', 'gmail/v1/nonexistent'])
     await assert.rejects(dynamic.describe(invalid), /follow its returned paths/);
   assert.deepEqual((await dynamic.describe('gmail/v1')).resources, ['gmail/v1/users']);
   assert.deepEqual((await dynamic.describe('gmail/v1/users')).resources, [
@@ -147,6 +150,134 @@ test('untrusted Discovery origins and schemas with invalid params never dispatch
     { userId: 'me', resource: {} },
     { userId: 'me', access_token: 'evil' },
   ]) {
+    const result = await dispatcher.call(list, params);
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error.outcome, 'not_dispatched');
+  }
+  assert.equal(requests, 0);
+});
+
+test('described parameters and declarations expose exactly the supported top-level contract', async () => {
+  const document = fixture();
+  const excluded = [
+    'key',
+    'access_token',
+    'AUTH',
+    'Headers',
+    'media',
+    'alt',
+    'uploadType',
+    'fields_',
+  ];
+  for (const name of excluded) document.parameters![name] = { type: 'string' };
+  const original = structuredClone(document);
+  const dynamic = new DiscoveryCatalog({ document });
+  const described = await dynamic.describe(list);
+  const parameters = described.parameters as Record<string, unknown>;
+  assert.equal(described.supported, true);
+  assert.deepEqual(Object.keys(parameters).sort(), ['fields', 'labelIds', 'maxResults', 'userId']);
+  assert.deepEqual(described.parameterOrder, ['userId']);
+  assert.deepEqual(
+    described.excludedParameters,
+    excluded.map((name) => ({
+      name,
+      reason: name === 'fields_' ? 'sdk_alias' : 'credentials_or_transport',
+      required: false,
+    })),
+  );
+  for (const name of excluded) {
+    assert.doesNotMatch(described.declarations as string, new RegExp(`"${name}"`));
+  }
+  assert.match(described.declarations as string, /"fields"\?: string/);
+  assert.equal(described.revision, 'fixture-1');
+  assert.deepEqual(
+    described.scopes,
+    original.resources!.users.resources!.messages.methods!.list.scopes,
+  );
+
+  const requested: string[] = [];
+  const dispatcher = createDispatcher({
+    catalog: dynamic,
+    accessToken: token,
+    requestId: 'projection',
+    transport: async (url) => {
+      requested.push(String(url));
+      return json({ messages: [] });
+    },
+  });
+  assert.equal((await dispatcher.call(list, { userId: 'me', fields: 'messages(id)' })).ok, true);
+  assert.match(requested[0], /fields=messages/);
+  for (const name of [...excluded, 'auth__', 'HEADERS_', 'maxResults_']) {
+    const result = await dispatcher.call(list, { userId: 'me', [name]: 'blocked' });
+    assert.equal(result.ok, false, name);
+    if (!result.ok) assert.equal(result.error.outcome, 'not_dispatched', name);
+  }
+  assert.equal(requested.length, 1);
+  assert.deepEqual(document, original, 'Caller projection must not mutate the native document');
+});
+
+test('transport-looking request-body fields remain native data rather than top-level overrides', async () => {
+  const document = fixture();
+  document.schemas!.Message.properties = {
+    auth: { type: 'string', required: true },
+    media: { type: 'object', additionalProperties: { type: 'string' } },
+    headers_: { type: 'string' },
+  };
+  document.parameters!.auth = { type: 'string' };
+  const dynamic = new DiscoveryCatalog({ document });
+  const described = await dynamic.describe(send);
+  assert.ok(!Object.hasOwn(described.parameters as object, 'auth'));
+  assert.match(described.declarations as string, /"auth": string/);
+  assert.match(described.declarations as string, /"headers_"\?: string/);
+  const body = { auth: 'application-data', media: { body: 'native-data' }, headers_: 'also-data' };
+  let observed: unknown;
+  const dispatcher = createDispatcher({
+    catalog: dynamic,
+    accessToken: token,
+    requestId: 'body-fields',
+    transport: async (_url, init) => {
+      observed = JSON.parse(String(init?.body));
+      assert.equal(new Headers(init?.headers).get('Authorization'), `Bearer ${token}`);
+      return json({ id: 'sent' });
+    },
+  });
+  assert.equal((await dispatcher.call(send, { userId: 'me', requestBody: body })).ok, true);
+  assert.deepEqual(observed, body);
+});
+
+test('a policy-excluded required native parameter makes the method explicitly unsupported', async () => {
+  const document = fixture();
+  document.resources!.users.resources!.messages.methods!.list.parameters!.AUTH = {
+    type: 'string',
+    required: true,
+  };
+  document.resources!.users.resources!.messages.methods!.list.parameterOrder = ['userId', 'AUTH'];
+  const dynamic = new DiscoveryCatalog({ document });
+  const described = await dynamic.describe(list);
+  assert.equal(described.supported, false);
+  assert.deepEqual(described.parameterOrder, ['userId']);
+  assert.equal((described.runtime as { json: boolean }).json, false);
+  assert.match(described.unsupportedReason as string, /required native parameter/);
+  assert.equal(described.signature, undefined);
+  assert.equal(described.declarations, undefined);
+  assert.deepEqual(described.excludedParameters, [
+    {
+      name: 'AUTH',
+      reason: 'credentials_or_transport',
+      required: true,
+    },
+  ]);
+  let requests = 0;
+  const dispatcher = createDispatcher({
+    catalog: dynamic,
+    accessToken: token,
+    requestId: 'required-exclusion',
+    transport: async () => {
+      requests++;
+      return json({});
+    },
+  });
+  for (const params of [{ userId: 'me' }, { userId: 'me', AUTH: 'blocked' }]) {
     const result = await dispatcher.call(list, params);
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.error.outcome, 'not_dispatched');
@@ -331,7 +462,18 @@ test('trusted snippet policy rejects mutations/service escapes before dispatch a
   assert.equal((await dispatcher.call(list, { userId: 'me' }, { services: ['drive'] })).ok, false);
   assert.equal((await dispatcher.call(list, { userId: 'me' })).ok, false);
   assert.equal(requests, 0);
-  assert.equal(dispatcher.outcomes.length, 2);
+  assert.equal(dispatcher.outcomes.length, 3);
+  assert.equal(dispatcher.outcomes.at(-1)?.path, list);
+  assert.equal(dispatcher.outcomes.at(-1)?.outcome, 'not_dispatched');
+  assert.equal(dispatcher.outcomesComplete, true, 'The first limit attempt still has a receipt');
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const result = await dispatcher.call(send, { userId: 'me' });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.error.code, 'CALL_LIMIT');
+  }
+  assert.equal(dispatcher.outcomes.length, 3, 'Repeated limit attempts cannot grow the ledger');
+  assert.equal(dispatcher.outcomesComplete, false, 'Omitted attempted paths cannot look complete');
+  assert.equal(requests, 0);
 });
 
 test('native path traversal is rejected before fetch and request bodies remain schema validated', async () => {
@@ -432,4 +574,107 @@ test('generated declarations parse for reserved Google names and retain selected
   assert.match(declarations, /"delete"\(params: Params\)/);
   assert.match(declarations, /"userId": string/);
   assert.doesNotMatch(declarations, /newlyDiscovered/);
+});
+
+function paginationFixture() {
+  const document = fixture();
+  const methods = document.resources!.users.resources!.messages.methods!;
+  methods.list.parameters!.q = { type: 'string' };
+  methods.list.parameters!.pageToken = { type: 'string' };
+  methods.get = { ...methods.remove, httpMethod: 'GET', response: { $ref: 'Message' } };
+  return new DiscoveryCatalog({ document });
+}
+
+test('list outcomes retain actual page requests and native continuation independently of returned data', async () => {
+  const urls: URL[] = [];
+  const dispatcher = createDispatcher({
+    catalog: paginationFixture(),
+    accessToken: token,
+    requestId: 'pagination',
+    transport: async (url) => {
+      const requested = new URL(String(url));
+      urls.push(requested);
+      return json(
+        requested.searchParams.has('pageToken')
+          ? { messages: [{ id: 'second' }] }
+          : { messages: [{ id: 'first' }], nextPageToken: 'native-page-two' },
+      );
+    },
+  });
+  const query = 'subject:fixture';
+  const first = await dispatcher.call(list, { userId: 'me', q: query, maxResults: 1 });
+  assert.equal(first.ok, true);
+  if (first.ok) (first.value.data as Record<string, unknown>).nextPageToken = 'forged';
+  const second = await dispatcher.call(list, {
+    userId: 'me',
+    q: query,
+    maxResults: 1,
+    pageToken: 'native-page-two',
+  });
+  assert.equal(second.ok, true);
+  assert.deepEqual(
+    dispatcher.outcomes.map((outcome) => outcome.pagination),
+    [
+      { query, maxResults: 1, nextPageToken: 'native-page-two' },
+      { query, maxResults: 1, requestedPageToken: 'native-page-two' },
+    ],
+  );
+  assert.equal(urls[0].searchParams.get('q'), query);
+  assert.equal(urls[1].searchParams.get('pageToken'), 'native-page-two');
+  await dispatcher.call(send, { userId: 'me' });
+  assert.equal(dispatcher.outcomes[2].pagination, undefined);
+  await dispatcher.call(list, { userId: 'me', maxResults: 501 });
+  assert.equal(dispatcher.outcomes[3].pagination, undefined);
+});
+
+test('unrepresentable pagination is omitted entirely without fabricating a final page or exposing secrets', async () => {
+  for (const nextPageToken of ['', null, 42, 'x'.repeat(2049), 'bad\npage', token]) {
+    const dispatcher = createDispatcher({
+      catalog: paginationFixture(),
+      accessToken: token,
+      requestId: 'unsafe-page',
+      transport: async () => json({ messages: [], nextPageToken }),
+    });
+    assert.equal((await dispatcher.call(list, { userId: 'me', maxResults: 1 })).ok, true);
+    assert.equal(dispatcher.outcomes[0].pagination, undefined);
+    assert.ok(!JSON.stringify(dispatcher.outcomes).includes(token));
+  }
+  for (const params of [{ q: 'x'.repeat(4097) }, { q: token }, { pageToken: 'x'.repeat(2049) }]) {
+    const dispatcher = createDispatcher({
+      catalog: paginationFixture(),
+      accessToken: token,
+      requestId: 'unsafe-request',
+      transport: async () => json({ messages: [] }),
+    });
+    assert.equal((await dispatcher.call(list, { userId: 'me', ...params })).ok, true);
+    assert.equal(dispatcher.outcomes[0].pagination, undefined);
+  }
+});
+
+test('get outcomes identify only validated dispatched reads, including native rejections', async () => {
+  const dispatcher = createDispatcher({
+    catalog: paginationFixture(),
+    accessToken: token,
+    requestId: 'get-resource',
+    transport: async (url) =>
+      String(url).includes('missing')
+        ? json({ error: { message: 'Not Found' } }, 404)
+        : json({ id: 'present' }),
+  });
+  const get = 'gmail/v1/users.messages.get';
+  await dispatcher.call(get, { userId: 'me', id: 'present' });
+  await dispatcher.call(get, { userId: 'me', id: 'missing' });
+  await dispatcher.call(get, { userId: 'me' });
+  await dispatcher.call(get, { userId: 'me', id: 'x'.repeat(257) });
+  await dispatcher.call(get, { userId: 'me', id: token });
+  assert.deepEqual(
+    dispatcher.outcomes.map(({ outcome, resourceId }) => ({ outcome, resourceId })),
+    [
+      { outcome: 'acknowledged', resourceId: 'present' },
+      { outcome: 'rejected', resourceId: 'missing' },
+      { outcome: 'not_dispatched', resourceId: undefined },
+      { outcome: 'acknowledged', resourceId: undefined },
+      { outcome: 'acknowledged', resourceId: undefined },
+    ],
+  );
 });

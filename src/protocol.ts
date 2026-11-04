@@ -13,7 +13,7 @@ export const MCP_VERSION = '2026-07-28';
 // Kept identical to the distributable skill; protocol.test.ts verifies the bytes.
 export const WORKSPACE_SKILL = `---
 name: google-workspace
-description: Discover Google Workspace API methods and run JavaScript through the describe and execute tools. The first deployment supports Gmail v1.
+description: Discover Google Workspace API methods and run JavaScript through the describe and execute tools. This deployment supports Gmail v1 and Drive v3.
 ---
 
 # Google Workspace Code Mode
@@ -27,7 +27,9 @@ clients: this deployment's available methods, parameters, schemas and transport
 limits come from its Discovery document.
 
 Use \`execute\` to submit JavaScript. The trusted caller supplies a short-lived
-OAuth \`accessToken\` as a request argument. The program receives \`google\`, \`inputs\`,
+OAuth \`accessToken\` as a request argument. When a gateway hides this argument,
+omit it: the gateway injects its current caller grant. Never invent or supply a
+token in code. The program receives \`google\`, \`inputs\`,
 and deployment-provided \`snippets\`; it does not receive the token. Keep user data
 in \`inputs\` instead of interpolating it into code.
 
@@ -66,9 +68,14 @@ Invoke a bundled snippet from code with \`await snippets.run('gmailInbox', input
 Read its descriptor with \`describe({path: 'snippets'})\`. Google scope declarations
 are requirements, not grants; available scopes are unknown for an opaque token.
 
-This slice supports JSON requests and responses, including Gmail base64url message
-bodies and attachments returned in JSON. Media upload/download overrides are
-rejected. Google acknowledgement of a send does not establish recipient delivery.
+JSON requests and responses include Gmail base64url message bodies and attachments.
+For Drive, use \`google.drive({version: 'v3'})\` and describe its native methods.
+Supported media methods declare \`runtime.mediaDownload\`, \`mediaSelection\`, and
+\`maxDownloadBytes\`: \`files.get\` accepts \`alt: 'media'\`, while \`files.export\` returns
+bytes directly. Media \`.data\` is \`{encoding: 'base64', data, size, mimeType, sha256}\`;
+\`data\` contains standard base64. Decode it in the host when saving a file and verify
+its byte length/hash. Downloads are limited to 131072 raw bytes. Media uploads,
+transport overrides and durable artifacts remain unavailable. Google acknowledgement of a send does not establish recipient delivery.
 
 References:
 

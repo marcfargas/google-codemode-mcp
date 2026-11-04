@@ -6,13 +6,16 @@ export interface ExecutionReceipt<T = unknown> {
   status: 'completed' | 'error';
   result: T;
   hasUnknownOutcome: boolean;
+  outcomesComplete: boolean;
   outcomes: {
     path: string;
     mutation: boolean;
     outcome: 'acknowledged' | 'rejected' | 'unknown' | 'not_dispatched';
     httpStatus?: number;
+    resourceId?: string;
+    mutationFields?: string[];
   }[];
-  discovery: { service: string; version: string; source: string; revision: string } | null;
+  discovery: { service: string; version: string; source: string; revision: string }[] | null;
 }
 
 /** Exercise the deployed bundle locally; Google outbound traffic is not mocked. */

@@ -104,6 +104,7 @@ async function main() {
     output,
     repeats = '1',
     selection,
+    cases,
     preflight_only,
   } = process.env;
   if (
@@ -119,9 +120,19 @@ async function main() {
     selectCells(selection);
     if (repeats !== '1') throw new Error('Matrix uses one attempt per selected cell');
   } else getCellByModel(model);
-  if (profile !== 'gmail')
+  if (cases) {
+    if (profile === 'gmail') {
+      const { selectGmailCases } = await import('./cases.ts');
+      selectGmailCases(cases);
+    } else if (profile === 'drive') {
+      const { selectDriveCases } = await import('./drive.ts');
+      selectDriveCases(cases);
+    }
+    if (!selection) throw new Error('Case suites require a model selection');
+  }
+  if (!['gmail', 'drive'].includes(profile))
     throw new Error(
-      'Coverage unavailable: only Gmail is implemented; Drive, Sheets, Docs, Calendar remain pending',
+      'Coverage unavailable: Gmail and Drive implemented; Sheets, Docs, Calendar remain pending',
     );
   if (!isAbsolute(output)) throw new Error('Output must be an absolute path outside the checkout');
   await mkdir(dirname(output), { recursive: true });
@@ -196,6 +207,8 @@ async function main() {
         `profile=${profile}`,
         '--input',
         selection ? `selection=${selection}` : `model=${model}`,
+        '--input',
+        `cases=${cases ?? ''}`,
         '--input',
         `proxy_url=${proxy}`,
         '--input',

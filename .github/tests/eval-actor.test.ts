@@ -436,7 +436,11 @@ test(
           {
             snippets: [],
             describe: async () => ({ services: ['gmail/v1'] }),
-            execute: async () => ({ outcomes: [], hasUnknownOutcome: false }),
+            execute: async () => ({
+              outcomes: [],
+              outcomesComplete: true,
+              hasUnknownOutcome: false,
+            }),
             runSnippet: async () => ({}),
           },
         );

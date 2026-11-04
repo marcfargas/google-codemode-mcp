@@ -1,7 +1,14 @@
 import { Validator } from '@cfworker/json-schema';
 import { Discovery } from 'googleapis-common/build/src/discovery.js';
-import { DiscoveryCatalog, jsonSchema, referencedDefinitions } from './discovery.ts';
+import {
+  DiscoveryCatalog,
+  jsonSchema,
+  referencedDefinitions,
+  MAX_DOWNLOAD_BYTES,
+} from './discovery.ts';
 import type { DiscoveryDocument, MethodMetadata } from './discovery.ts';
+import { callableParameters, parameterExclusion, supportsDownload } from './parameters.ts';
+import { servicePath } from './services.ts';
 
 export type Outcome = 'not_dispatched' | 'rejected' | 'acknowledged' | 'unknown';
 export interface CallOutcome {
@@ -10,6 +17,14 @@ export interface CallOutcome {
   mutation: boolean;
   outcome: Outcome;
   httpStatus?: number;
+  resourceId?: string;
+  mutationFields?: string[];
+  pagination?: {
+    requestedPageToken?: string;
+    nextPageToken?: string;
+    maxResults?: number;
+    query?: string;
+  };
 }
 export interface SafeGoogleError {
   code: string;
@@ -48,19 +63,36 @@ function endpointFactory(document: DiscoveryDocument): EndpointFactory {
   ).makeEndpoint(document);
 }
 
+function containsBytes(bytes: Uint8Array, needle: Uint8Array): boolean {
+  // Linear matching bounds hostile near-matches under Worker CPU limits.
+  const prefix = new Uint32Array(needle.length);
+  for (let index = 1, matched = 0; index < needle.length; index++) {
+    while (matched && needle[index] !== needle[matched]) matched = prefix[matched - 1];
+    if (needle[index] === needle[matched]) matched++;
+    prefix[index] = matched;
+  }
+  for (let index = 0, matched = 0; index < bytes.length; index++) {
+    while (matched && bytes[index] !== needle[matched]) matched = prefix[matched - 1];
+    if (bytes[index] === needle[matched]) matched++;
+    if (matched === needle.length) return true;
+  }
+  return false;
+}
+
 function validate(method: MethodMetadata, params: unknown, document: DiscoveryDocument): boolean {
   if (!params || typeof params !== 'object' || Array.isArray(params)) return false;
+  const projection = callableParameters(method);
+  if (!method.supported || !projection.supported) return false;
   const properties = Object.fromEntries(
-    Object.entries(method.parameters ?? {}).map(([name, schema]) => [name, jsonSchema(schema)]),
+    Object.entries(projection.parameters).map(([name, schema]) => [name, jsonSchema(schema)]),
   );
-  const reserved =
-    /^(auth|headers|rootUrl|url|options|retry|retryConfig|adapter|fetchImplementation|accessToken|oauth_token|access_token|key|resource|media|uploadType|upload_protocol|callback|alt)_*$/i;
   for (const key of Object.keys(params)) {
     // The native SDK unaliases trailing underscores after extracting auth and
     // headers. Never allow an alias to bypass the actual Discovery whitelist.
-    if (reserved.test(key) || key.endsWith('_')) return false;
+    if (parameterExclusion(key) && !(key === 'alt' && Object.hasOwn(projection.parameters, 'alt')))
+      return false;
   }
-  for (const [name, schema] of Object.entries(method.parameters ?? {})) {
+  for (const [name, schema] of Object.entries(projection.parameters)) {
     if (schema.location !== 'path') continue;
     const raw = (params as Record<string, unknown>)[name];
     if (typeof raw !== 'string') continue;
@@ -85,13 +117,13 @@ function validate(method: MethodMetadata, params: unknown, document: DiscoveryDo
       properties,
       additionalProperties: false,
       required: [
-        ...Object.entries(method.parameters ?? {})
+        ...Object.entries(projection.parameters)
           .filter(([, value]) => value.required)
           .map(([name]) => name),
         ...(method.request?.required ? ['requestBody'] : []),
       ],
       definitions: referencedDefinitions(document, [
-        ...Object.values(method.parameters ?? {}),
+        ...Object.values(projection.parameters),
         ...(method.request ? [method.request] : []),
       ]),
     },
@@ -114,6 +146,46 @@ export function createDispatcher(options: DispatcherOptions) {
     callTimeoutMs: 15_000,
     ...options.limits,
   };
+  function safeHeaders(source: HeadersInit): Record<string, string> {
+    const result: Record<string, string> = {};
+    const headers = new Headers(source);
+    for (const name of ['etag', 'content-type', 'retry-after']) {
+      const value = headers.get(name);
+      if (value && (!accessToken || !value.includes(accessToken))) result[name] = value;
+    }
+    return result;
+  }
+
+  // Outcome annotations come from validated native calls, never program output.
+  // Omit an unrepresentable page entirely: dropping only its token could falsely
+  // imply that a response was the final page.
+  const safeAnnotation = (value: unknown, maxLength: number): value is string =>
+    typeof value === 'string' &&
+    value.length <= maxLength &&
+    !/[\u0000-\u001f\u007f]/.test(value) &&
+    (!accessToken || !value.includes(accessToken));
+
+  function pagination(params: unknown, data: unknown): CallOutcome['pagination'] {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
+    const request = params as Record<string, unknown>;
+    const response = data as Record<string, unknown>;
+    const result: NonNullable<CallOutcome['pagination']> = {};
+    for (const [source, name, field, bound] of [
+      [request, 'pageToken', 'requestedPageToken', 2048],
+      [request, 'q', 'query', 4096],
+      [response, 'nextPageToken', 'nextPageToken', 2048],
+    ] as const) {
+      if (!Object.hasOwn(source, name)) continue;
+      const value = source[name];
+      if (!safeAnnotation(value, bound) || (name !== 'q' && !value.length)) return undefined;
+      result[field] = value;
+    }
+    if (Object.hasOwn(request, 'maxResults')) {
+      if (!Number.isInteger(request.maxResults)) return undefined;
+      result.maxResults = request.maxResults as number;
+    }
+    return result;
+  }
 
   const failure = (
     record: CallOutcome,
@@ -140,7 +212,14 @@ export function createDispatcher(options: DispatcherOptions) {
     if (closed || (method.mutation && unknown)) {
       return failure(record, 'DISPATCH_CLOSED', 'Further Google dispatch is blocked');
     }
-    const document = await catalog.document();
+    const selectedService = servicePath(method.path);
+    const document = await catalog.document(selectedService);
+    const media =
+      supportsDownload(method) &&
+      ((params as Record<string, unknown>).alt === 'media' || !method.response);
+    const responseLimit = media
+      ? Math.min(limits.maxResponseBytes, MAX_DOWNLOAD_BYTES)
+      : limits.maxResponseBytes;
     const controller = new AbortController();
     active.set(record, controller);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -150,6 +229,7 @@ export function createDispatcher(options: DispatcherOptions) {
     try {
       const endpoint = endpointFactory(document)({
         retry: false,
+        ...(media ? { responseType: 'arraybuffer' } : {}),
         headers: { Authorization: `Bearer ${accessToken}` },
         fetchImplementation: async (url: string | URL | Request, init?: RequestInit) => {
           const target = new URL(
@@ -163,6 +243,29 @@ export function createDispatcher(options: DispatcherOptions) {
             throw new Error('Dispatch gate closed');
           const headers = new Headers(init?.headers);
           headers.set('Authorization', `Bearer ${accessToken}`);
+          const id = (params as Record<string, unknown>).id;
+          if (method.path === 'gmail/v1/users.messages.get' && safeAnnotation(id, 256))
+            record.resourceId = id;
+          const fileId = (params as Record<string, unknown>).fileId;
+          if (selectedService === 'drive/v3' && safeAnnotation(fileId, 256))
+            record.resourceId = fileId;
+          if (method.path === 'drive/v3/files.update') {
+            const body = (params as Record<string, unknown>).requestBody;
+            const fields =
+              body && typeof body === 'object' && !Array.isArray(body)
+                ? Object.keys(body).sort()
+                : body === undefined
+                  ? []
+                  : undefined;
+            if (
+              fields &&
+              fields.length <= 64 &&
+              fields.every(
+                (field) => safeAnnotation(field, 128) && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(field),
+              )
+            )
+              record.mutationFields = fields;
+          }
           dispatched = true;
           record.outcome = 'unknown';
           const response = await (options.transport ?? fetch)(url, {
@@ -193,7 +296,7 @@ export function createDispatcher(options: DispatcherOptions) {
                   return;
                 }
                 received += value.byteLength;
-                if (received > limits.maxResponseBytes) {
+                if (received > responseLimit) {
                   bodyLimitExceeded = true;
                   await reader.cancel('Google response exceeds byte limit');
                   stream.error(new Error('Google response exceeds byte limit'));
@@ -216,7 +319,7 @@ export function createDispatcher(options: DispatcherOptions) {
         },
       });
       let target: unknown = endpoint;
-      for (const segment of method.path.slice('gmail/v1/'.length).split('.')) {
+      for (const segment of method.path.slice(selectedService.length + 1).split('.')) {
         if (!target || typeof target !== 'object' || !Object.hasOwn(target, segment)) {
           throw new Error('Native method unavailable');
         }
@@ -247,6 +350,40 @@ export function createDispatcher(options: DispatcherOptions) {
       }
       record.httpStatus = response.status;
       record.outcome = 'acknowledged';
+      if (media) {
+        if (!(response.data instanceof ArrayBuffer))
+          return failure(record, 'INVALID_MEDIA', 'Google media response was not bytes');
+        const bytes = new Uint8Array(response.data);
+        if (bytes.length > responseLimit)
+          return failure(record, 'RESPONSE_LIMIT', 'Google response exceeds execution limit');
+        const tokenBytes = new TextEncoder().encode(accessToken);
+        if (tokenBytes.length && containsBytes(bytes, tokenBytes))
+          return failure(
+            record,
+            'CREDENTIAL_ECHO',
+            'Google media response contained credential bytes',
+          );
+        const responseHeaders = new Headers(response.headers);
+        const mimeType = responseHeaders.get('content-type') ?? 'application/octet-stream';
+        if (
+          mimeType.length > 256 ||
+          /[\u0000-\u001f\u007f]/.test(mimeType) ||
+          (accessToken && mimeType.includes(accessToken))
+        )
+          return failure(record, 'INVALID_MEDIA', 'Google media metadata was invalid');
+        const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+        const sha256 = Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
+        let binary = '';
+        for (const byte of bytes) binary += String.fromCharCode(byte);
+        return {
+          ok: true,
+          value: {
+            data: { encoding: 'base64', data: btoa(binary), size: bytes.length, mimeType, sha256 },
+            status: response.status,
+            headers: safeHeaders(response.headers),
+          },
+        };
+      }
       const serialized = JSON.stringify(response.status === 204 ? null : (response.data ?? null));
       if (new TextEncoder().encode(serialized).length > limits.maxResponseBytes) {
         return failure(record, 'RESPONSE_LIMIT', 'Google response exceeds execution limit');
@@ -255,13 +392,14 @@ export function createDispatcher(options: DispatcherOptions) {
       const data = accessToken
         ? JSON.parse(serialized.split(escapedToken).join('[REDACTED]'))
         : JSON.parse(serialized);
-      const headers: Record<string, string> = {};
-      const responseHeaders = new Headers(response.headers);
-      for (const name of ['etag', 'content-type', 'retry-after']) {
-        const value = responseHeaders.get(name);
-        if (value && !value.includes(accessToken)) headers[name] = value;
+      if (method.path === 'gmail/v1/users.messages.list') {
+        const observed = pagination(params, response.data);
+        if (observed) record.pagination = observed;
       }
-      return { ok: true, value: { data, status: response.status, headers } };
+      return {
+        ok: true,
+        value: { data, status: response.status, headers: safeHeaders(response.headers) },
+      };
     } catch (error) {
       const native = error as {
         response?: { status?: number; data?: { error?: { errors?: { reason?: string }[] } } };
@@ -277,8 +415,19 @@ export function createDispatcher(options: DispatcherOptions) {
             ? 'rejected'
             : 'unknown';
       if (method.mutation && record.outcome === 'unknown') unknown = true;
-      const reasons = native.response?.data?.error?.errors
-        ?.map((item) => item.reason)
+      let errorData: unknown = native.response?.data;
+      if (errorData instanceof ArrayBuffer) {
+        try {
+          errorData = JSON.parse(new TextDecoder().decode(errorData));
+        } catch {
+          errorData = undefined;
+        }
+      }
+      const errors = (errorData as { error?: { errors?: unknown } } | undefined)?.error?.errors;
+      const reasons = (Array.isArray(errors) ? errors : [])
+        .map((item: unknown) =>
+          item && typeof item === 'object' ? (item as { reason?: unknown }).reason : undefined,
+        )
         .filter(
           (reason): reason is string =>
             typeof reason === 'string' &&
@@ -301,6 +450,9 @@ export function createDispatcher(options: DispatcherOptions) {
 
   return {
     outcomes,
+    get outcomesComplete() {
+      return sequence === outcomes.length;
+    },
     get hasUnknownOutcome() {
       return unknown;
     },
@@ -316,14 +468,20 @@ export function createDispatcher(options: DispatcherOptions) {
       const record: CallOutcome = {
         callId: `${options.requestId}:${++sequence}`,
         path:
-          typeof path === 'string' && path.length <= 256 && /^gmail\/v1\/[A-Za-z0-9_.]+$/.test(path)
+          typeof path === 'string' &&
+          path.length <= 256 &&
+          /^(gmail\/v1|drive\/v3)\/[A-Za-z0-9_.]+$/.test(path)
             ? path
             : '<invalid>',
         mutation: true,
         outcome: 'not_dispatched',
       };
-      if (sequence > limits.maxCalls)
+      if (sequence > limits.maxCalls) {
+        // Retain one bounded limit record; further attempts cannot grow the ledger.
+        // outcomesComplete then reports whether any attempts were omitted.
+        if (sequence === limits.maxCalls + 1) outcomes.push(record);
         return failure(record, 'CALL_LIMIT', 'Google call limit exceeded');
+      }
       outcomes.push(record);
       if (record.path === '<invalid>')
         return failure(record, 'INVALID_PATH', 'Invalid Google method path');
@@ -333,7 +491,7 @@ export function createDispatcher(options: DispatcherOptions) {
         record.mutation = method.mutation;
         if (
           (policy?.readOnly && method.mutation) ||
-          (policy?.services && !policy.services.includes('gmail/v1'))
+          (policy?.services && !policy.services.includes(servicePath(method.path)))
         ) {
           return failure(
             record,
@@ -341,13 +499,14 @@ export function createDispatcher(options: DispatcherOptions) {
             'Snippet policy does not permit this Google call',
           );
         }
-        if (!validate(method, params, await catalog.document())) {
+        if (!validate(method, params, await catalog.document(servicePath(method.path)))) {
           return failure(
             record,
             'INVALID_PARAMS',
             'Parameters do not match the supported Google method schema',
           );
         }
+        params = structuredClone(params);
       } catch {
         return failure(record, 'DISCOVERY_ERROR', 'Google method discovery failed');
       }
