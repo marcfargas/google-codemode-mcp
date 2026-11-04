@@ -63,7 +63,9 @@ export async function retainCandidateSource(destination) {
       '-z',
       '--',
       '.github/eval',
+      '.github/hosted',
       '.github/tests/eval-*.test.ts',
+      '.github/tests/hosted*.test.ts',
       '.github/workflows/evaluate.yml',
       '.github/worker-client.ts',
       '.github/run.mjs',
@@ -106,7 +108,18 @@ async function main() {
     selection,
     cases,
     preflight_only,
+    runner,
   } = process.env;
+  if (
+    runner &&
+    (runner !== 'codex' ||
+      profile !== 'gmail' ||
+      model !== 'gpt-6.1-sol' ||
+      !!selection ||
+      !!cases ||
+      repeats !== '1')
+  )
+    throw new Error('Native Codex is one optional Gmail read-search/Sol probe');
   if (
     !profile ||
     (!model && !selection) ||
@@ -152,8 +165,31 @@ async function main() {
         : (process.env.CPA_CLIENT_API_KEY ??
           (await readFile(join(homedir(), '.config/cpa-manager-plus/client-key'), 'utf8')).trim());
     if (!key && preflight_only !== 'true') throw new Error('Missing CPA_CLIENT_API_KEY');
+    const backend = process.env.EVAL_BACKEND || 'local';
+    if (!['local', 'hosted'].includes(backend))
+      throw new Error('Select local or hosted evaluation backend');
+    const hosted = {};
+    if (backend === 'hosted' && preflight_only !== 'true') {
+      for (const name of [
+        'HOSTED_VERIFICATION_URL',
+        'HOSTED_EXPECTED_CANDIDATE_DIGEST',
+        'HOSTED_EXPECTED_WORKER_VERSION',
+        'HOSTED_ACCESS_HEADERS_JSON',
+      ]) {
+        if (!process.env[name]) throw new Error(`Missing ${name}`);
+        hosted[name] = process.env[name];
+      }
+    }
     const credentials =
-      preflight_only === 'true' ? {} : { ...(await localCredentials()), CPA_CLIENT_API_KEY: key };
+      preflight_only === 'true'
+        ? {}
+        : {
+            ...(await localCredentials()),
+            CPA_CLIENT_API_KEY: key,
+            ...(hosted.HOSTED_ACCESS_HEADERS_JSON
+              ? { HOSTED_ACCESS_HEADERS_JSON: hosted.HOSTED_ACCESS_HEADERS_JSON }
+              : {}),
+          };
     const secrets = join(directory, 'secrets');
     const empty = join(directory, 'empty');
     await writeFile(empty, '', { mode: 0o600 });
@@ -179,6 +215,20 @@ async function main() {
     });
     await writeFile(join(destination, 'source.patch'), patch);
     await retainCandidateSource(destination);
+    await writeFile(
+      join(destination, 'container-profile.json'),
+      JSON.stringify(
+        {
+          nativeCodex: runner === 'codex',
+          securityOpt: runner === 'codex' ? ['seccomp=unconfined'] : [],
+          privileged: false,
+          addedCapabilities: [],
+        },
+        null,
+        2,
+      ) + '\n',
+      { mode: 0o600 },
+    );
     const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
     const child = spawn(
       'act',
@@ -198,11 +248,16 @@ async function main() {
         '--container-daemon-socket',
         '-',
         '--container-options',
-        `--volume ${quote(`${destination}:/eval-evidence`)}`,
+        `${runner === 'codex' ? '--security-opt seccomp=unconfined ' : ''}--volume ${quote(`${destination}:/eval-evidence`)}`,
         '--env',
         `EVAL_OWNER_UID=${process.getuid()}`,
         '--env',
         `EVAL_OWNER_GID=${process.getgid()}`,
+        '--input',
+        `backend=${backend}`,
+        ...Object.entries(hosted)
+          .filter(([name]) => name !== 'HOSTED_ACCESS_HEADERS_JSON')
+          .flatMap(([name, value]) => ['--var', `${name}=${value}`]),
         '--input',
         `profile=${profile}`,
         '--input',
@@ -217,6 +272,8 @@ async function main() {
         `repeats=${repeats}`,
         '--input',
         `preflight_only=${preflight_only === 'true'}`,
+        '--input',
+        `native_codex_probe=${runner === 'codex'}`,
         '-P',
         'ubuntu-latest=catthehacker/ubuntu:act-latest',
       ],

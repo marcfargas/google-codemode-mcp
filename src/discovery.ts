@@ -59,6 +59,8 @@ export interface MethodMetadata extends DiscoveryMethod {
 
 export const GMAIL_DISCOVERY_URL = SERVICES['gmail/v1'].discoveryUrl;
 export const MAX_DOWNLOAD_BYTES = 128 * 1024;
+const DISCOVERY_NEXT =
+  "Before execute, describe every distinct Google method the program may call, including calls inside helpers, loops and branches. A resource listing or another method's schemas do not describe that method. Reuse method descriptions already read in this conversation.";
 export const MEDIA_SCHEMA = {
   type: 'object',
   required: ['encoding', 'data', 'size', 'mimeType', 'sha256'],
@@ -276,6 +278,7 @@ export class DiscoveryCatalog {
         signature: method.supported
           ? `${path.slice(key.length + 1)}(params): Promise<{ data, status, headers }>`
           : undefined,
+        next: DISCOVERY_NEXT,
         unsupportedReason: method.supported
           ? undefined
           : 'A required native parameter is excluded by the execution parameter policy',
@@ -321,6 +324,7 @@ export class DiscoveryCatalog {
       source: service.discoveryUrl,
       resources: [...resources].map((name) => `${key}/${name}`),
       methods: direct,
+      next: DISCOVERY_NEXT,
       schemaPath: `${key}#<SchemaName>`,
     };
   }

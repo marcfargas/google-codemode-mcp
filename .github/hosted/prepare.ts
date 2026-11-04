@@ -8,23 +8,33 @@ const checkout = fileURLToPath(new URL('../../', import.meta.url).href);
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 
 /** Prepare exact retained deploy bytes without authenticating or publishing. */
-export async function prepareHosted(output: string) {
+export async function prepareHosted(output: string, mode: 'probes' | 'product' = 'probes') {
+  if (!['probes', 'product'].includes(mode))
+    throw new Error('Select probes or product preparation');
   const relativeOutput = relative(checkout, output);
   if (!isAbsolute(output) || !(relativeOutput === '..' || relativeOutput.startsWith('../')))
     throw new Error('Use a new absolute evidence directory outside the checkout');
   await mkdir(output, { mode: 0o700 });
-  const sourcePaths = ['package-lock.json', '.github/hosted/wrangler.json'];
+  const sourcePaths = [
+    'package.json',
+    'package-lock.json',
+    'snippets.config.ts',
+    'wrangler.jsonc',
+    'skills/google-workspace/SKILL.md',
+    '.github/hosted/wrangler.json',
+  ];
   for (const directory of ['src', '.github/hosted'])
     for (const file of await readdir(join(checkout, directory)))
       if (file.endsWith('.ts')) sourcePaths.push(`${directory}/${file}`);
   const sourceFiles: Record<string, string> = {};
   for (const path of sourcePaths.sort())
     sourceFiles[path] = hash(await readFile(join(checkout, path)));
-  const sourceDigest = hash(JSON.stringify(sourceFiles));
+  const sourceDigest = hash(JSON.stringify({ mode, sourceFiles }));
   const result = spawnSync(
     join(checkout, 'node_modules/.bin/wrangler'),
     [
       'deploy',
+      join(checkout, `.github/hosted/${mode === 'product' ? 'product' : 'worker'}.ts`),
       '--dry-run',
       '--config',
       join(checkout, '.github/hosted/wrangler.json'),
@@ -36,7 +46,8 @@ export async function prepareHosted(output: string) {
   await writeFile(join(output, 'prepare.log'), result.stdout + result.stderr, { mode: 0o600 });
   if (result.error || result.status !== 0)
     throw new Error('Verification bundle preparation failed; inspect retained prepare.log');
-  const bundle = await readFile(join(output, 'worker.js'));
+  const bundle = await readFile(join(output, mode === 'product' ? 'product.js' : 'worker.js'));
+  if (mode === 'product') await writeFile(join(output, 'worker.js'), bundle, { mode: 0o600 });
   const config = JSON.parse(await readFile(join(checkout, '.github/hosted/wrangler.json'), 'utf8'));
   delete config.$schema;
   const deployment = {
@@ -51,6 +62,7 @@ export async function prepareHosted(output: string) {
   }).stdout.trim();
   const manifest = {
     harnessVersion: 1,
+    mode,
     sourceDigest,
     sourceFiles,
     bundleSha256: hash(bundle),
@@ -67,7 +79,7 @@ export async function prepareHosted(output: string) {
   return manifest;
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  prepareHosted(process.argv[2] ?? '')
+  prepareHosted(process.argv[2] ?? '', (process.argv[3] ?? 'probes') as 'probes' | 'product')
     .then((manifest) => console.log(`Prepared ${manifest.sourceDigest}; no deployment performed`))
     .catch(() => {
       console.error(

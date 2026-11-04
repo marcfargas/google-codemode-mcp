@@ -24,6 +24,13 @@ import {
   RESPONSES_RUNNER_VERSION,
 } from './responses.ts';
 import type { Runner } from './matrix.ts';
+import {
+  CODEX_CLI_VERSION,
+  codexConfiguration,
+  codexLaunchArguments,
+  parseCodexTranscript,
+  summarizeCodexUsage,
+} from './codex.ts';
 
 const ACTOR_UID = 61337;
 const CLI_VERSION = '2.1.318';
@@ -42,7 +49,9 @@ export function parseActorTranscript(
 ) {
   return runner === 'responses'
     ? parseResponsesTranscript(text, exitCode, timedOut)
-    : parseTranscript(text, exitCode, timedOut);
+    : runner === 'codex'
+      ? parseCodexTranscript(text, exitCode, timedOut)
+      : parseTranscript(text, exitCode, timedOut);
 }
 
 export function summarizeActorUsage(
@@ -52,7 +61,9 @@ export function summarizeActorUsage(
 ): any {
   return runner === 'responses'
     ? summarizeResponsesUsage(native, model)
-    : summarizeUsage(native, model);
+    : runner === 'codex'
+      ? summarizeCodexUsage(native, model)
+      : summarizeUsage(native, model);
 }
 type ObjectValue = Record<string, unknown>;
 function object(value: unknown): ObjectValue {
@@ -253,9 +264,9 @@ export async function collectFiles(workspace: string): Promise<Record<string, st
   return files;
 }
 
-async function nativeCli() {
+async function nativeCli(runner: 'claude' | 'codex' = 'claude') {
   for (const directory of SYSTEM_PATH.split(':')) {
-    const candidate = join(directory, 'claude');
+    const candidate = join(directory, runner);
     try {
       await access(candidate, constants.X_OK);
       const native = await realpath(candidate);
@@ -267,14 +278,18 @@ async function nativeCli() {
         encoding: 'utf8',
         timeout: 5_000,
       });
-      if (version.status !== 0 || version.stdout.trim() !== `${CLI_VERSION} (Claude Code)`)
-        throw new Error(`Expected native Claude ${CLI_VERSION}; observed ${version.stdout.trim()}`);
+      const expected =
+        runner === 'claude' ? `${CLI_VERSION} (Claude Code)` : `codex-cli ${CODEX_CLI_VERSION}`;
+      if (version.status !== 0 || version.stdout.trim() !== expected)
+        throw new Error(`Expected native ${expected}; observed ${version.stdout.trim()}`);
       return { executable: candidate, version: version.stdout.trim() };
     } catch (error) {
       if (object(error).code !== 'ENOENT' && object(error).code !== 'EACCES') throw error;
     }
   }
-  throw new Error('Root-owned globally installed native Claude CLI not found on system PATH');
+  throw new Error(
+    `Root-owned globally installed native ${runner === 'claude' ? 'Claude' : 'Codex'} CLI not found on system PATH`,
+  );
 }
 function loopbackUrl(value: string) {
   const url = new URL(value);
@@ -412,22 +427,36 @@ async function runIsolatedActor(options: ActorOptions, runtime?: string) {
   });
   const runner = options.runner ?? 'claude';
   const cli =
-    runner === 'claude'
-      ? await nativeCli()
-      : { executable: process.execPath, version: RESPONSES_RUNNER_VERSION };
+    runner === 'responses'
+      ? { executable: process.execPath, version: RESPONSES_RUNNER_VERSION }
+      : await nativeCli(runner);
+  if (runner === 'codex') {
+    const configuration = codexConfiguration({
+      model: options.model,
+      mcpUrl,
+      proxyUrl,
+      systemPrompt: `${ACTOR_SYSTEM_PROMPT}\nWorking directory: ${workspace}.`,
+    });
+    const configPath = join(ACTOR_HOME, 'config', 'config.toml');
+    await writeFile(configPath, configuration, { mode: 0o600 });
+    await chown(configPath, ACTOR_UID, ACTOR_UID);
+    await writeFile(join(output, 'native-codex-config.toml'), configuration, { mode: 0o600 });
+  }
   const args =
     runner === 'claude'
       ? actorLaunchArguments({ model: options.model, mcpUrl, workspace })
-      : [
-          join(runtime!, 'runner.mjs'),
-          '--responses-runner',
-          JSON.stringify({
-            model: options.model,
-            mcpUrl,
-            proxyUrl,
-            systemPrompt: `${ACTOR_SYSTEM_PROMPT}\nWorking directory: ${workspace}.`,
-          }),
-        ];
+      : runner === 'codex'
+        ? codexLaunchArguments(workspace)
+        : [
+            join(runtime!, 'runner.mjs'),
+            '--responses-runner',
+            JSON.stringify({
+              model: options.model,
+              mcpUrl,
+              proxyUrl,
+              systemPrompt: `${ACTOR_SYSTEM_PROMPT}\nWorking directory: ${workspace}.`,
+            }),
+          ];
   const env =
     runner === 'claude'
       ? {
@@ -436,11 +465,21 @@ async function runIsolatedActor(options: ActorOptions, runtime?: string) {
           ANTHROPIC_BASE_URL: proxyUrl,
           MCP_PROTOCOL_NEGOTIATION: 'auto',
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+          CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1',
           DISABLE_AUTOUPDATER: '1',
           CLAUDE_CODE_MAX_RETRIES: '0',
           CLAUDE_CODE_NONSTREAMING_TIMEOUT_RETRIES: '0',
+          CLAUDE_CODE_DISABLE_REFUSAL_RETRY: '1',
+          CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK: '1',
+          CLAUDE_CODE_MAX_OUTPUT_TOKENS: '2048',
         }
-      : { ...minimalEnv() };
+      : runner === 'codex'
+        ? {
+            ...minimalEnv(),
+            CODEX_HOME: join(ACTOR_HOME, 'config'),
+            CODEX_EVAL_RELAY_KEY: 'local-eval-relay',
+          }
+        : { ...minimalEnv() };
   await writeFile(join(output, 'prompt.txt'), options.prompt, { mode: 0o600 });
   await writeFile(
     join(output, 'launch.json'),

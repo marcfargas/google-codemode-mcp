@@ -221,9 +221,19 @@ export async function verifyHosted(output: string) {
   if (!isAbsolute(prepared)) throw new Error('Prepared candidate directory must be absolute');
   const manifestText = await readFile(join(prepared, 'manifest.json'), 'utf8');
   const manifest = JSON.parse(manifestText);
+  // Mode-less manifests retain their original source-only identity for replay.
+  if (manifest.mode !== undefined && manifest.mode !== 'probes')
+    throw new Error('Runtime probe verification requires a probes candidate');
+  const preparedDigest = hash(
+    JSON.stringify(
+      manifest.mode === undefined
+        ? manifest.sourceFiles
+        : { mode: manifest.mode, sourceFiles: manifest.sourceFiles },
+    ),
+  );
   if (
     manifest.sourceDigest !== expected.candidateDigest ||
-    hash(JSON.stringify(manifest.sourceFiles)) !== expected.candidateDigest ||
+    preparedDigest !== expected.candidateDigest ||
     manifest.bundleSha256 !== hash(await readFile(join(prepared, 'worker.js')))
   )
     throw new Error('Retained prepared candidate identity or bundle hash mismatch');

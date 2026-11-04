@@ -39,6 +39,14 @@ eval-drive $proxy_url $output $cases='all' $selection='required':
 eval-preflight $output:
     profile=gmail proxy_url=http://127.0.0.1:1 selection=required preflight_only=true node .github/eval/act.mjs
 
+# One optional native Codex/Sol read-search attempt; not the required matrix.
+eval-native-gmail $proxy_url $output:
+    profile=gmail model=gpt-6.1-sol runner=codex node .github/eval/act.mjs
+
+# Exercise native Codex with inert provider/MCP responses and no credentials.
+eval-native-preflight $output:
+    profile=gmail model=gpt-6.1-sol runner=codex proxy_url=http://127.0.0.1:1 preflight_only=true node .github/eval/act.mjs
+
 # Regrade one retained trial without Google or model requests.
 eval-regrade $saved $output:
     node .github/eval/regrade.ts "$saved" "$output"
@@ -46,6 +54,10 @@ eval-regrade $saved $output:
 # Retain a private hosted-verification bundle; no authentication or deployment.
 hosted-prepare output:
     node .github/hosted/prepare.ts {{quote(output)}}
+
+# Retain a production-backed candidate for the existing protected test Worker.
+hosted-product-prepare output:
+    node .github/hosted/prepare.ts {{quote(output)}} product
 
 # Verify one deployed private candidate using HOSTED_* environment settings.
 hosted-verify output:

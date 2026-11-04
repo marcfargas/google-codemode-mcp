@@ -1,4 +1,4 @@
-export type Runner = 'claude' | 'responses';
+export type Runner = 'claude' | 'responses' | 'codex';
 export type CellRole = 'required' | 'probe' | 'reference';
 export interface MatrixCell {
   readonly id: string;

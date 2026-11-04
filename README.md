@@ -369,11 +369,13 @@ actual Wrangler build. Workspace responses are synthetic in these checks.
 
 Live Gmail reads, labels, drafts, and controlled self-send passed locally and on
 GitHub, as recorded below. The six independent Gmail agent cases completed their
-task outcomes with both required models; the stricter discovery gate still fails
-for Sonnet on attachment and pagination. See the
+task outcomes with both required models; the initial stricter discovery gate failed
+for Sonnet on attachment and pagination. A later focused hosted run passed both
+cases with Sonnet and Sol, including strict discovery and skill retrieval. See the
 [versioned results](.github/eval/README.md#independent-gmail-cases-with-grading-version-2-2026-11-04).
 The separate hosted synthetic Worker passed CPU/timeout/cancellation and bridge
-checks. Gateway adaptation is deployed in its owning project, but the Code Mode
+checks. The protected test Worker also ran the actual product against Gmail,
+using test-account tokens directly. Gateway adaptation is deployed in its owning project, but the Code Mode
 backend binding and provider-connected host journeys remain acceptance work. Drive has local synthetic verification; live qualification requires
 the additional test grant described below. Subsequent APIs are Sheets, Docs, and
 Calendar, in that order. Tasks and replay are deferred.

@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { appendFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+import { codexRequestHashes, validateCodexInput, validateCodexOutput } from './codex.ts';
 
 const MAX_REQUESTS = 18;
 const MAX_OUTPUT = 15_000;
@@ -149,6 +150,8 @@ export function createResponsesHandler(options: {
   receipts: any[];
   redact: (value: string) => string;
   allowedToolNames: () => string[];
+  /** Separately qualified native host profile; leaves the custom runner contract unchanged. */
+  nativeCodex?: boolean;
 }) {
   const rates = RESPONSES_PRICING.models[options.model as keyof typeof RESPONSES_PRICING.models];
   if (!rates) throw new Error('GPT model lacks an explicit evaluation pricing entry');
@@ -177,7 +180,8 @@ export function createResponsesHandler(options: {
       const payload = JSON.parse(await readBody(request));
       if (payload.model !== options.model)
         throw new Error('Unexpected requested model; fallback is disabled');
-      validateInput(payload, options.allowedToolNames());
+      if (options.nativeCodex) validateCodexInput(payload);
+      else validateInput(payload, options.allowedToolNames());
       if (
         payload.max_output_tokens != null &&
         (!integer(payload.max_output_tokens) || payload.max_output_tokens === 0)
@@ -211,8 +215,13 @@ export function createResponsesHandler(options: {
         inputBytes,
         inputTokenUpperBound,
         requestSha256: hash(serialized),
-        systemHash: hash(JSON.stringify(payload.instructions ?? null)),
-        toolsHash: hash(JSON.stringify(payload.tools)),
+        ...(options.nativeCodex
+          ? codexRequestHashes(payload)
+          : {
+              systemHash: hash(JSON.stringify(payload.instructions ?? null)),
+              toolsHash: hash(JSON.stringify(payload.tools)),
+            }),
+        nativeCodex: options.nativeCodex ?? false,
         maxTokens: payload.max_output_tokens,
         accountingVersion: RESPONSES_ACCOUNTING_VERSION,
         reservationUsd,
@@ -247,6 +256,14 @@ export function createResponsesHandler(options: {
         const streaming =
           upstream.headers.get('content-type')?.includes('text/event-stream') ?? false;
         const events = parseEvents(text, streaming);
+        let nativeOutputRefused = false;
+        if (options.nativeCodex) {
+          try {
+            validateCodexOutput(events, streaming);
+          } catch {
+            nativeOutputRefused = true;
+          }
+        }
         const responses = streaming ? events.flatMap((event) => event.response ?? []) : events;
         record.servedModels = [
           ...new Set(
@@ -357,6 +374,12 @@ export function createResponsesHandler(options: {
         else if (terminal?.status === 'failed' || events.some((event) => event.type === 'error'))
           record.error = 'upstream_response_error';
         else if (!upstream.ok) record.error = 'upstream_http_error';
+        if (options.nativeCodex) {
+          record.nativeOutputRefused = nativeOutputRefused;
+          if (nativeOutputRefused) record.error = 'native_executable_output_refused';
+          else if (!record.complete || !identityValid)
+            record.error ??= 'native_terminal_unverified';
+        }
         record.settlementEligible =
           record.complete &&
           !record.error &&
@@ -366,6 +389,7 @@ export function createResponsesHandler(options: {
           cacheValid;
         const heldReasons: [boolean, string][] = [
           [!upstream.ok, 'upstream_http_error'],
+          [nativeOutputRefused, 'native_executable_output_refused'],
           [duplicateResponse, 'response_identity_reused'],
           [record.conflictingTerminals, 'conflicting_response_terminals'],
           [!terminal, 'missing_unique_terminal'],
@@ -393,10 +417,18 @@ export function createResponsesHandler(options: {
         record.totalCommittedEstimateUsd = estimatedUsdUpperBound;
         record.cumulativeUsagePublishedRateEstimateUsd = completeUsage ? usageEstimatedUsd : null;
         await append('model-receipts.jsonl', record);
-        response.writeHead(record.error ? 502 : upstream.status, {
-          'Content-Type': upstream.headers.get('content-type') ?? 'application/json',
-        });
-        response.end(text);
+        if (options.nativeCodex && record.error) {
+          // No provider bytes reach the native host before all streamed items
+          // and the unique terminal pass review. A non-2xx alone is insufficient:
+          // never echo forbidden executable content in the refusal body.
+          response.writeHead(502, { 'Content-Type': 'application/json' });
+          response.end(JSON.stringify({ error: 'Native evaluation response refused; no retry' }));
+        } else {
+          response.writeHead(record.error ? 502 : upstream.status, {
+            'Content-Type': upstream.headers.get('content-type') ?? 'application/json',
+          });
+          response.end(text);
+        }
       } catch (error) {
         if (record.settlementEligible) {
           estimatedUsdUpperBound += record.refundUsd;

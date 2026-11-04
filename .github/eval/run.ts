@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { OAuth2Client } from 'google-auth-library';
-import { createBuiltWorker } from '../worker-client.ts';
+import { createEvaluationBackend } from './backend.ts';
 import { prepareGmailFixture, gradeGmail, type GmailFixture } from './gmail.ts';
 import { runActor } from './actor.ts';
 import { startEvalServer } from './server.ts';
@@ -91,7 +91,22 @@ export async function runCell(configuration?: {
 }) {
   if (process.env.GITHUB_ACTIONS === 'true' && process.env.ACT !== 'true')
     throw new Error('Paid agent evaluation requires local act and marcdev CLIProxyAPI');
+  const nativeProbe = process.env.EVAL_RUNNER === 'codex';
+  if (process.env.EVAL_RUNNER && !nativeProbe)
+    throw new Error('Only the explicit codex capability probe overrides a runner');
   const profile = configuration?.profile ?? required('EVAL_PROFILE');
+  if (
+    nativeProbe &&
+    (profile !== 'gmail' ||
+      (configuration?.model ?? process.env.EVAL_MODEL) !== 'gpt-6.1-sol' ||
+      (configuration?.caseId ?? process.env.EVAL_CASE ?? 'read-search') !== 'read-search' ||
+      Number(configuration?.repeats ?? process.env.EVAL_REPEATS ?? 1) !== 1 ||
+      !!process.env.EVAL_SELECTION ||
+      !!process.env.EVAL_CASES)
+  )
+    throw new Error(
+      'Native Codex is one optional Gmail read-search/Sol probe, not a matrix override',
+    );
   const output = resolve(configuration?.output ?? required('EVAL_OUTPUT'));
   await mkdir(output, { recursive: true, mode: 0o700 });
   await chmod(output, 0o700);
@@ -100,7 +115,11 @@ export async function runCell(configuration?: {
     throw new Error(`Coverage unavailable for ${profile}; no model call made`);
   const selectedCase =
     profile === 'gmail'
-      ? getGmailCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'combined')
+      ? getGmailCase(
+          configuration?.caseId ??
+            process.env.EVAL_CASE ??
+            (nativeProbe ? 'read-search' : 'combined'),
+        )
       : getDriveCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'read-file');
   if (process.getuid?.() !== 0)
     throw new Error(
@@ -108,6 +127,7 @@ export async function runCell(configuration?: {
     );
   const model = configuration?.model ?? required('EVAL_MODEL');
   const cell = getCellByModel(model);
+  const runner = nativeProbe ? 'codex' : cell.runner;
   const proxyUrl = required('EVAL_PROXY_URL');
   if (!/^https?:\/\//.test(proxyUrl)) throw new Error('Proxy URL must use HTTP or HTTPS');
   const repeats = Number(configuration?.repeats ?? process.env.EVAL_REPEATS ?? 1);
@@ -138,20 +158,22 @@ export async function runCell(configuration?: {
       'Test OAuth grant unavailable or missing selected service scope; no agent started',
     );
   }
-  const worker = await createBuiltWorker();
+  const backend = await createEvaluationBackend(output);
   const results: any[] = [];
   try {
     const identity = {
       revision: spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim(),
-      bundleSha256: sha256(await readFile('dist/worker.js')),
+      backend: backend.identity,
       files: Object.fromEntries(
         await Promise.all(
           [
             '.github/eval/run.ts',
+            '.github/eval/backend.ts',
             '.github/eval/campaign.ts',
             '.github/eval/catalog.ts',
             '.github/eval/server.ts',
             '.github/eval/actor.ts',
+            '.github/eval/codex.ts',
             '.github/eval/responses.ts',
             '.github/eval/responses-relay.ts',
             '.github/eval/matrix.ts',
@@ -170,11 +192,12 @@ export async function runCell(configuration?: {
       caseVersion: selectedCase.version,
       mechanismPolicy: selectedCase.policy,
       requestedModel: model,
-      runner: cell.runner,
-      runnerVersion: cell.runner === 'claude' ? '2.1.318' : RESPONSES_RUNNER_VERSION,
-      accountingVersion: cell.runner === 'responses' ? RESPONSES_ACCOUNTING_VERSION : null,
-      role: cell.role,
-      cellId: cell.id,
+      runner,
+      runnerVersion:
+        runner === 'claude' ? '2.1.318' : runner === 'codex' ? '0.166.0' : RESPONSES_RUNNER_VERSION,
+      accountingVersion: runner === 'claude' ? null : RESPONSES_ACCOUNTING_VERSION,
+      role: nativeProbe ? 'probe' : cell.role,
+      cellId: nativeProbe ? 'sol-native-codex' : cell.id,
       repeats,
       createdAt: new Date().toISOString(),
       limits: {
@@ -182,8 +205,8 @@ export async function runCell(configuration?: {
         modelRequests: 18,
         maxOutputTokensPerRequest: 2048,
         totalOutputTokensUpperBound: 15_000,
-        nativeEstimatedUsd: cell.runner === 'claude' ? 1 : null,
-        publishedRateEstimatedUsd: cell.runner === 'responses' ? 1 : null,
+        nativeEstimatedUsd: runner === 'claude' ? 1 : null,
+        publishedRateEstimatedUsd: runner === 'claude' ? null : 1,
         retries: 0,
       },
     };
@@ -223,26 +246,15 @@ export async function runCell(configuration?: {
           proxyKey,
           proxyUrl,
           model,
-          runner: cell.runner,
+          runner,
           output: trial,
-          dispatch: async (request) => {
-            const response = await worker.dispatchFetch(request.url, {
-              method: request.method,
-              headers: Object.fromEntries(request.headers),
-              body: await request.text(),
-            });
-            if (
-              response.headers.has('mcp-session-id') ||
-              !response.headers.get('content-type')?.includes('application/json')
-            )
-              throw new Error('Expected finite sessionless JSON');
-            return response as unknown as Response;
-          },
+          redactSecrets: backend.secrets,
+          dispatch: backend.dispatch,
         });
         const actor = await runActor({
           prompt: fixture.prompt,
           model,
-          runner: cell.runner,
+          runner,
           output: trial,
           mcpUrl: relay.url + '/mcp',
           proxyUrl: relay.url + '/llm',
@@ -291,7 +303,7 @@ export async function runCell(configuration?: {
           result.error = 'Actor execution did not complete with a valid successful transcript';
         }
         result.usage = actor.usage;
-        result.runner = cell.runner;
+        result.runner = runner;
         result.runnerVersion = actor.cliVersion;
         result.llmReceipts = relay.llm;
         result.hasUnknownMutation = relay.hasUnknownMutation;
@@ -344,6 +356,10 @@ export async function runCell(configuration?: {
       '',
       `Profile: ${profile}. Model: ${model}. Result: ${passed ? 'PASS' : 'FAIL'}.`,
       '',
+      nativeProbe
+        ? 'Optional native Codex CLI capability probe with a broader tool surface. This does not replace or qualify the required Sol Responses matrix performer.'
+        : `Runner: ${runner}.`,
+      '',
       'Gmail and Drive have implemented profiles. Sheets, Docs, and Calendar remain pending.',
       '',
       ...results.flatMap((result) => [
@@ -361,7 +377,9 @@ export async function runCell(configuration?: {
         `Cleanup: ${JSON.stringify(result.cleanup ?? null)}.`,
         '',
       ]),
-      'This synthetic pilot measures feasibility for the observed workflow, not statistical superiority or hosted Cloudflare acceptance.',
+      backend.identity.kind === 'hosted'
+        ? 'This pilot measures the selected protected hosted product path and observed workflow; it does not establish other hosts or statistical reliability.'
+        : 'This synthetic pilot measures feasibility for the observed workflow, not statistical superiority or hosted Cloudflare acceptance.',
       '',
     ].join('\n');
     await writeFile(join(output, 'report.md'), report, { mode: 0o600 });
@@ -370,7 +388,7 @@ export async function runCell(configuration?: {
     );
     return { passed, results, identity, profile, model, output };
   } finally {
-    await worker.dispose();
+    await backend.close();
   }
 }
 

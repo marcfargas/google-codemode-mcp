@@ -35,7 +35,8 @@ export async function startEvalServer(options: {
   proxyKey: string;
   model: string;
   output: string;
-  runner?: 'claude' | 'responses';
+  runner?: 'claude' | 'responses' | 'codex';
+  redactSecrets?: readonly string[];
 }) {
   const audit: McpEvent[] = [];
   const llm: any[] = [];
@@ -50,14 +51,19 @@ export async function startEvalServer(options: {
   const drained: (() => void)[] = [];
   const controllers = new Set<AbortController>();
   let closing: Promise<void> | undefined;
-  const redact = (value: string) =>
-    value
+  const redact = (value: string) => {
+    let text = value
       .replaceAll(options.accessToken, '[google-token]')
       .replaceAll(options.proxyKey, '[proxy-key]');
+    for (const secret of options.redactSecrets ?? [])
+      if (secret) text = text.replaceAll(secret, '[hosted-access]');
+    return text;
+  };
   const responses =
-    options.runner === 'responses'
+    options.runner === 'responses' || options.runner === 'codex'
       ? createResponsesHandler({
           ...options,
+          nativeCodex: options.runner === 'codex',
           receipts: llm,
           redact,
           allowedToolNames: () => [
@@ -164,19 +170,11 @@ export async function startEvalServer(options: {
         response.end();
         return;
       }
-      if (
-        path === '/llm/v1/responses' &&
-        request.method === 'POST' &&
-        options.runner === 'responses'
-      ) {
+      if (path === '/llm/v1/responses' && request.method === 'POST' && !!responses) {
         await responses!.handle(request, response);
         return;
       }
-      if (
-        path !== '/llm/v1/messages' ||
-        request.method !== 'POST' ||
-        options.runner === 'responses'
-      ) {
+      if (path !== '/llm/v1/messages' || request.method !== 'POST' || !!responses) {
         response.writeHead(404);
         response.end();
         return;

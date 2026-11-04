@@ -2,6 +2,15 @@ name: Agent feasibility
 on:
   workflow_dispatch:
     inputs:
+      native_codex_probe:
+        description: Optional native Codex Sol read-search probe; separate from the matrix
+        default: false
+        type: boolean
+      backend:
+        description: Product backend (hosted requires privately supplied HOSTED settings)
+        default: local
+        type: choice
+        options: [local, hosted]
       profile:
         description: Service profile (Gmail and Drive implemented; others are coverage failures)
         required: true
@@ -47,6 +56,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 75
     env:
+      EVAL_BACKEND: ${{ inputs.backend }}
+      EVAL_RUNNER: ${{ inputs.native_codex_probe && 'codex' || '' }}
+      HOSTED_VERIFICATION_URL: ${{ vars.HOSTED_VERIFICATION_URL }}
+      HOSTED_EXPECTED_CANDIDATE_DIGEST: ${{ vars.HOSTED_EXPECTED_CANDIDATE_DIGEST }}
+      HOSTED_EXPECTED_WORKER_VERSION: ${{ vars.HOSTED_EXPECTED_WORKER_VERSION }}
+      HOSTED_ACCESS_HEADERS_JSON: ${{ secrets.HOSTED_ACCESS_HEADERS_JSON }}
       EVAL_PROFILE: ${{ inputs.profile }}
       EVAL_MODEL: ${{ inputs.model }}
       EVAL_SELECTION: ${{ inputs.selection }}
@@ -71,10 +86,16 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - run: npm install --global @anthropic-ai/claude-code@2.1.318
+      - name: Install pinned native Codex for its optional capability probe
+        if: inputs.native_codex_probe == true
+        run: npm install --global @openai/codex@0.166.0
       - name: Verify native file tools without provider or Google calls
         run: EVAL_NATIVE_CLI="$(command -v claude)" node --experimental-strip-types --test --test-name-pattern='pinned native' .github/tests/eval-actor.test.ts
       - name: Verify isolated GPT runner without provider or Google calls
         run: sudo -E "$(command -v node)" --experimental-strip-types --test --test-name-pattern='isolated Responses' .github/tests/eval-actor.test.ts
+      - name: Verify optional native Codex through synthetic relays only
+        if: inputs.native_codex_probe == true
+        run: sudo -E env EVAL_NATIVE_CODEX_CLI="$(command -v codex)" "$(command -v node)" --experimental-strip-types --test .github/tests/eval-codex.test.ts
       - run: node .github/run.mjs build
       - name: Run isolated native agent and independent outcome checks
         if: inputs.preflight_only != true

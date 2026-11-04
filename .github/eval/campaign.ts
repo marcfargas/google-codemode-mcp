@@ -217,7 +217,7 @@ export async function runCampaign(dependencies = { runCell, verifyModels }) {
       '',
       `Maximum estimate: $${source.estimatedUsdCeilingTotal}; provider billing remains unknown. Per-attempt caps and safety stops are unchanged.`,
       '',
-      'Per-case matrix reports retain required-pair qualification, model identity, cache usage, task/mechanism criteria and cleanup. Historical failures remain unchanged. These local runners do not qualify actual hosts or hosted Cloudflare.',
+      "Per-case matrix reports retain required-pair qualification, model identity, cache usage, task/mechanism criteria and cleanup. Historical failures remain unchanged. Each cell's source.json records the tested backend and candidate identity; results do not qualify other deployments or target hosts.",
       '',
     ].join('\n'),
     { mode: 0o600 },

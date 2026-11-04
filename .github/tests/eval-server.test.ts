@@ -14,6 +14,7 @@ test('agent relay injects tokens only at the trusted boundary and fences unknown
     output,
     model: 'synthetic-model',
     accessToken: 'private-google-token',
+    redactSecrets: ['private-access-secret'],
     proxyKey: 'private-proxy-key',
     proxyUrl: 'http://127.0.0.1:1',
     dispatch: async (request) => {
@@ -29,7 +30,7 @@ test('agent relay injects tokens only at the trusted boundary and fences unknown
             outcomes: [
               { path: 'gmail/v1/users.messages.send', mutation: true, outcome: 'unknown' },
             ],
-            logs: ['private-google-token'],
+            logs: ['private-google-token', 'private-access-secret'],
           },
         },
       });
@@ -57,12 +58,17 @@ test('agent relay injects tokens only at the trusted boundary and fences unknown
     const first = await invoke(TOKEN_SENTINEL);
     assert.equal(first.status, 200);
     assert.equal(requests[0].params.arguments.accessToken, 'private-google-token');
-    assert.ok(!(await first.text()).includes('private-google-token'));
+    const actorResponse = await first.text();
+    assert.ok(!actorResponse.includes('private-google-token'));
+    assert.ok(!actorResponse.includes('private-access-secret'));
     assert.equal(relay.hasUnknownMutation, true);
     assert.equal((await invoke(TOKEN_SENTINEL)).status, 400);
     assert.equal(requests.length, 1);
     assert.ok(
       !(await readFile(join(output, 'mcp.jsonl'), 'utf8')).includes('private-google-token'),
+    );
+    assert.ok(
+      !(await readFile(join(output, 'mcp.jsonl'), 'utf8')).includes('private-access-secret'),
     );
     assert.equal((await fetch(relay.url + '/mcp')).status, 405);
   } finally {

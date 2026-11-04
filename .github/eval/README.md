@@ -334,3 +334,75 @@ unattempted cells, the original Sonnet/Sol budget failure, and the subsequent
 qualified accounting repair remain retained in the historical sections above.
 Actual target hosts, gateway deployment, hosted Cloudflare limits and Drive live
 behavior are separate acceptance boundaries.
+
+## Native Codex capability probe
+
+`just eval-native-gmail PROXY_URL NEW_OUTPUT` runs one fresh `read-search` case
+with native Codex 0.166.0 and `gpt-6.1-sol`. It is an optional host capability
+probe, separate from the required Sonnet/Sol matrix; it does not replace the Sol
+Responses performer. It can use the same explicit hosted backend settings.
+
+The native profile has a broader advertised tool surface. It uses an isolated
+actor identity/home, workspace sandbox, shell tools disabled, and the trusted
+relay's existing request/output/time/cost caps. The relay buffers provider output
+and refuses collaboration or unknown executable calls before any reaches the
+native process. It retains actual native instructions/tool schemas, usage and
+cache keys without warmups or automatic retries. Credential-free integration
+checks must exercise native resource/file access, protected-file refusals, and
+provider errors before the paid attempt. Native CLI success does not qualify
+ChatGPT UI connections or equal performer conditions.
+
+Only this optional profile starts its `act` container with Docker
+`seccomp=unconfined`, which permits the user namespaces required by Codex's
+bubblewrap sandbox. It adds no capabilities or privileged mode and does not
+mount the Docker socket. The native process retains `workspace-write`, excludes
+blanket `/tmp` and `TMPDIR` writes, and explicitly approves only the connected
+server's `execute` tool. The other performer containers keep Docker's default
+seccomp profile. The launcher records these settings in `container-profile.json`.
+The synthetic gate verifies an exact owned-file write, protected-file read
+refusal, refusal to write an otherwise actor-writable outside directory,
+mixed forbidden output, and a one-request upstream 503 without retries. The
+outside-write refusal is observed at Codex's project policy; it is not evidence
+of a particular kernel denial. See the official
+[MCP tool approval setting](https://learn.chatgpt.com/docs/config-file/config-reference).
+
+## Focused direct hosted Gmail results (2026-11-04)
+
+One fresh attachment and pagination attempt per required model passed against the
+same protected, production-backed Cloudflare deployment. All four attempts passed
+the unchanged version-2 task, method-ordering, actual skill retrieval, identity,
+certainty and cleanup criteria. The trusted relay supplied the existing test
+account's token directly; no gateway was involved. The resource and method
+descriptions now remind the agent to describe each distinct method, including
+calls inside helpers, loops and branches. This run combines that hint, hosted
+transport and the revised Claude launch controls; it does not isolate their effects.
+
+Sonnet used 13 model requests across its two attempts, reporting 120,764 cache-read
+and 32,775 cache-creation input tokens, with a $0.1822384 native CLI estimate.
+Sol used 18 requests across its two attempts, reporting 191,452 input tokens
+including 141,696 cached tokens, and 1,042 output tokens; its observed
+published-rate estimate was $0.1241016. These are separate estimate sources;
+provider billing remains unknown. System/tool hashes stayed constant within each
+attempt. Cache misses remain visible in individual receipts; no warmups, automatic
+retries, repeated completed trials or extra cache probes were purchased.
+
+All four attempts had successful cleanup and no unknown mutations. Their
+per-cell source records retain the hosted digest/version and complete source
+snapshot. The first saved suite report had an obsolete static sentence denying
+hosted qualification; its underlying cell identities and receipts establish the
+actual backend. That historical report is preserved, and future reports refer to
+the recorded backend explicitly. Earlier failed Sonnet trials and offline
+regrades remain failed evidence. This focused four-cell pass does not qualify a
+fresh six-case suite, other services, ChatGPT UI, OpenClaw, or native host Skills
+activation. See the [deployment identity and limits](../hosted/README.md#direct-hosted-gmail-gate).
+
+The single native Codex/Sol `read-search` pilot failed before any actor Google
+call: its first completed provider response omitted the namespace on a valid
+`exec` call, which the original relay rejected. The response reported 10,151 input
+tokens, zero cache reads and 74 output tokens, a $0.021042 observed published-rate
+estimate; its $0.122178 reservation stayed held because the response was refused.
+Cleanup succeeded. The guard now accepts that captured producer shape while
+still rejecting unknown names, explicit other namespaces and collaboration calls.
+The credential-free integration replays the captured opening before its synthetic
+MCP/file/refusal checks. The original live pilot remains failed; no paid retry
+was made, and native live task completion remains unqualified.

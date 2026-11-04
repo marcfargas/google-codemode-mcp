@@ -193,3 +193,41 @@ node --experimental-strip-types --test .github/tests/hosted.test.ts
 ```
 
 The ordinary test workflow includes these tests. They build the private candidate and exercise it in local Miniflare, including the actual 15-second async timeout, late-call fences, five reads, and healthy follow-ups. Outbound networking fails if attempted. CPU grading is tested with synthetic exception evidence; the infinite loop is deliberately never run in local workerd, whose CPU limit behavior does not establish hosted enforcement. A local pass is not a hosted pass.
+
+## Direct hosted Gmail gate
+
+Prepare the production-backed candidate with `just hosted-product-prepare OUTPUT`.
+This mode imports the real product entrypoint and adds only test-deployment identity
+headers. Deploy its retained bundle/config to the existing runner-protected test
+Worker, preserving Access, disabled previews and disabled observability. The prior
+synthetic bundle and its version-specific runtime receipts remain separate.
+
+For a local `just eval-gmail` run, select `EVAL_BACKEND=hosted` and provide
+`HOSTED_VERIFICATION_URL`, `HOSTED_EXPECTED_CANDIDATE_DIGEST`,
+`HOSTED_EXPECTED_WORKER_VERSION`, and private `HOSTED_ACCESS_HEADERS_JSON` through
+the runner environment. The launcher passes the Access pair privately to `act`.
+Before fixture setup or inference, the hosted backend checks denied admission and
+an authenticated root description; every response must match the chosen source
+and deployed version. Redirects and persistent sessions are refused.
+
+The trusted local relay supplies the short-lived test-account Google token directly
+as the tool argument. This sends that token over HTTPS to the protected Cloudflare
+product. The actor receives only its existing placeholder and loopback endpoint.
+Fixture setup, independent Gmail readback and owned-fixture cleanup remain direct
+Google calls. No gateway is required. Run only selected cases/models; retain
+request-level usage/cache receipts and old failures rather than purchasing warmups.
+
+On 2026-11-04 the production-backed bundle with source digest
+`01dca552ad432caee0c3d08afe2049410ca5e667e0d6260d8478697f828b93e0`
+was deployed as version `bd43ffaf-1343-44e8-b060-ad086f4e8186` with the existing
+Worker Editor credential. Native platform readback and authenticated responses
+matched that identity; missing Access credentials returned 403 and a wrong secret
+returned 401. A no-model `users.getProfile` read matched the dedicated test account.
+
+All four selected agent attempts passed: Sonnet and Sol on attachment and
+pagination. Each passed the unchanged version-2 method-ordering and actual skill
+retrieval criteria, exact file/answer checks, independent Google readback and
+cleanup, with no unknown mutations. Tokens were injected directly by the trusted
+relay. This qualifies these cases on this deployed product; the earlier synthetic
+CPU/termination receipts retain their original version. Other Gmail cases,
+services, target-host journeys and native Skills activation remain separate.
