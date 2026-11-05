@@ -181,3 +181,17 @@ at the captured b2a8cf3 slice; the later pagination runtime has independent no-m
 artifact regression controls, not a repeated artifact actor campaign. The four passing media cells qualify cf98b51; they do not silently
 qualify later artifact code or an R2-enabled hosted deployment. Avoid new paid
 runs merely to report these existing metrics.
+
+For standalone whole-file downloads, set `ARTIFACT_DOWNLOAD_ORIGIN` alongside the
+private binding. `just check` exercises GET/HEAD directly against the built Worker,
+including exact JSON/binary/empty files, read-only token separation, expiry,
+corruption, deletion, safe headers and disabled configurations. The media integration
+also stores Gmail bytes then uploads them from R2 to Drive in a later execution,
+without a gateway or model-visible bytes. Extend the deployment dry-run with
+`ARTIFACT_DOWNLOAD_ORIGIN=https://mcp.example.com`; this validates runtime variable
+injection, not actual ingress. Cloudflare Access still applies. Local checks alone
+do not qualify deployed downloads or native host file presentation. Two no-model
+[standalone hosted download controls](../../../tests/hosted/README.md#standalone-artifact-downloads-2026-11-05)
+verified exact GET/HEAD delivery, protected ingress and deletion on their retained
+bundle/version; the first failed length-header assertion is preserved. Retain
+historical hosted storage and paid evidence under their original identities.

@@ -123,6 +123,7 @@ test('actual workerd/native SDK composes Gmail attachments and Drive bytes witho
   const uploads: ReturnType<typeof readMultipart>[] = [];
   const drafts: ReturnType<typeof attachment>[] = [];
   const client = await openBuiltWorker({
+    artifacts: true,
     outbound: async (request) => {
       const url = new URL(request.url);
       if (url.pathname.includes('/discovery/') || url.pathname.includes('$discovery'))
@@ -171,6 +172,24 @@ test('actual workerd/native SDK composes Gmail attachments and Drive bytes witho
     assert.deepEqual(uploads[0].metadata, { name: 'RÉSUMÉ 🌍.BIN', parents: ['target-folder'] });
     assert.deepEqual(uploads[0].bytes, bytes);
     assert.equal(uploads[0].headers, 'content-type: application/octet-stream');
+    const stored = await client.tool<ExecutionReceipt<{ uri: string }>>('execute', {
+      accessToken: token,
+      code: `const {data:b}=await google.gmail({version:'v1'}).users.messages.attachments.get({userId:'me',messageId:'source',id:'attachment'});
+      return artifacts.putBytes({encoding:'base64url',data:b.data,size:b.size,mimeType:'application/octet-stream'},{name:'stored.bin'});`,
+    });
+    assert.equal(stored.status, 'completed', JSON.stringify(stored));
+    assert.equal(JSON.stringify(stored).includes(bytes.toString('base64')), false);
+    const reused = await client.tool<ExecutionReceipt>('execute', {
+      accessToken: token,
+      inputs: { uri: stored.result.uri },
+      code: `const body=await artifacts.readBytes(inputs.uri);
+      const {data}=await google.drive({version:'v3'}).files.create({requestBody:{name:'stored-copy.bin'},media:{mimeType:body.mimeType,body}});
+      await artifacts.delete(inputs.uri); return data;`,
+    });
+    assert.equal(reused.status, 'completed', JSON.stringify(reused));
+    assert.equal(reused.hasUnknownOutcome, false);
+    assert.deepEqual(uploads[1].bytes, bytes);
+    assert.equal(uploads[1].metadata.name, 'stored-copy.bin');
     const draft = await client.tool<ExecutionReceipt>('execute', {
       accessToken: token,
       code: `

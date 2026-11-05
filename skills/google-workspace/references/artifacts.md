@@ -58,6 +58,44 @@ a useful selection. Byte reads return a standard base64 envelope. Keep the
 capability in inputs when passing it to code. `await artifacts.delete(uri)`
 explicitly removes the object; do not infer recipient delivery from storage.
 
+## Whole-file download and cross-service transfer
+
+If `describe({path:'artifacts'})` reports `downloads.enabled:true`, stored references
+and manifests also contain a `downloadUrl`. The standalone MCP Worker serves that
+HTTPS URL directly from private storage; no gateway is needed. GET downloads the
+whole original file, and HEAD checks it without returning a body. Both verify size,
+expiry and the whole SHA-256 before success. Byte and JSON limits above still apply.
+Range requests receive the complete file. There is no HTTP upload or delete route.
+
+The URL is a separate read-only bearer capability. Keep it private; it expires at
+the reference's `expiresAt`, and deleting the original artifact revokes subsequent
+downloads. It cannot authorize MCP reads or deletion. Deployment ingress policies
+still apply, so a Cloudflare Access-protected origin requires its normal ingress
+credentials. An absent URL means HTTP delivery is disabled or the object predates
+this feature; MCP resources and helpers still work. Do not manufacture a URL from
+an artifact URI. A download endpoint does not guarantee native host file display.
+
+For a transfer to another Google service, keep the bytes inside Code Mode. In a
+later execution, pass the original artifact capability in `inputs.uri`:
+
+```js
+const body = await artifacts.readBytes(inputs.uri);
+const drive = google.drive({ version: 'v3' });
+return (
+  await drive.files.create({
+    requestBody: { name: inputs.name },
+    media: { mimeType: body.mimeType, body },
+    fields: 'id,name',
+  })
+).data;
+```
+
+Discover the destination method before execution. Its native mutation outcome
+remains separate from artifact reads/deletion. A failed upload does not remove the
+source. To attach stored bytes to Gmail, pass the `readBytes` envelope to the
+`composeMime` snippet described in the media-transfer reference, then create a draft.
+Neither path requires downloading bytes to the model or fetching the HTTPS URL.
+
 ## MCP resources and chunks
 
 The base URI `artifact://google-codemode-mcp/v1/<capability>` reads as a small JSON

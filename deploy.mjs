@@ -8,6 +8,24 @@ if (options.length > 1 || options.some((option) => option !== '--dry-run'))
 
 const { WORKER_NAME: name, WORKER_DOMAIN: domain, WORKER_ROUTE: route } = process.env;
 const bucket = process.env.ARTIFACTS_BUCKET;
+const downloadOrigin = process.env.ARTIFACT_DOWNLOAD_ORIGIN;
+if (downloadOrigin !== undefined) {
+  let parsed;
+  try {
+    parsed = new URL(downloadOrigin);
+  } catch {
+    /* Report a configuration error below. */
+  }
+  if (
+    !parsed ||
+    parsed.protocol !== 'https:' ||
+    ![parsed.origin, parsed.origin + '/'].includes(downloadOrigin)
+  )
+    throw new Error(
+      'ARTIFACT_DOWNLOAD_ORIGIN must be an HTTPS origin without credentials, path, query or fragment',
+    );
+}
+
 if (bucket !== undefined && !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucket))
   throw new Error(
     'ARTIFACTS_BUCKET must name an existing private R2 bucket (3–63 lowercase letters, digits or hyphens)',
@@ -41,18 +59,36 @@ if (options.includes('--dry-run')) args.push('--dry-run', '--outdir', 'dist');
 
 let temporary;
 try {
-  if (bucket) {
+  if (bucket || downloadOrigin) {
     const { experimental_readRawConfig } = await import('wrangler');
     const { rawConfig } = experimental_readRawConfig({ config: resolve('wrangler.jsonc') });
-    if (rawConfig.r2_buckets?.some((entry) => entry.binding === 'ARTIFACTS'))
+    if (bucket && rawConfig.r2_buckets?.some((entry) => entry.binding === 'ARTIFACTS'))
       throw new Error('Configure ARTIFACTS through ARTIFACTS_BUCKET or the base config, not both');
+    if (
+      downloadOrigin &&
+      !bucket &&
+      !rawConfig.r2_buckets?.some((entry) => entry.binding === 'ARTIFACTS')
+    )
+      throw new Error(
+        'ARTIFACT_DOWNLOAD_ORIGIN requires ARTIFACTS_BUCKET or a configured ARTIFACTS binding',
+      );
     await mkdir('.wrangler', { recursive: true });
     temporary = await mkdtemp(resolve('.wrangler/artifacts-'));
     const config = {
       ...rawConfig,
       main: resolve(rawConfig.main),
       ...(rawConfig.tsconfig ? { tsconfig: resolve(rawConfig.tsconfig) } : {}),
-      r2_buckets: [...(rawConfig.r2_buckets ?? []), { binding: 'ARTIFACTS', bucket_name: bucket }],
+      ...(bucket
+        ? {
+            r2_buckets: [
+              ...(rawConfig.r2_buckets ?? []),
+              { binding: 'ARTIFACTS', bucket_name: bucket },
+            ],
+          }
+        : {}),
+      ...(downloadOrigin
+        ? { vars: { ...rawConfig.vars, ARTIFACT_DOWNLOAD_ORIGIN: new URL(downloadOrigin).origin } }
+        : {}),
     };
     delete config.$schema;
     await writeFile(join(temporary, 'wrangler.json'), JSON.stringify(config), { mode: 0o600 });

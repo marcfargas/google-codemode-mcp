@@ -426,3 +426,44 @@ test('close during preparation prevents dispatch and during delete retains immut
   assert.deepEqual(deleting.snapshot(), snapshot);
   assert.equal(fake.stats().deletes, 1);
 });
+
+test('download capability enforces expiry, integrity and legacy metadata without granting mutation', async () => {
+  const fake = fakeBucket();
+  let now = 1000;
+  const store = createArtifactStore(fake.bucket, {
+    now: () => now,
+    downloadOrigin: 'https://files.test',
+  });
+  const controller = writer(store);
+  const ref = value<ArtifactReference>(await putJson(controller, '{"ok":true}', 'safe.json'));
+  assert.ok(ref.downloadUrl);
+  const request = () => new Request(ref.downloadUrl!);
+  const [object] = fake.objects.values();
+  const original = object.bytes;
+  const metadata = { ...object.metadata };
+  assert.equal(JSON.stringify(metadata).includes(ref.downloadUrl.split('/').at(-1)!), false);
+  for (const capability of ref.downloadUrl.split('/').slice(-2)) {
+    const uri =
+      'artifact://google-codemode-mcp/v1/' + Buffer.from(capability, 'hex').toString('base64url');
+    rejected(await controller.invoke('delete', { uri }), 'ARTIFACT_UNAVAILABLE');
+    await assert.rejects(store.readResource(uri));
+  }
+  object.bytes = Buffer.from('{"ok":fals}');
+  assert.equal((await store.download(request())).status, 404);
+  object.bytes = original;
+  object.metadata.artifact = JSON.stringify({
+    ...JSON.parse(metadata.artifact),
+    name: 'bad\r\nname',
+  });
+  assert.equal((await store.download(request())).status, 404);
+  object.metadata = { ...metadata };
+  delete object.metadata.download;
+  const legacy = await store.readResource(ref.uri);
+  assert.equal(JSON.parse((legacy.contents[0] as { text: string }).text).downloadUrl, undefined);
+  assert.equal((await store.download(request())).status, 404);
+  object.metadata = { ...metadata };
+  now = ref.expiresAt - 1;
+  assert.equal((await store.download(request())).status, 200);
+  now++;
+  assert.equal((await store.download(request())).status, 404);
+});
