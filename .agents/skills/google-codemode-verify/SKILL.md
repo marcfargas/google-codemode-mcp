@@ -163,9 +163,12 @@ JSON also survived same-bundle redeployment. See [hosted storage evidence](../..
 for exact digest/version identities, protected admission and the S3 TLS limitation.
 The bucket's one-day prefix lifecycle was configured/read back, not exercised.
 Physical lifecycle execution and native host downloadable-file presentation remain
-unqualified. After temporary R2 administration is removed, verify an R2-bound
-redeployment before claiming Worker Editor alone suffices; the earlier reduced-token
-proof covered storage-disabled deployment. Four local artifact agent cells passed
+unqualified. R2-bound same-bundle redeployment and a small cross-request storage
+smoke passed after the owner removed R2 permissions: native binding/version
+readback, protected admission, native Google read-admitted put, later helper/resource
+reads, delete and unavailable resource. R2 listing was denied. This qualifies the
+supplied owner-confirmed Worker Editor credential, without claiming token-policy
+introspection or repeating the prior independent R2 inventory. Four local artifact agent cells passed
 at the captured b2a8cf3 slice; the later pagination runtime has independent no-model
 artifact regression controls, not a repeated artifact actor campaign. The four passing media cells qualify cf98b51; they do not silently
 qualify later artifact code or an R2-enabled hosted deployment. Avoid new paid

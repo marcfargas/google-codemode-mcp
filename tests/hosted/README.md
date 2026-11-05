@@ -26,8 +26,8 @@ used to invoke tests.
 
 The storage-disabled deployment was verified with Worker Editor alone; it needs
 no Access administration, Google, KV, R2 or D1 rights. An R2-bound redeployment
-with only Worker Editor remains to be verified after removing temporary R2
-administration. Selecting `workers.dev` avoids zone/DNS provisioning permissions.
+also passed after the owner removed temporary R2 administration, as recorded
+below. Selecting `workers.dev` avoids zone/DNS provisioning permissions.
 Worker creation and Access setup can be performed by a separate bootstrap custodian;
 keep that broader token out of the invoking runner. Some token interfaces still
 show the older account-wide `Workers Scripts Edit` permission: do not assume it
@@ -295,7 +295,7 @@ The retained hosted bundle SHA-256 was
 `6e893cfab54d4109750e5a84f1cba15bdcd4cd5c1612e5de704d90e8618923a4`.
 Native deployment/version receipts link that bundle and binding to initial version
 `52c27d58-fcca-4db2-9ef1-49a0fb18fa10` and same-bundle redeployment
-`df1829e7-dae3-4e25-8137-63c3b5e885c0`, which serves the final candidate.
+`df1829e7-dae3-4e25-8137-63c3b5e885c0`, used for the full storage controls.
 
 Two no-model controls reused the existing Gmail fixtures and artifact grader.
 A 374834-byte native JSON result and a 96000-byte binary attachment each passed
@@ -323,7 +323,19 @@ Worker-level Access remains in place. Final admission checks returned 403 withou
 credentials, 401 with a wrong secret and 200 with the runner pair and matching
 identity. Fresh owned-Worker metadata showed no attached domains, disabled version
 previews and disabled observability/logpush; the global domain listing was outside
-this token's scope. Provisioning is complete, so temporary R2 administration can
-be removed. Redeployment of the R2-bound Worker with only Worker Editor still
-requires a check using the reduced credential; the earlier Editor-only proof
-covered the storage-disabled deployment.
+this token's scope.
+
+After the owner removed R2 permissions, the same retained bundle/config deployed
+successfully as version `49e44ee2-5a4a-4ed1-b1d6-a3af63a5080b` with the
+owner-confirmed Worker Editor credential. R2 bucket listing was denied with
+HTTP 403/error 10000. Native version receipts confirmed the same script etag and R2 binding;
+protected discovery returned the matching candidate/version. Missing credentials
+returned 403 and a wrong secret returned 401. Previews and observability stayed
+disabled, with no attached domains. A no-model native Gmail profile read admitted
+a small JSON artifact put, followed by matching helper/resource reads in later
+requests, explicit deletion and an unavailable resource read. No Google writes
+or model calls occurred. This verifies R2-bound redeployment and runtime storage
+with that supplied reduced credential. Token-policy introspection and a new
+direct-R2 inventory were not performed; the earlier full storage controls retain
+their own identities and independent cleanup evidence. Temporary R2 administration
+is no longer needed for this deployment path.
