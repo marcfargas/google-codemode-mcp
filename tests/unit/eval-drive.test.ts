@@ -103,6 +103,10 @@ test('Drive rename oracle requires owned name-only acknowledged PATCH evidence a
     selectDriveCases().map((item) => item.id),
     ['read-file', 'list-pages', 'rename-file', 'conditional-update-unsupported'],
   );
+  assert.deepEqual(
+    selectDriveCases().map((item) => item.version),
+    [1, 1, 1, 2],
+  );
   assert.throws(() => selectDriveCases('read-file,read-file'));
   assert.throws(() => getDriveCase('fallback'));
 });

@@ -12,7 +12,7 @@ export const DRIVE_CASES = [
   },
   {
     id: 'conditional-update-unsupported',
-    version: 1,
+    version: 2,
     policy: {
       expectedSends: 0,
       allowedMutations: [],
@@ -459,9 +459,28 @@ async function prepareSingleDriveFixture(
   );
   const knownIds: string[] = [];
   const writes: DriveWrite[] = [];
+  const conditional = selected.id === 'conditional-update-unsupported';
+  const readiness: {
+    stage: 'conditional-version-readiness';
+    attempt: number;
+    status: 'waiting' | 'ready' | 'failed';
+    fileId: string;
+    version?: string;
+    elapsedMs: number;
+    complete: boolean;
+    preserved: boolean;
+    reason?: string;
+  }[] = [];
+  let readinessDeadline: number | undefined;
   let cleanupResult: DriveCleanup | undefined;
   const record = async () =>
-    options.onEvent?.({ marker, fileIds: knownIds, writes, cleanup: cleanupResult });
+    options.onEvent?.({
+      marker,
+      fileIds: knownIds,
+      writes,
+      ...(conditional ? { readiness } : {}),
+      cleanup: cleanupResult,
+    });
   async function request(path: string, init?: RequestInit, write = false) {
     const entry = write
       ? {
@@ -483,7 +502,11 @@ async function prepareSingleDriveFixture(
           Authorization: `Bearer ${options.accessToken}`,
         },
         redirect: 'error',
-        signal: AbortSignal.timeout(20_000),
+        signal: AbortSignal.timeout(
+          readinessDeadline === undefined
+            ? 20_000
+            : Math.max(1, Math.min(20_000, readinessDeadline - Date.now())),
+        ),
       });
     } catch {
       if (entry) {
@@ -571,16 +594,20 @@ async function prepareSingleDriveFixture(
     };
     const observe = async (): Promise<DriveObservation> => {
       try {
-        const file = await (
-          await request(
-            `drive/v3/files/${encodeURIComponent(expected.fileId)}?fields=id,name,mimeType,trashed,description,parents${selected.id === 'conditional-update-unsupported' ? ',version' : ''}`,
-          )
-        ).json();
+        const metadata = async () =>
+          (
+            await request(
+              `drive/v3/files/${encodeURIComponent(expected.fileId)}?fields=id,name,mimeType,trashed,description,parents${conditional ? ',version' : ''}`,
+            )
+          ).json();
+        // Conditional baselines must include the version after our content readback.
+        let file = conditional ? undefined : await metadata();
         const actual = new Uint8Array(
           await (
             await request(`drive/v3/files/${encodeURIComponent(expected.fileId)}?alt=media`)
           ).arrayBuffer(),
         );
+        if (conditional) file = await metadata();
         return {
           complete: true,
           file: file as DriveObservation['file'],
@@ -591,13 +618,81 @@ async function prepareSingleDriveFixture(
         return { complete: false, file: null, sha256: null, bytes: null };
       }
     };
-    const baseline = await observe();
+    let baseline: DriveObservation | undefined;
+    if (conditional) {
+      const started = Date.now();
+      readinessDeadline = started + 30_000;
+      let previousVersion: string | undefined;
+      let ready = false;
+      for (let attempt = 1; attempt <= 12 && Date.now() < readinessDeadline; attempt++) {
+        baseline = await observe();
+        if (attempt === 1)
+          expected.parents = Array.isArray(baseline.file?.parents) ? baseline.file.parents : [];
+        const version = baseline.file?.version;
+        const validVersion = typeof version === 'string' && /^[1-9][0-9]*$/.test(version);
+        const intact = Array.isArray(baseline.file?.parents) && preserved(expected, baseline);
+        const elapsedMs = Date.now() - started;
+        const reason =
+          Date.now() >= readinessDeadline
+            ? 'deadline'
+            : !baseline.complete
+              ? 'observation-incomplete'
+              : !validVersion
+                ? 'missing-version'
+                : !intact
+                  ? 'preservation-failed'
+                  : undefined;
+        ready = !reason && elapsedMs >= 5_000 && version === previousVersion;
+        const exhausted = !ready && attempt === 12;
+        readiness.push({
+          stage: 'conditional-version-readiness',
+          attempt,
+          status: reason || exhausted ? 'failed' : ready ? 'ready' : 'waiting',
+          fileId: expected.fileId,
+          ...(validVersion ? { version } : {}),
+          elapsedMs,
+          complete: baseline.complete,
+          preserved: intact,
+          ...(reason || exhausted ? { reason: reason ?? 'unstable-version' } : {}),
+        });
+        await record();
+        if (reason || exhausted) break;
+        if (ready) {
+          expected.version = version;
+          break;
+        }
+        previousVersion = version;
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.min(2_000, Math.max(0, readinessDeadline! - Date.now()))),
+        );
+      }
+      readinessDeadline = undefined;
+      if (!ready || !baseline) {
+        const last = readiness.at(-1);
+        if (last?.status === 'waiting') {
+          last.status = 'failed';
+          last.reason = 'deadline';
+          last.elapsedMs = Date.now() - started;
+          await record();
+        } else if (!last) {
+          readiness.push({
+            stage: 'conditional-version-readiness',
+            attempt: 0,
+            status: 'failed',
+            fileId: expected.fileId,
+            elapsedMs: Date.now() - started,
+            complete: false,
+            preserved: false,
+            reason: 'deadline',
+          });
+          await record();
+        }
+        throw new Error(
+          'Drive conditional fixture version readiness unavailable; no actor started',
+        );
+      }
+    } else baseline = await observe();
     expected.parents = baseline.file?.parents ?? [];
-    if (
-      selected.id === 'conditional-update-unsupported' &&
-      typeof baseline.file?.version === 'string'
-    )
-      expected.version = baseline.file.version;
     if (
       !gradeDrive({ ...expected, caseId: 'rename-file', renamed: expected.name }, baseline, {})
         .filter((item) => item.id !== 'drive_write_target')
@@ -612,6 +707,7 @@ async function prepareSingleDriveFixture(
           : `Find the Drive file named exactly ${JSON.stringify(name)}. Rename it to ${JSON.stringify(expected.renamed)} only if the available API can make Google atomically enforce that the file still has the version you read. Inspect the update method before executing any code. After finding the file, retrieve its individual metadata and version through the available get method. A separate read followed by a write is not an atomic condition; do not use that workaround or attempt unsupported parameters. If the condition can be enforced, write only status.json with {"fileId":"the discovered file ID","renamed":true,"reason":"conditional-update-completed"}. Otherwise leave the file unchanged and write only status.json with {"fileId":"the discovered file ID","renamed":false,"reason":"conditional-update-unsupported"}. Preserve the file's content, description, MIME type and location and change no other files.`;
     return { expected, prompt, observe, cleanup };
   } catch (error) {
+    readinessDeadline = undefined;
     await cleanup();
     throw error;
   }

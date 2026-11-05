@@ -368,6 +368,19 @@ test('conditional limit oracle requires exact unsupported artifact, actual owned
   const changed = structuredClone(observed);
   changed.file!.version = '8';
   assert.equal(statuses(goal, changed, artifact, audit([read])).drive_version_preserved, 'fail');
+  // Restored visible metadata cannot hide a rename/revert, or repair the old 1→3 baseline.
+  for (const [before, after] of [
+    ['3', '5'],
+    ['1', '3'],
+  ]) {
+    const restored = structuredClone(observed);
+    restored.file!.version = after;
+    assert.equal(
+      statuses({ ...goal, version: before }, restored, artifact, audit([read]))
+        .drive_version_preserved,
+      'fail',
+    );
+  }
   const renamed = structuredClone(observed);
   renamed.file!.name = goal.renamed;
   assert.equal(statuses(goal, renamed, artifact, audit([read])).drive_metadata, 'fail');
@@ -424,18 +437,95 @@ test('Drive page fixture independently reads all three shared-prefix files and c
 });
 
 test('conditional fixture retains output-only version and makes the special inspection order explicit', async () => {
-  await withSyntheticDrive({}, async ({ calls }) => {
+  await withSyntheticDrive({}, async ({ calls, manifests }) => {
     const fixture = await prepareDriveFixture({
       accessToken: 'synthetic-google-token',
       expectedUser: 'test@example.invalid',
       caseId: 'conditional-update-unsupported',
+      onEvent: async (manifest) => {
+        manifests.push(structuredClone(manifest));
+      },
     });
     assert.equal(fixture.expected.version, '7');
     assert.match(fixture.prompt, /Inspect the update method before executing any code/);
     assert.match(fixture.prompt, /only if the available API can make Google atomically enforce/);
     assert.ok(calls.some((call) => call.fields?.endsWith(',version')));
+    assert.equal(getDriveCase('conditional-update-unsupported').version, 2);
+    const readiness = manifests.at(-1).readiness;
+    assert.deepEqual(
+      readiness.map((entry: any) => entry.status),
+      ['waiting', 'waiting', 'waiting', 'ready'],
+    );
+    assert.ok(readiness.at(-1).elapsedMs >= 5_000, 'early equality is insufficient');
+    assert.ok(!JSON.stringify(manifests).includes('synthetic-google-token'));
     assert.deepEqual(await fixture.cleanup(), { failures: [], unknownMutations: [] });
   });
+});
+
+test('conditional readiness waits for settled native versions and captures metadata after media', async () => {
+  await withSyntheticDrive({ versions: ['1', '2', '3', '3'] }, async ({ calls, manifests }) => {
+    const fixture = await prepareDriveFixture({
+      accessToken: 'synthetic-google-token',
+      expectedUser: 'test@example.invalid',
+      caseId: 'conditional-update-unsupported',
+      onEvent: async (manifest) => {
+        manifests.push(structuredClone(manifest));
+      },
+    });
+    assert.equal(fixture.expected.version, '3');
+    const readiness = manifests.at(-1).readiness;
+    assert.deepEqual(
+      readiness.map((entry: any) => entry.version),
+      ['1', '2', '3', '3'],
+    );
+    assert.equal(readiness.at(-1).status, 'ready');
+    assert.ok(readiness.every((entry: any) => entry.preserved && entry.complete));
+    const reads = calls.filter((call) => call.path === '/drive/v3/files/synthetic-owned-1');
+    assert.equal(reads.length, 8);
+    for (let index = 0; index < reads.length; index += 2) {
+      assert.equal(reads[index].media, true);
+      assert.equal(reads[index + 1].media, false);
+    }
+    await fixture.cleanup();
+  });
+});
+
+test('conditional readiness fails closed before returning an actor fixture and cleans the owned file', async () => {
+  const failures = [
+    { changingVersions: true },
+    { versions: [undefined] },
+    { versions: [''] },
+    { versions: ['not-a-version'] },
+    { deadlineDuringRead: true },
+    { contentDriftAt: 2 },
+    ...['id', 'name', 'description', 'mimeType', 'trashed', 'parents'].map((metadataDrift) => ({
+      metadataDrift,
+    })),
+  ];
+  for (const options of failures) {
+    await withSyntheticDrive(options, async ({ calls, manifests }) => {
+      await assert.rejects(
+        prepareDriveFixture({
+          accessToken: 'synthetic-google-token',
+          expectedUser: 'test@example.invalid',
+          caseId: 'conditional-update-unsupported',
+          onEvent: async (manifest) => {
+            manifests.push(structuredClone(manifest));
+          },
+        }),
+        /version readiness unavailable; no actor started/,
+        JSON.stringify(options),
+      );
+      const final = manifests.at(-1);
+      assert.equal(final.readiness.at(-1).status, 'failed');
+      assert.ok(final.readiness.length <= 12);
+      assert.deepEqual(final.cleanup, { failures: [], unknownMutations: [] });
+      assert.deepEqual(
+        calls.filter((call) => call.method === 'DELETE').map((call) => call.path),
+        ['/drive/v3/files/synthetic-owned-1'],
+      );
+    });
+  }
 });
 
 test('Drive page fixture refuses wrong accounts, retains ambiguous partial creates and reports cleanup failures', async () => {
@@ -511,24 +601,41 @@ async function withSyntheticDrive(
     failSecondCreate?: 'http' | 'missing-id';
     failDelete?: string;
     expireReadiness?: boolean;
+    versions?: (string | undefined)[];
+    changingVersions?: boolean;
+    metadataDrift?: string;
+    contentDriftAt?: number;
+    deadlineDuringRead?: boolean;
   },
   exercise: (fixture: {
-    calls: { path: string; method: string; fields: string | null }[];
+    calls: { path: string; method: string; fields: string | null; media: boolean }[];
     manifests: any[];
   }) => Promise<void>,
 ) {
   const originalFetch = globalThis.fetch;
   const originalNow = Date.now;
+  const originalSetTimeout = globalThis.setTimeout;
   let now = originalNow();
-  if (options.expireReadiness) Date.now = () => now;
+  Date.now = () => now;
+  globalThis.setTimeout = ((callback: (...args: any[]) => void, delay = 0, ...args: any[]) => {
+    now += delay;
+    return originalSetTimeout(callback, 0, ...args);
+  }) as typeof setTimeout;
   const stored = new Map<string, { metadata: Record<string, unknown>; bytes: Buffer }>();
-  const calls: { path: string; method: string; fields: string | null }[] = [];
+  const calls: { path: string; method: string; fields: string | null; media: boolean }[] = [];
   const manifests: any[] = [];
   let creates = 0;
+  let metadataReads = 0;
+  let mediaReads = 0;
   globalThis.fetch = (async (input: any, init?: RequestInit) => {
     const url = new URL(String(input));
     const method = init?.method ?? 'GET';
-    calls.push({ path: url.pathname, method, fields: url.searchParams.get('fields') });
+    calls.push({
+      path: url.pathname,
+      method,
+      fields: url.searchParams.get('fields'),
+      media: url.searchParams.get('alt') === 'media',
+    });
     assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer synthetic-google-token');
     if (url.pathname === '/drive/v3/about')
       return Response.json({ user: { emailAddress: 'test@example.invalid' } });
@@ -564,13 +671,41 @@ async function withSyntheticDrive(
       return options.failDelete === id
         ? Response.json({ error: {} }, { status: 503 })
         : new Response(null, { status: 204 });
-    if (url.searchParams.get('alt') === 'media') return new Response(file.bytes);
-    return Response.json({ ...file.metadata, id, trashed: false, parents: ['root'], version: '7' });
+    if (url.searchParams.get('alt') === 'media') {
+      mediaReads++;
+      return new Response(
+        options.contentDriftAt && mediaReads >= options.contentDriftAt
+          ? Buffer.from('corrupt')
+          : file.bytes,
+      );
+    }
+    metadataReads++;
+    if (options.deadlineDuringRead) now += 30_001;
+    const metadata: Record<string, unknown> = {
+      ...file.metadata,
+      id,
+      trashed: false,
+      parents: ['root'],
+      version: options.changingVersions
+        ? String(metadataReads)
+        : options.versions
+          ? options.versions[Math.min(metadataReads - 1, options.versions.length - 1)]
+          : '7',
+    };
+    if (options.metadataDrift && metadataReads >= 2)
+      metadata[options.metadataDrift] =
+        options.metadataDrift === 'parents'
+          ? ['moved']
+          : options.metadataDrift === 'trashed'
+            ? true
+            : 'changed';
+    return Response.json(metadata);
   }) as typeof fetch;
   try {
     await exercise({ calls, manifests });
   } finally {
     globalThis.fetch = originalFetch;
     Date.now = originalNow;
+    globalThis.setTimeout = originalSetTimeout;
   }
 }

@@ -264,6 +264,7 @@ test(
           fixture = await prepareDriveFixture({
             accessToken,
             expectedUser,
+            caseId: 'conditional-update-unsupported',
             onEvent: async (manifest) => {
               entry.manifest = structuredClone(manifest);
               await retain();
@@ -319,6 +320,7 @@ test(
           }
           const observation = await fixture.observe();
           entry.qualification.observation = observation;
+          assert.equal(observation.file?.version, fixture.expected.version);
           const criteria = gradeDrive(
             { ...fixture.expected, caseId: 'rename-file', renamed: fixture.expected.name },
             observation,

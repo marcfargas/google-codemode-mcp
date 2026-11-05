@@ -43,6 +43,18 @@ owned-file read. This measures discovery and adherence to the documented limit,
 not independent API reasoning or successful conditional writes. Zero recorded
 mutation outcomes cannot prove no expression was rejected before the bridge.
 
+Conditional case version 2 adds a bounded pre-launch readiness check: native
+versions must agree across successive observations after at least five seconds,
+with unchanged owned metadata and content. It stops before inference if readiness
+cannot be established within 12 observations or 30 seconds. Readiness observations
+are retained in the fixture manifest. This is an observed fixture precondition,
+not a guarantee that Google cannot make later internal changes. The other three
+cases remain version 1; grading version 3 and its version-preservation check are
+unchanged. The maintained live Drive check passed with the repair: readiness
+observed versions `1`, `3`, `3`, captured `3` after 6.8 seconds, and independent
+final readback remained `3`; cleanup completed with no unknown mutations. The
+version-2 conditional agent pair remains unattempted.
+
 The file case uses UTF-8 content because runner Write tools accept text; synthetic
 native-SDK tests separately verify arbitrary binary and JSON-MIME downloads.
 The media envelope remains bounded to 131072 raw bytes; uploads/artifact storage
@@ -445,6 +457,59 @@ No additional agent trials ran for this qualification. Earlier Sonnet/Sol case
 passes and the original Sol runner failure retain their source/runner identities.
 Shared drives, a real `incompleteSearch: true` response, successful conditional
 writes, hosted Drive and actual target-host activation remain unqualified.
+
+## Fresh four-case Drive campaign (2026-11-05)
+
+Eight fresh attempts ran once on `44c8c369d282c2be2463f4ae2c807afd7c05caca`,
+using one local Worker bundle and the required Sonnet/Sol pair. All cases were
+version 1 under grading version 3. Download, pagination and rename passed for
+both models. Both conditional-limit cases failed only `drive_version_preserved`:
+the immediate fixture baseline was `1`, while each actor's first metadata read
+and independent final observation returned `3`. All other criteria passed,
+including update-method discovery before execution, owned-file reads, exact
+status artifacts, unchanged metadata/content and zero recorded mutations.
+All eight attempts had complete model identity evidence, successful cleanup and
+zero unknown mutations. Original result: **six pass, two fail, zero errors,
+zero unattempted**. No retries or cap increases ran.
+
+A subsequent fixture-only calibration created three owned files without models.
+Their versions advanced from `1` to `3` before the first media download, then
+remained `3` at later reads. A deliberate rename/revert control advanced the
+version to `4` and `5`; all three files were cleaned up. Google's
+[File reference](https://developers.google.com/workspace/drive/api/reference/rest/v3/files)
+states that version includes every server change, including invisible changes.
+The specific internal cause remains unknown. Conditional case version 2 adds
+readiness before capturing its baseline; it retains the independent version
+check. This fixture repair cannot be applied to the old baseline or turn the
+original failures into passes. A fresh version-2 conditional pair remains pending.
+
+Per-attempt counters below include the failed cases. Claude input excludes its
+separate cache-read and cache-creation counters; GPT input includes cached reads.
+GPT cache creation is unknown. Sonnet estimates come from the native CLI; Sol
+estimates use observed published rates. Committed GPT estimates use conservative
+uncached-rate accounting and are not additional charges. Actual billing is unknown.
+
+| Case                           | Model  | Gate | Requests |   Input | Output | Cache read | Cache creation | Estimate USD | GPT committed USD |
+| ------------------------------ | ------ | ---- | -------: | ------: | -----: | ---------: | -------------: | -----------: | ----------------: |
+| read-file                      | Sonnet | pass |        6 |      12 |  1,816 |     31,696 |         10,005 |    0.0613736 |           unknown |
+| read-file                      | Sol    | pass |        9 | 142,674 |    494 |    113,408 |        unknown |    0.0748128 |          0.290288 |
+| list-pages                     | Sonnet | pass |        5 |      10 |  1,442 |     27,052 |          8,151 |    0.0497492 |           unknown |
+| list-pages                     | Sol    | pass |        8 |  78,268 |    647 |     56,320 |        unknown |     0.055998 |          0.163006 |
+| rename-file                    | Sonnet | pass |        5 |      10 |  1,017 |     26,220 |          6,853 |     0.040224 |           unknown |
+| rename-file                    | Sol    | pass |        9 | 119,648 |    550 |     77,824 |        unknown |    0.0969304 |          0.244796 |
+| conditional-update-unsupported | Sonnet | fail |        5 |      10 |  1,260 |     28,977 |          7,657 |    0.0461457 |           unknown |
+| conditional-update-unsupported | Sol    | fail |       10 | 251,055 |    570 |    200,448 |        unknown |    0.1269588 |           0.50781 |
+
+Across four attempts, Sonnet reported 21 complete requests, 42 ordinary input,
+113,945 cache-read input, 32,666 cache-creation input and 5,535 output tokens;
+the native CLI estimate totals **$0.1974925**. Sol reported 36 complete requests,
+591,645 input including 448,000 cached input, and 2,261 output tokens including
+zero reported reasoning tokens; its observed usage estimate totals **$0.3547**,
+with **$1.2059** committed across four separate per-attempt budgets. These are
+different counter/cost bases, not a model-cost ranking. No model requests were
+made to recover or report metrics. The source, raw results, original failures
+and all earlier campaign failures remain retained. This is feasibility evidence,
+not reliability, a complete passing four-case suite, or host/hosted qualification.
 
 ## Native Codex capability probe
 
