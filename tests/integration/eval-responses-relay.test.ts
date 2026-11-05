@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import test from 'node:test';
-import { createResponsesHandler, RESPONSES_ACCOUNTING_VERSION } from '../eval/responses-relay.ts';
+import { RESPONSES_ACCOUNTING_VERSION } from '../eval/responses-relay.ts';
+import { responsesHarness } from '../support/relay.ts';
 
 const MODEL = 'gpt-6.1-terra';
 const tool = { type: 'function', name: 'describe', parameters: { type: 'object' }, strict: false };
@@ -37,62 +37,10 @@ function assertHeld(receipt: any) {
   assert.ok(receipt.settlementReason.length > 0);
 }
 
-async function harness(
+const harness = (
   respond: (body: any, response: ServerResponse, request: IncomingMessage) => unknown,
   model = MODEL,
-) {
-  const output = await mkdtemp(join(tmpdir(), 'responses-relay-'));
-  const upstream: any[] = [];
-  const proxy = createServer(async (request, response) => {
-    let raw = '';
-    for await (const chunk of request) raw += chunk;
-    const body = JSON.parse(raw);
-    upstream.push({ body, headers: request.headers });
-    await respond(body, response, request);
-  });
-  await new Promise<void>((resolve) => proxy.listen(0, '127.0.0.1', resolve));
-  const receipts: any[] = [];
-  const handler = createResponsesHandler({
-    proxyUrl: `http://127.0.0.1:${(proxy.address() as { port: number }).port}`,
-    proxyKey: 'private-proxy-key',
-    model,
-    output,
-    receipts,
-    redact: (text) => text.replaceAll('private-proxy-key', '[proxy-key]'),
-    allowedToolNames: () => ['describe'],
-  });
-  const relay = createServer(async (request, response) => {
-    try {
-      await handler.handle(request, response);
-    } catch (error) {
-      response.writeHead(400, { 'Content-Type': 'application/json' });
-      response.end(JSON.stringify({ error: error instanceof Error ? error.message : 'failed' }));
-    }
-  });
-  await new Promise<void>((resolve) => relay.listen(0, '127.0.0.1', resolve));
-  return {
-    output,
-    upstream,
-    receipts,
-    handler,
-    invoke: (body: any = payload(model), key = 'local-eval-relay') =>
-      fetch(`http://127.0.0.1:${(relay.address() as { port: number }).port}/responses`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-        body: JSON.stringify(body),
-      }),
-    async close() {
-      handler.abort();
-      relay.closeAllConnections();
-      proxy.closeAllConnections();
-      await Promise.all([
-        new Promise<void>((resolve) => relay.close(() => resolve())),
-        new Promise<void>((resolve) => proxy.close(() => resolve())),
-      ]);
-      await rm(output, { recursive: true, force: true });
-    },
-  };
-}
+) => responsesHarness(respond, payload(model));
 
 test('Responses relay preserves cache controls, terminal usage and model identity without leaking auth', async () => {
   const gate = await harness((_body, response) => {

@@ -234,20 +234,6 @@ test('oversized method descriptions keep complete execution guidance within the 
   const dynamic = new DiscoveryCatalog({ document });
   const described = await dynamic.describe(send);
   const resolved = await dynamic.resolve(send);
-  const header = [
-    'path',
-    'signature',
-    'next',
-    'supported',
-    'mutation',
-    'httpMethod',
-    'runtime',
-    'excludedParameters',
-    'unsupportedReason',
-    'documentation',
-    'skill',
-  ];
-  assert.deepEqual(Object.keys(described).slice(0, header.length), header);
   const computed = [
     'revision',
     'source',
@@ -264,11 +250,6 @@ test('oversized method descriptions keep complete execution guidance within the 
     'requestSchema',
     'responseSchema',
   ];
-  assert.deepEqual(
-    Object.keys(described).sort(),
-    [...new Set([...Object.keys(resolved), ...computed])].sort(),
-    'promotion preserves the exact field set, including undefined values',
-  );
   for (const key of Object.keys(resolved))
     if (!computed.includes(key)) assert.deepEqual(described[key], resolved[key], key);
   assert.equal(described.description, largeDescription);

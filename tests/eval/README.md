@@ -157,6 +157,11 @@ without credentials, inference, or Google requests:
 just eval-preflight /absolute/new/preflight-directory
 ```
 
+Synthetic runner checks live in `tests/preflight/`. The workflow runs each file
+explicitly, so renaming a test cannot silently omit a required preflight.
+Ordinary `just check` also discovers these files; native CLI checks run only when
+their executable paths are explicitly supplied.
+
 The **Agent feasibility** workflow runs only through local `act` on marcdev.
 Its first step refuses GitHub-hosted execution before installing tools, refreshing
 OAuth grants, creating fixtures, or calling models. Use the `just eval*`

@@ -13,9 +13,8 @@ import { getCellByModel } from './matrix.ts';
 import { verifyModels } from './catalog.ts';
 import { RESPONSES_RUNNER_VERSION } from './responses.ts';
 import { RESPONSES_ACCOUNTING_VERSION } from './responses-relay.ts';
-import { getGmailCase } from './cases.ts';
+import { getCase, getGmailCase } from './cases.ts';
 import {
-  getDriveCase,
   prepareDriveFixture,
   gradeDrive,
   type DriveExpected,
@@ -23,7 +22,6 @@ import {
 } from './drive.ts';
 import type { GmailExpected, GmailObservation } from './gmail.ts';
 import {
-  getMediaCase,
   prepareMediaFixture,
   gradeMedia,
   type MediaExpected,
@@ -67,7 +65,7 @@ const profiles = {
   },
 };
 
-function gradeTask(
+export function gradeTask(
   expected: GmailExpected | DriveExpected | MediaExpected,
   observation: GmailObservation | DriveObservation | MediaObservation | null,
   files: Record<string, string>,
@@ -128,16 +126,10 @@ export async function runCell(configuration?: {
   await json(join(output, 'coverage.json'), profiles);
   if (!['gmail', 'drive', 'media'].includes(profile))
     throw new Error(`Coverage unavailable for ${profile}; no model call made`);
-  const selectedCase =
-    profile === 'gmail'
-      ? getGmailCase(
-          configuration?.caseId ??
-            process.env.EVAL_CASE ??
-            (nativeProbe ? 'read-search' : 'combined'),
-        )
-      : profile === 'media'
-        ? getMediaCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'gmail-to-drive')
-        : getDriveCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'read-file');
+  const selectedCase = getCase(
+    profile,
+    configuration?.caseId ?? process.env.EVAL_CASE ?? (nativeProbe ? 'read-search' : undefined),
+  );
   const captureOutbound =
     profile === 'drive' && selectedCase.id === 'conditional-update-unsupported';
   if (captureOutbound && process.env.EVAL_BACKEND === 'hosted')
@@ -196,6 +188,7 @@ export async function runCell(configuration?: {
             'tests/eval/backend.ts',
             'tests/eval/outbound.ts',
             'tests/support/worker-client.ts',
+            'tests/support/io.ts',
             'tests/eval/campaign.ts',
             'tests/eval/catalog.ts',
             'tests/eval/server.ts',
@@ -317,8 +310,9 @@ export async function runCell(configuration?: {
         await json(join(trial, 'observation.json'), observation);
         observed = true;
         await json(join(trial, 'files.json'), actor.files);
+        const task = gradeTask(fixture.expected, observation, actor.files, relay.audit, outbound);
         result.criteria = [
-          ...gradeTask(fixture.expected, observation, actor.files, relay.audit, outbound),
+          ...task,
           ...gradeMechanisms(relay.audit, selectedCase.policy),
           gradeModel(model, relay.llm),
           {
@@ -333,13 +327,7 @@ export async function runCell(configuration?: {
             evidence: `exit=${actor.exitCode}; timeout=${actor.timedOut}; valid transcript=${actor.transcript.valid}`,
           },
         ];
-        result.taskSuccess = gradeTask(
-          fixture.expected,
-          observation,
-          actor.files,
-          relay.audit,
-          outbound,
-        ).every((criterion) => criterion.status === 'pass');
+        result.taskSuccess = task.every((criterion) => criterion.status === 'pass');
         result.status = result.criteria.every((criterion: any) => criterion.status === 'pass')
           ? 'pass'
           : 'fail';
@@ -465,15 +453,4 @@ export async function runCell(configuration?: {
   } finally {
     await backend.close();
   }
-}
-
-if (process.argv[1] && resolve(process.argv[1]) === resolve('tests/eval/run.ts')) {
-  runCell()
-    .then((run) => {
-      if (!run.passed) process.exitCode = 1;
-    })
-    .catch(() => {
-      console.error('Agent feasibility infrastructure failed; inspect retained private evidence');
-      process.exitCode = 1;
-    });
 }

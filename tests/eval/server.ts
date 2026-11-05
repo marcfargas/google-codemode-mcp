@@ -1,4 +1,5 @@
-import { createServer, type IncomingMessage } from 'node:http';
+import { createServer } from 'node:http';
+import { requestText } from '../support/io.ts';
 import { appendFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
@@ -6,17 +7,6 @@ import { createResponsesHandler } from './responses-relay.ts';
 
 export const TOKEN_SENTINEL = 'injected-by-eval-caller';
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
-
-async function body(request: IncomingMessage) {
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  for await (const chunk of request) {
-    bytes += chunk.length;
-    if (bytes > 262_144) throw new Error('Request exceeds evaluation input limit');
-    chunks.push(Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString('utf8');
-}
 
 export interface McpEvent {
   /** One relay-owned sequence, shared by request starts and parsed completions. */
@@ -89,7 +79,9 @@ export async function startEvalServer(options: {
       if (stopped) throw new Error('Evaluation execution closed');
       const path = new URL(request.url!, 'http://localhost').pathname;
       if (path === '/mcp' && request.method === 'POST') {
-        const rpc = JSON.parse(await body(request));
+        const rpc = JSON.parse(
+          await requestText(request, 262_144, 'Request exceeds evaluation input limit'),
+        );
         if (stopped) throw new Error('Evaluation execution closed');
         const original = structuredClone(rpc.params ?? {});
         const execution = rpc.method === 'tools/call' && rpc.params?.name !== 'describe';
@@ -184,7 +176,9 @@ export async function startEvalServer(options: {
         request.headers.authorization !== 'Bearer local-eval-relay'
       )
         throw new Error('Invalid local model credential');
-      const payload = JSON.parse(await body(request));
+      const payload = JSON.parse(
+        await requestText(request, 262_144, 'Request exceeds evaluation input limit'),
+      );
       if (payload.model !== options.model)
         throw new Error('Unexpected requested model; fallback is disabled');
       if (stopped || active || requests >= 18 || outputTokens >= 15_000)

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import type { McpEvent } from '../eval/server.ts';
+import { toolEvent } from '../support/audit.ts';
 import { GMAIL_CASES, type GmailCaseId } from '../eval/cases.ts';
 import {
   gradeGmail,
@@ -95,14 +96,7 @@ const answerFile = (answer: unknown) => ({
   'answer.json': Buffer.from(JSON.stringify(answer)).toString('base64'),
 });
 function audit(...outcomes: unknown[]): McpEvent[] {
-  return [
-    {
-      method: 'tools/call',
-      params: { name: 'execute' },
-      status: 200,
-      response: { result: { structuredContent: { outcomesComplete: true, outcomes } } },
-    },
-  ];
+  return [toolEvent('execute', { outcomesComplete: true, outcomes })];
 }
 function listPage(query: string, requestedPageToken?: string, nextPageToken?: string) {
   return {
@@ -474,149 +468,44 @@ test('missing readback is unknown, partial history cannot pass side-effect crite
 });
 
 test('independent REST lifecycle guards account, seeds MIME attachment, captures history and cleans only known IDs', async () => {
-  const originalFetch = globalThis.fetch;
-  const calls: { path: string; method: string; body?: any }[] = [];
-  const events: GmailManifest[] = [];
-  let full: any;
-  let downloaded: string;
-  let subject: string;
-  let labelName: string;
-  let attachmentFilename: string;
-  let fixtureRaw: string;
-  let historyPages = 0;
-  globalThis.fetch = (async (input: any, init?: RequestInit) => {
-    const url = new URL(String(input));
-    const path = url.pathname.replace('/gmail/v1/users/me/', '') + url.search;
-    const method = init?.method ?? 'GET';
-    assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer private-test-token');
-    const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
-    calls.push({ path, method, body });
-    let value: any;
-    if (path === 'profile') value = { emailAddress: 'dummy@example.test', historyId: '123' };
-    else if (path === 'drafts?maxResults=100') value = { drafts: [{ id: 'pre-existing-draft' }] };
-    else if (path === 'labels' && method === 'POST') {
-      labelName = body.name;
-      value = { id: 'fixture-label' };
-    } else if (path.startsWith('messages?') && method === 'POST') {
-      fixtureRaw = Buffer.from(body.raw, 'base64url').toString('utf8');
-      subject = fixtureRaw.match(/^Subject: (.+)\r?$/m)![1].trim();
-      attachmentFilename = fixtureRaw.match(/filename="([^"]+)"/)![1];
-      downloaded = fixtureRaw
-        .split('Content-Transfer-Encoding: base64\r\n\r\n')[2]
-        .split('\r\n')[0];
-      full = {
-        id: 'source',
-        threadId: 'thread',
-        labelIds: ['INBOX', 'UNREAD'],
-        payload: {
-          mimeType: 'multipart/mixed',
-          headers: [
-            { name: 'Message-ID', value: '<observed-google-id@example.test>' },
-            { name: 'Subject', value: subject },
-          ],
-          parts: [
-            {
-              mimeType: 'text/plain',
-              body: { data: Buffer.from('seed body').toString('base64url') },
-            },
-            {
-              mimeType: 'text/plain',
-              filename: attachmentFilename,
-              body: { attachmentId: 'attachment' },
-            },
-          ],
+  await withFixtureApi(
+    async ({ calls, raw, historyPages }) => {
+      const events: GmailManifest[] = [];
+      const result = await prepareGmailFixture({
+        accessToken: 'synthetic-token',
+        expectedUser: 'dummy@example.test',
+        onEvent: (manifest) => {
+          events.push(manifest);
         },
-      };
-      value = { id: 'source', threadId: 'thread' };
-    } else if (path === 'messages/source?format=full') value = full;
-    else if (path === 'messages/unrelated?format=full')
-      value = { id: 'unrelated', threadId: 'other' };
-    else if (path === 'messages/source/attachments/attachment')
-      value = { data: Buffer.from(downloaded!, 'base64').toString('base64url') };
-    else if (path === 'labels' && method === 'GET')
-      value = { labels: [{ id: 'fixture-label', name: labelName!, type: 'user' }] };
-    else if (path === 'threads/thread?format=full')
-      value = {
-        messages: [
-          full,
-          {
-            id: 'reply',
-            threadId: 'thread',
-            payload: {
-              headers: [
-                { name: 'In-Reply-To', value: '<observed-google-id@example.test>' },
-                { name: 'Subject', value: `Re: ${subject!}` },
-              ],
-            },
-          },
-        ],
-      };
-    else if (path.startsWith('history?')) {
-      historyPages++;
-      value =
-        historyPages === 1
-          ? {
-              history: [
-                {
-                  labelsAdded: [
-                    { message: { id: 'source', threadId: 'thread' }, labelIds: ['fixture-label'] },
-                  ],
-                },
-              ],
-              nextPageToken: 'next',
-            }
-          : {
-              history: [
-                {
-                  messagesAdded: [
-                    { message: { id: 'unrelated', threadId: 'other', labelIds: ['INBOX'] } },
-                  ],
-                },
-              ],
-            };
-    } else if (path === 'messages/source/trash' || path === 'messages/reply/trash')
-      value = { id: path.split('/')[1] };
-    else if (path === 'labels/fixture-label' && method === 'DELETE')
-      return new Response(null, { status: 204 });
-    else throw new Error(`Unexpected mocked path ${method} ${path}`);
-    return Response.json(value);
-  }) as typeof fetch;
-  try {
-    const result = await prepareGmailFixture({
-      accessToken: 'private-test-token',
-      expectedUser: 'dummy@example.test',
-      onEvent: (manifest) => {
-        events.push(manifest);
-      },
-    });
-    assert.equal(result.expected.messageId, '<observed-google-id@example.test>');
-    assert.ok(result.prompt.includes(subject!));
-    assert.ok(!result.prompt.includes(result.expected.confirmationCode));
-    assert.ok(!result.prompt.includes(attachmentFilename!));
-    assert.ok(!result.prompt.includes(result.expected.sourceId));
-    assert.ok(!result.prompt.includes('users.messages'));
-    assert.ok(fixtureRaw!.includes('Content-Disposition: attachment;'));
-    assert.ok(events.some((event) => event.writes.some((write) => write.state === 'attempting')));
-    assert.ok(!JSON.stringify(events).includes('private-test-token'));
-    const observation = await result.observe();
-    assert.equal(historyPages, 2);
-    assert.equal(observation.complete, true);
-    assert.ok(observation.history.some((change) => change.id === 'unrelated'));
-    assert.deepEqual(result.manifest.messageIds, ['source', 'reply']);
-    assert.equal(statuses(result.expected, observation, {}).no_extra_effects, 'fail');
-    const cleaned = await result.cleanup();
-    assert.deepEqual(cleaned, { failures: [], unknownMutations: [] });
-    assert.equal(
-      calls.filter((call) => call.method === 'POST' && call.path.includes('messages?')).length,
-      1,
-    );
-    assert.ok(!calls.some((call) => call.path.includes('unrelated/trash')));
-    assert.ok(
-      !calls.some((call) => call.path.includes('pre-existing-draft') && call.method !== 'GET'),
-    );
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+      });
+      assert.equal(result.expected.messageId, '<observed-google-id@example.test>');
+      assert.ok(result.prompt.includes(result.expected.subject));
+      assert.ok(!result.prompt.includes(result.expected.confirmationCode));
+      assert.ok(!result.prompt.includes(result.expected.attachment.filename));
+      assert.ok(!result.prompt.includes(result.expected.sourceId));
+      assert.ok(!result.prompt.includes('users.messages'));
+      assert.ok(raw().includes('Content-Disposition: attachment;'));
+      assert.ok(events.some((event) => event.writes.some((write) => write.state === 'attempting')));
+      assert.ok(!JSON.stringify(events).includes('synthetic-token'));
+      const observation = await result.observe();
+      assert.equal(historyPages(), 2);
+      assert.equal(observation.complete, true);
+      assert.ok(observation.history.some((change) => change.id === 'unrelated'));
+      assert.deepEqual(result.manifest.messageIds, [result.expected.sourceId, 'reply']);
+      assert.equal(statuses(result.expected, observation, {}).no_extra_effects, 'fail');
+      const cleaned = await result.cleanup();
+      assert.deepEqual(cleaned, { failures: [], unknownMutations: [] });
+      assert.equal(
+        calls.filter((call) => call.method === 'POST' && call.path === 'messages').length,
+        1,
+      );
+      assert.ok(!calls.some((call) => call.path.includes('unrelated/trash')));
+      assert.ok(
+        !calls.some((call) => call.path.includes('pre-existing-draft') && call.method !== 'GET'),
+      );
+    },
+    { lifecycle: true },
+  );
 });
 
 test('account mismatch fails before any write', async () => {
@@ -672,14 +561,18 @@ async function withFixtureApi(
   run: (state: {
     calls: { path: string; method: string }[];
     seedCount: () => number;
+    raw: () => string;
+    historyPages: () => number;
   }) => Promise<void>,
-  missingStatus = 404,
+  options: { missingStatus?: number; lifecycle?: boolean } = {},
 ) {
   const originalFetch = globalThis.fetch;
   const calls: { path: string; method: string }[] = [];
   const messages = new Map<string, any>();
   let labelName = '';
   let attachmentData = '';
+  let raw = '';
+  let historyPages = 0;
   globalThis.fetch = (async (input: any, init?: RequestInit) => {
     const url = new URL(String(input));
     const path = url.pathname.replace('/gmail/v1/users/me/', '');
@@ -688,7 +581,8 @@ async function withFixtureApi(
     assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer synthetic-token');
     if (path === 'profile')
       return Response.json({ emailAddress: 'dummy@example.test', historyId: '100' });
-    if (path === 'drafts') return Response.json({ drafts: [] });
+    if (path === 'drafts')
+      return Response.json({ drafts: options.lifecycle ? [{ id: 'pre-existing-draft' }] : [] });
     if (path === 'labels' && method === 'POST') {
       labelName = JSON.parse(String(init?.body)).name;
       return Response.json({ id: 'Label_owned' });
@@ -697,6 +591,7 @@ async function withFixtureApi(
       return Response.json({ labels: [{ id: 'Label_owned', name: labelName, type: 'user' }] });
     if (path === 'messages' && method === 'POST') {
       const mime = Buffer.from(JSON.parse(String(init?.body)).raw, 'base64url').toString('utf8');
+      raw = mime;
       const id = `seed-${messages.size + 1}`;
       const segments = mime.split('Content-Transfer-Encoding: base64\r\n\r\n');
       const text = segments[1].split('\r\n')[0];
@@ -710,7 +605,10 @@ async function withFixtureApi(
           mimeType: filename ? 'multipart/mixed' : 'text/plain',
           headers: ['Subject', 'Message-ID'].map((name) => ({
             name,
-            value: mime.match(new RegExp(`^${name}: (.+)\\r?$`, 'm'))![1].trim(),
+            value:
+              options.lifecycle && name === 'Message-ID'
+                ? '<observed-google-id@example.test>'
+                : mime.match(new RegExp(`^${name}: (.+)\\r?$`, 'm'))![1].trim(),
           })),
           ...(filename
             ? {
@@ -730,22 +628,83 @@ async function withFixtureApi(
     if (path === 'messages/seed-1/attachments/attachment')
       return Response.json({ data: Buffer.from(attachmentData, 'base64').toString('base64url') });
     if (/^messages\/[^/]+$/.test(path) && method === 'GET') {
-      const message = messages.get(path.split('/')[1]);
+      const message =
+        options.lifecycle && path === 'messages/unrelated'
+          ? { id: 'unrelated', threadId: 'other' }
+          : messages.get(path.split('/')[1]);
       return message
         ? Response.json(message)
-        : Response.json({ error: { code: missingStatus } }, { status: missingStatus });
+        : Response.json(
+            { error: { code: options.missingStatus ?? 404 } },
+            { status: options.missingStatus ?? 404 },
+          );
     }
     if (path === 'threads/thread-seed-1')
-      return Response.json({ messages: [messages.get('seed-1')] });
-    if (path === 'history') return Response.json({ history: [] });
-    if (/^messages\/seed-[123]\/trash$/.test(path) && method === 'POST')
+      return Response.json({
+        messages: [
+          messages.get('seed-1'),
+          ...(options.lifecycle
+            ? [
+                {
+                  id: 'reply',
+                  threadId: 'thread-seed-1',
+                  payload: {
+                    headers: [
+                      { name: 'In-Reply-To', value: '<observed-google-id@example.test>' },
+                      {
+                        name: 'Subject',
+                        value: `Re: ${messages.get('seed-1').payload.headers[0].value}`,
+                      },
+                    ],
+                  },
+                },
+              ]
+            : []),
+        ],
+      });
+    if (path === 'history') {
+      historyPages++;
+      return Response.json(
+        !options.lifecycle
+          ? { history: [] }
+          : historyPages === 1
+            ? {
+                history: [
+                  {
+                    labelsAdded: [
+                      {
+                        message: { id: 'seed-1', threadId: 'thread-seed-1' },
+                        labelIds: ['Label_owned'],
+                      },
+                    ],
+                  },
+                ],
+                nextPageToken: 'next',
+              }
+            : {
+                history: [
+                  {
+                    messagesAdded: [
+                      { message: { id: 'unrelated', threadId: 'other', labelIds: ['INBOX'] } },
+                    ],
+                  },
+                ],
+              },
+      );
+    }
+    if (/^messages\/(seed-[123]|reply)\/trash$/.test(path) && method === 'POST')
       return Response.json({ id: path.split('/')[1] });
     if (path === 'labels/Label_owned' && method === 'DELETE')
       return new Response(null, { status: 204 });
     throw new Error(`Unexpected synthetic fixture API request: ${method} ${path}`);
   }) as typeof fetch;
   try {
-    await run({ calls, seedCount: () => messages.size });
+    await run({
+      calls,
+      seedCount: () => messages.size,
+      raw: () => raw,
+      historyPages: () => historyPages,
+    });
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -814,16 +773,21 @@ test('failure fixture preflights a well-formed missing ID and aborts on a differ
     await fixture.cleanup();
     assert.ok(!calls.some((call) => call.path === `messages/${fixture.expected.missingId}/trash`));
   });
-  await withFixtureApi(async ({ calls }) => {
-    await assert.rejects(
-      prepareGmailFixture({
-        accessToken: 'synthetic-token',
-        expectedUser: 'dummy@example.test',
-        caseId: 'failure',
-      }),
-      /did not return HTTP 404/,
-    );
-    assert.ok(calls.some((call) => call.path === 'messages/seed-1/trash'));
-    assert.ok(calls.some((call) => call.path === 'labels/Label_owned' && call.method === 'DELETE'));
-  }, 400);
+  await withFixtureApi(
+    async ({ calls }) => {
+      await assert.rejects(
+        prepareGmailFixture({
+          accessToken: 'synthetic-token',
+          expectedUser: 'dummy@example.test',
+          caseId: 'failure',
+        }),
+        /did not return HTTP 404/,
+      );
+      assert.ok(calls.some((call) => call.path === 'messages/seed-1/trash'));
+      assert.ok(
+        calls.some((call) => call.path === 'labels/Label_owned' && call.method === 'DELETE'),
+      );
+    },
+    { missingStatus: 400 },
+  );
 });

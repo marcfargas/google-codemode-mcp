@@ -6,6 +6,7 @@ import test from 'node:test';
 import { gradeSavedEvidence, regradeTrial } from '../eval/regrade.ts';
 import { GRADING_VERSION } from '../eval/mechanisms.ts';
 import type { McpEvent } from '../eval/server.ts';
+import { toolEvent, resourceEvent, ordered } from '../support/audit.ts';
 
 const native = [{ type: 'result', subtype: 'success', is_error: false }];
 const actor = {
@@ -99,41 +100,16 @@ test('offline command copies original source/result, records current grader and 
 const savedAudit = (): McpEvent[] => {
   const path = 'gmail/v1/users.messages.get';
   const uri = 'skill://google-codemode-mcp/google-workspace/SKILL.md';
-  return [
-    {
-      method: 'tools/call',
-      params: { name: 'describe', arguments: {} },
-      response: { result: { structuredContent: { services: [] } } },
-    },
-    {
-      method: 'resources/read',
-      params: { uri },
-      response: { result: { contents: [{ uri, text: '# Google Workspace Code Mode' }] } },
-    },
-    {
-      method: 'tools/call',
-      params: { name: 'describe', arguments: { path } },
-      response: { result: { structuredContent: { path, signature: 'get(params)' } } },
-    },
-    {
-      method: 'tools/call',
-      params: { name: 'execute' },
-      response: {
-        result: {
-          structuredContent: {
-            outcomes: [{ path, mutation: false, outcome: 'acknowledged' }],
-            outcomesComplete: true,
-            hasUnknownOutcome: false,
-          },
-        },
-      },
-    },
-  ].map((event, index) => ({
-    ...event,
-    status: 200,
-    startedOrdinal: 2 * index + 1,
-    completedOrdinal: 2 * index + 2,
-  }));
+  return ordered(
+    toolEvent('describe', { services: [] }, {}),
+    resourceEvent(uri),
+    toolEvent('describe', { path, signature: 'get(params)' }, { path }),
+    toolEvent('execute', {
+      outcomes: [{ path, mutation: false, outcome: 'acknowledged' }],
+      outcomesComplete: true,
+      hasUnknownOutcome: false,
+    }),
+  );
 };
 const attemptRecords = (audit: McpEvent[]) =>
   audit.map((event) => ({

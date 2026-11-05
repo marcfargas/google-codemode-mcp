@@ -3,10 +3,8 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { builtinModules } from 'node:module';
-import { build } from 'esbuild';
 import test from 'node:test';
-import { openBuiltWorker, type ExecutionReceipt } from '../support/worker-client.ts';
+import { bundleFixture, openBuiltWorker, type ExecutionReceipt } from '../support/worker-client.ts';
 import type { ArtifactReference, ArtifactOutcome } from '../../src/artifacts.ts';
 
 const token = 'inert-workerd-artifact-token';
@@ -74,39 +72,6 @@ type Receipt = ExecutionReceipt & {
   error?: string;
 };
 const hash = (data: Buffer | string) => createHash('sha256').update(data).digest('hex');
-
-async function fixtureBundle() {
-  const result = await build({
-    entryPoints: ['tests/fixtures/artifacts.ts'],
-    bundle: true,
-    write: false,
-    format: 'esm',
-    platform: 'neutral',
-    conditions: ['workerd', 'worker', 'browser', 'import', 'default'],
-    mainFields: ['module', 'main'],
-    alias: Object.fromEntries(
-      builtinModules
-        .filter((name) => !name.startsWith('node:'))
-        .map((name) => [name, 'node:' + name]),
-    ),
-    external: ['cloudflare:workers', 'node:*'],
-  });
-  const bundle = result.outputFiles[0].text;
-  const builtins = [
-    ...new Set([...bundle.matchAll(/__require\("(node:[^"]+)"\)/g)].map((match) => match[1])),
-  ];
-  return (
-    builtins
-      .map((name, index) => `import * as builtin_${index} from ${JSON.stringify(name)};`)
-      .join('\n') +
-    '\nfunction require(name){switch(name){' +
-    builtins
-      .map((name, index) => `case ${JSON.stringify(name)}:return builtin_${index};`)
-      .join('') +
-    'default:throw new Error("Unknown require")}}\n' +
-    bundle
-  );
-}
 
 test('actual workerd artifacts survive new requests and Worker instances with verifiable bounded chunks', async () => {
   const persistencePath = await mkdtemp(join(tmpdir(), 'google-codemode-artifacts-'));
@@ -334,7 +299,7 @@ test('disabled deployment is explicit; snippets cannot use artifacts and storage
   const client = await openBuiltWorker({
     artifacts: true,
     outbound,
-    bundle: await fixtureBundle(),
+    bundle: await bundleFixture('tests/fixtures/artifacts.ts'),
   });
   try {
     const nested = await client.tool<Receipt>('execute', {

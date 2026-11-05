@@ -1,3 +1,5 @@
+import { getDriveCase, selectDriveCases } from './drive.ts';
+import { getMediaCase, selectMediaCases } from './media.ts';
 import type { MechanismPolicy } from './mechanisms.ts';
 
 export type GmailCaseId =
@@ -61,4 +63,30 @@ export function selectGmailCases(selection = 'all'): GmailCase[] {
   if (!ids.length || ids.some((id) => !id || id.trim() !== id) || new Set(ids).size !== ids.length)
     throw new Error('Invalid Gmail case selection');
   return ids.map(getGmailCase);
+}
+
+/** Shared dispatch preserves each service's defaults and validation. */
+export function getCase(profile: string, id?: string) {
+  switch (profile) {
+    case 'gmail':
+      return getGmailCase(id);
+    case 'drive':
+      return getDriveCase(id);
+    case 'media':
+      return getMediaCase(id);
+    default:
+      throw new Error('Unsupported suite profile');
+  }
+}
+export function selectCases(profile: string, selection = 'all') {
+  switch (profile) {
+    case 'gmail':
+      return selectGmailCases(selection);
+    case 'drive':
+      return selectDriveCases(selection);
+    case 'media':
+      return selectMediaCases(selection);
+    default:
+      throw new Error('Unsupported suite profile');
+  }
 }

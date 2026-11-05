@@ -3,9 +3,9 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { MATRIX, getCellByModel, selectCells } from './matrix.ts';
-import { GMAIL_CASES, getGmailCase, selectGmailCases } from './cases.ts';
-import { DRIVE_CASES, getDriveCase, selectDriveCases } from './drive.ts';
-import { MEDIA_CASES, getMediaCase, selectMediaCases } from './media.ts';
+import { GMAIL_CASES, getCase, selectCases } from './cases.ts';
+import { DRIVE_CASES } from './drive.ts';
+import { MEDIA_CASES } from './media.ts';
 
 export interface ReportDeclaration {
   profile?: string;
@@ -289,18 +289,8 @@ function declarationSource(declaration: ReportDeclaration) {
     )
       throw new Error('Invalid native probe');
     const cases = declaration.cases
-      ? profile === 'gmail'
-        ? selectGmailCases(declaration.cases)
-        : profile === 'media'
-          ? selectMediaCases(declaration.cases)
-          : selectDriveCases(declaration.cases)
-      : [
-          profile === 'gmail'
-            ? getGmailCase(declaration.caseId || (nativeProbe ? 'read-search' : 'combined'))
-            : profile === 'media'
-              ? getMediaCase(declaration.caseId || 'gmail-to-drive')
-              : getDriveCase(declaration.caseId || 'read-file'),
-        ];
+      ? selectCases(profile, declaration.cases)
+      : [getCase(profile, declaration.caseId || (nativeProbe ? 'read-search' : undefined))];
     const cells = nativeProbe
       ? [{ id: 'sol-native-codex', model: 'gpt-6.1-sol', runner: 'codex', role: 'probe' }]
       : declaration.selection

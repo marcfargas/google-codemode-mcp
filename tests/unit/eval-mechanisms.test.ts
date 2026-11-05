@@ -2,17 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { gradeMechanisms, GRADING_VERSION, type MechanismPolicy } from '../eval/mechanisms.ts';
 import type { McpEvent } from '../eval/server.ts';
+import { event, resourceEvent, ordered } from '../support/audit.ts';
 
 const get = 'gmail/v1/users.messages.get';
 const send = 'gmail/v1/users.messages.send';
 const skillUri = 'skill://google-codemode-mcp/google-workspace/SKILL.md';
 const readOnly: MechanismPolicy = { expectedSends: 0, allowedMutations: [] };
-const event = (method: string, params: any, result: any): McpEvent => ({
-  method,
-  params,
-  status: 200,
-  response: { result },
-});
 const describe = (path?: string) =>
   event(
     'tools/call',
@@ -23,14 +18,7 @@ const describe = (path?: string) =>
         : { services: [{ name: 'gmail' }] },
     },
   );
-const skill = () =>
-  event(
-    'resources/read',
-    { uri: skillUri },
-    {
-      contents: [{ uri: skillUri, text: '# Google Workspace Code Mode' }],
-    },
-  );
+const skill = () => resourceEvent(skillUri);
 const outcome = (path = get, mutation = false, state = 'acknowledged') => ({
   path,
   mutation,
@@ -48,12 +36,6 @@ const execute = (outcomes = [outcome()], name = 'execute') =>
       },
     },
   );
-const ordered = (...events: McpEvent[]) =>
-  events.map((entry, index) => ({
-    ...entry,
-    startedOrdinal: 2 * index + 1,
-    completedOrdinal: 2 * index + 2,
-  }));
 const basic = () => ordered(describe(), skill(), describe(get), execute());
 const statuses = (audit: McpEvent[], policy: MechanismPolicy = readOnly) =>
   Object.fromEntries(gradeMechanisms(audit, policy).map((c) => [c.id, c.status]));

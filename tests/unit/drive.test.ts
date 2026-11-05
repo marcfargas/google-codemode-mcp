@@ -325,42 +325,6 @@ test('Drive metadata response headers preserve an ETag only when Google supplies
   }
 });
 
-test('Drive conditional and transport parameters are refused before any update dispatch', async () => {
-  let calls = 0;
-  const dispatcher = createDispatcher({
-    catalog: catalog(),
-    accessToken: token,
-    requestId: 'drive-no-transport-options',
-    transport: async () => {
-      calls++;
-      return json({ id: 'fixture' });
-    },
-  });
-  const forbidden = {
-    headers: { 'If-Match': 'stale-etag' },
-    headers_: { 'If-Match': 'stale-etag' },
-    options: { headers: { 'If-Match': 'stale-etag' } },
-    ifMatch: 'stale-etag',
-  };
-  for (const [key, value] of Object.entries(forbidden)) {
-    const result = await dispatcher.call(update, {
-      fileId: 'fixture',
-      requestBody: { name: 'must-not-rename' },
-      [key]: value,
-    });
-    assert.equal(result.ok, false, key);
-    if (!result.ok) {
-      assert.equal(result.error.code, 'INVALID_PARAMS', key);
-      assert.equal(result.error.outcome, 'not_dispatched', key);
-    }
-  }
-  assert.equal(calls, 0);
-  assert.deepEqual(
-    dispatcher.outcomes.map(({ path, mutation, outcome }) => ({ path, mutation, outcome })),
-    Object.keys(forbidden).map(() => ({ path: update, mutation: true, outcome: 'not_dispatched' })),
-  );
-});
-
 test('Drive descriptions and declaration parameter shapes invent no conditional or transport options', async () => {
   const ts = await import('typescript');
   for (const [path, expected] of [

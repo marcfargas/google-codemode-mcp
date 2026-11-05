@@ -90,12 +90,16 @@ jobs:
         if: inputs.native_codex_probe == true
         run: npm install --global @openai/codex@0.166.0
       - name: Verify native file tools without provider or Google calls
-        run: EVAL_NATIVE_CLI="$(command -v claude)" node --experimental-strip-types --test --test-name-pattern='pinned native' tests/integration/eval-actor.test.ts
+        run: |
+          CLI="$(command -v claude)"
+          EVAL_NATIVE_CLI="$CLI" node --experimental-strip-types --test tests/preflight/claude.test.ts
       - name: Verify isolated GPT runner without provider or Google calls
-        run: sudo -E "$(command -v node)" --experimental-strip-types --test --test-name-pattern='isolated Responses' tests/integration/eval-actor.test.ts
+        run: sudo -E "$(command -v node)" --experimental-strip-types --test tests/preflight/responses.test.ts
       - name: Verify optional native Codex through synthetic relays only
         if: inputs.native_codex_probe == true
-        run: sudo -E env EVAL_NATIVE_CODEX_CLI="$(command -v codex)" "$(command -v node)" --experimental-strip-types --test tests/integration/eval-codex.test.ts
+        run: |
+          CLI="$(command -v codex)"
+          sudo -E env EVAL_NATIVE_CODEX_CLI="$CLI" "$(command -v node)" --experimental-strip-types --test tests/preflight/codex.test.ts
       - run: node tests/run.mjs build
       - name: Run isolated native agent and independent outcome checks
         if: inputs.preflight_only != true

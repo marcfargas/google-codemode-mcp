@@ -1,3 +1,4 @@
+import { readMultipart } from '../support/multipart.ts';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
@@ -78,29 +79,6 @@ const input = (bytes: Buffer, encoding: 'base64' | 'base64url' = 'base64') => ({
   },
 });
 
-/** Decode the captured wire independently of the producer and its byte helpers. */
-function parts(body: Uint8Array, contentType: string) {
-  const boundary = /boundary=([^;]+)/.exec(contentType)?.[1];
-  assert.ok(boundary);
-  const wire = Buffer.from(body);
-  const marker = Buffer.from(`--${boundary}`);
-  const separator = Buffer.from('\r\n\r\n');
-  const first = wire.indexOf(marker);
-  assert.equal(first, 0);
-  const metadataStart = wire.indexOf(separator, first) + separator.length;
-  const second = wire.indexOf(marker, metadataStart);
-  const metadata = JSON.parse(wire.subarray(metadataStart, second - 2).toString('utf8'));
-  const mediaHeaderStart = second + marker.length + 2;
-  const mediaStart = wire.indexOf(separator, mediaHeaderStart) + separator.length;
-  const end = wire.lastIndexOf(Buffer.from(`\r\n--${boundary}--`));
-  assert.ok(end >= mediaStart);
-  return {
-    metadata,
-    mediaHeaders: wire.subarray(mediaHeaderStart, mediaStart - 4).toString('ascii'),
-    bytes: wire.subarray(mediaStart, end),
-  };
-}
-
 test('native Discovery SDK emits exact binary multipart metadata and zero-byte uploads', async () => {
   let requests = 0;
   const dispatcher = createDispatcher({
@@ -120,9 +98,9 @@ test('native Discovery SDK emits exact binary multipart metadata and zero-byte u
       assert.equal(headers.get('authorization'), 'Bearer inert-test-token');
       assert.match(headers.get('content-type')!, /^multipart\/related; boundary=/);
       assert.ok(init?.body instanceof Uint8Array);
-      const decoded = parts(init.body, headers.get('content-type')!);
+      const decoded = readMultipart(init.body, headers.get('content-type')!);
       assert.deepEqual(decoded.metadata, { name: 'résumé 📎.bin', parents: ['target-folder'] });
-      assert.equal(decoded.mediaHeaders, 'content-type: application/octet-stream');
+      assert.equal(decoded.headers, 'content-type: application/octet-stream');
       const expected =
         requests === 1
           ? Buffer.from(Array.from({ length: 256 }, (_, index) => index))

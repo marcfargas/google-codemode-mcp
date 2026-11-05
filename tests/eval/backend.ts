@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createBuiltWorker } from '../support/worker-client.ts';
+import { responseText } from '../support/io.ts';
 import { createOutboundRecorder, type OutboundEvidence } from './outbound.ts';
 
 const MCP_VERSION = '2026-07-28';
@@ -63,26 +64,6 @@ export function hostedConfiguration(env: NodeJS.ProcessEnv = process.env): Hoste
   };
 }
 
-async function boundedText(response: Response) {
-  if (!response.body) return '';
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let bytes = 0;
-  try {
-    for (;;) {
-      const item = await reader.read();
-      if (item.done) break;
-      bytes += item.value.byteLength;
-      if (bytes > MAX_RESPONSE_BYTES) throw new Error('Hosted response exceeds evaluation limit');
-      chunks.push(item.value);
-    }
-  } catch (error) {
-    await reader.cancel().catch(() => {});
-    throw error;
-  }
-  return Buffer.concat(chunks).toString('utf8');
-}
-
 /** Trusted transport. No Access credential or response cookie reaches the actor. */
 export async function createHostedBackend(
   configuration: HostedConfiguration,
@@ -131,7 +112,11 @@ export async function createHostedBackend(
       await response.body?.cancel();
       throw new Error('Expected finite sessionless hosted JSON');
     }
-    const text = await boundedText(response);
+    const text = await responseText(
+      response,
+      MAX_RESPONSE_BYTES,
+      'Hosted response exceeds evaluation limit',
+    );
     try {
       JSON.parse(text);
     } catch {

@@ -17,7 +17,7 @@ if (target === 'build') build();
 else if (target === 'check') {
   run('node_modules/.bin/tsc', ['--noEmit']);
   build();
-  const tests = ['unit', 'integration'].flatMap((group) =>
+  const tests = ['unit', 'integration', 'preflight'].flatMap((group) =>
     readdirSync(`tests/${group}`)
       .filter((name) => name.endsWith('.test.ts'))
       .sort()

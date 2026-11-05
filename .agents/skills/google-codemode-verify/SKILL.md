@@ -47,7 +47,7 @@ readiness at the failed boundary and restart only trial-owned state when warrant
 Maintained suites, helpers and local workflow launchers live under `tests/`;
 `.github/` contains GitHub workflows and repository-secret installation, with
 commands in `justfile` and the deployment entrypoint at root `deploy.mjs`. Credential-free
-checks select `tests/unit/` and `tests/integration/`; credentialed suites in
+checks select `tests/unit/`, `tests/integration/` and `tests/preflight/`; credentialed suites in
 `tests/live/` run only through the explicit live targets. `just build` and `just deploy --dry-run`
 only bundle/validate; `just deploy` publishes and needs deployment scope.
 

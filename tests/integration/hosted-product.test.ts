@@ -4,7 +4,8 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { Miniflare } from 'miniflare';
+import type { Miniflare } from 'miniflare';
+import { createBuiltWorker } from '../support/worker-client.ts';
 import { prepareHosted } from '../hosted/prepare.ts';
 import { createHostedBackend, hostedConfiguration } from '../eval/backend.ts';
 
@@ -84,34 +85,15 @@ test('product preparation serves the actual sessionless product with source/vers
     assert.deepEqual(config.observability, { enabled: false });
     const bundle = await readFile(join(output, 'worker.js'), 'utf8');
     assert.equal(createHash('sha256').update(bundle).digest('hex'), manifest.bundleSha256);
-    worker = new Miniflare({
-      workers: [
-        {
-          config: {
-            name: 'hosted-product-local',
-            compatibilityDate: '2026-07-28',
-            compatibilityFlags: ['nodejs_compat'],
-            manifest: {
-              mainModule: 'worker.js',
-              modulesRoot: '/',
-              modules: { 'worker.js': { type: 'esm', contents: bundle } },
-            },
-            env: {
-              LOADER: { type: 'worker-loader' },
-              CANDIDATE_DIGEST: { type: 'text', value: manifest.sourceDigest },
-              WORKER_VERSION: { type: 'json', value: { id: version } },
-            },
-          },
-          dev: {
-            outboundService: {
-              type: 'fetcher',
-              handler: async () => {
-                throw new Error('No network allowed');
-              },
-            },
-          },
-        },
-      ],
+    worker = await createBuiltWorker({
+      bundle,
+      bindings: {
+        CANDIDATE_DIGEST: { type: 'text', value: manifest.sourceDigest },
+        WORKER_VERSION: { type: 'json', value: { id: version } },
+      },
+      outbound: async () => {
+        throw new Error('No network allowed');
+      },
     });
     const req = request();
     const response = await worker.dispatchFetch(req.url, {

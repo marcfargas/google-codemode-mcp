@@ -1,63 +1,16 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { build } from 'esbuild';
-import { builtinModules } from 'node:module';
-import { readFile, writeFile, mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { Miniflare, Response as MiniflareResponse } from 'miniflare';
+import type { Miniflare } from 'miniflare';
+import { bundleFixture, createBuiltWorker } from '../support/worker-client.ts';
 
 let mf: Miniflare;
-let directory: string;
 let production: Miniflare;
 before(async () => {
-  directory = await mkdtemp(join(tmpdir(), 'google-codemode-worker-'));
-  const scriptPath = join(directory, 'worker.js');
-  await build({
-    entryPoints: ['tests/fixtures/workerd.ts'],
-    bundle: true,
-    format: 'esm',
-    platform: 'neutral',
-    conditions: ['workerd', 'worker', 'browser', 'import', 'default'],
-    mainFields: ['module', 'main'],
-    alias: Object.fromEntries(
-      builtinModules.filter((n) => !n.startsWith('node:')).map((n) => [n, 'node:' + n]),
-    ),
-    external: ['cloudflare:workers', 'node:*'],
-    outfile: scriptPath,
-  });
-  const bundle = await readFile(scriptPath, 'utf8');
-  const builtins = [
-    ...new Set([...bundle.matchAll(/__require\("(node:[^"]+)"\)/g)].map((m) => m[1])),
-  ];
-  const shim =
-    builtins.map((n, i) => `import * as builtin_${i} from ${JSON.stringify(n)};`).join('\n') +
-    '\nfunction require(name){switch(name){' +
-    builtins.map((n, i) => `case ${JSON.stringify(n)}: return builtin_${i};`).join('') +
-    'default: throw new Error("Unknown require "+name)}}';
-  await writeFile(scriptPath, shim + '\n' + bundle);
-  mf = new Miniflare({
-    workers: [
-      {
-        config: {
-          name: 'test',
-          compatibilityDate: '2026-07-28',
-          compatibilityFlags: ['nodejs_compat'],
-          manifest: {
-            mainModule: 'worker.js',
-            modulesRoot: '/',
-            modules: { 'worker.js': { type: 'esm', contents: shim + '\n' + bundle } },
-          },
-          env: { LOADER: { type: 'worker-loader' } },
-        },
-      },
-    ],
-  });
+  mf = await createBuiltWorker({ bundle: await bundleFixture('tests/fixtures/workerd.ts') });
 });
 after(async () => {
   await mf?.dispose();
   await production?.dispose();
-  if (directory) await rm(directory, { recursive: true, force: true });
 });
 async function execute(code: string, query = '', extra: Record<string, unknown> = {}) {
   const response = await mf.dispatchFetch('http://localhost/' + query, {
@@ -299,7 +252,6 @@ test('overflow fallback also redacts a caller-supplied credential echo in correl
 });
 
 test('actual Wrangler build boots and executes through the production MCP route', async () => {
-  const bundle = await readFile('dist/worker.js', 'utf8');
   const outbound: string[] = [];
   const parameters = { userId: { type: 'string', required: true, location: 'path' } };
   const discovery = {
@@ -324,40 +276,19 @@ test('actual Wrangler build boots and executes through the production MCP route'
       },
     },
   };
-  production = new Miniflare({
-    workers: [
-      {
-        config: {
-          name: 'production-test',
-          compatibilityDate: '2026-07-28',
-          compatibilityFlags: ['nodejs_compat'],
-          manifest: {
-            mainModule: 'worker.js',
-            modulesRoot: '/',
-            modules: { 'worker.js': { type: 'esm', contents: bundle } },
-          },
-          env: { LOADER: { type: 'worker-loader' } },
-        },
-        dev: {
-          outboundService: {
-            type: 'fetcher',
-            handler: async (request) => {
-              outbound.push(request.url);
-              assert.equal(new URL(request.url).hostname, 'gmail.googleapis.com');
-              if (new URL(request.url).pathname === '/$discovery/rest')
-                return MiniflareResponse.json(discovery);
-              assert.equal(request.headers.get('authorization'), 'Bearer TOKEN_CANARY_77881');
-              return request.method === 'POST'
-                ? new MiniflareResponse(null, {
-                    status: 307,
-                    headers: { location: 'https://example.invalid/credential-trap' },
-                  })
-                : MiniflareResponse.json({ messages: [] });
-            },
-          },
-        },
-      },
-    ],
+  production = await createBuiltWorker({
+    outbound: async (request) => {
+      outbound.push(request.url);
+      assert.equal(new URL(request.url).hostname, 'gmail.googleapis.com');
+      if (new URL(request.url).pathname === '/$discovery/rest') return Response.json(discovery);
+      assert.equal(request.headers.get('authorization'), 'Bearer TOKEN_CANARY_77881');
+      return request.method === 'POST'
+        ? new Response(null, {
+            status: 307,
+            headers: { location: 'https://example.invalid/credential-trap' },
+          })
+        : Response.json({ messages: [] });
+    },
   });
   const call = (code: string) =>
     production.dispatchFetch('http://localhost/mcp', {
