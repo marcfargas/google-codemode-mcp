@@ -413,8 +413,10 @@ updates are not prevented. See the
 [Drive qualification and limits](tests/eval/README.md#drive-pagination-and-conditional-write-boundary-2026-11-05).
 The fresh four-case Sonnet/Sol campaign passed download, pagination and rename;
 both conditional-limit attempts failed only an unsettled fixture-version check.
-The fixture readiness repair retains that check, and its version-2 agent pair
-remains pending. See [per-attempt results and token/cache/cost metrics](tests/eval/README.md#fresh-four-case-drive-campaign-2026-11-05).
+A separately authorized version-2 conditional pair passed for Sol, while Sonnet
+again failed only the version guard: two equal early observations did not predict
+later continuity. Drive qualification remains open. See [per-attempt results and
+token/cache/cost metrics](tests/eval/README.md#conditional-version-2-pair-2026-11-05).
 Gmail/Drive media composition and advanced guidance follow Drive qualification.
 Subsequent APIs are Sheets, Docs, and
 Calendar, in that order. Tasks and replay are deferred.

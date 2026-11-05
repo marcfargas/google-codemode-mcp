@@ -53,13 +53,15 @@ cases remain version 1; grading version 3 and its version-preservation check are
 unchanged. The maintained live Drive check passed with the repair: readiness
 observed versions `1`, `3`, `3`, captured `3` after 6.8 seconds, and independent
 final readback remained `3`; cleanup completed with no unknown mutations. The
-version-2 conditional agent pair remains unattempted.
+version-2 conditional agent pair subsequently produced one pass and one version-only
+failure; the readiness assumption remains inadequate for the strict version guard.
 
 The file case uses UTF-8 content because runner Write tools accept text; synthetic
 native-SDK tests separately verify arbitrary binary and JSON-MIME downloads.
 The media envelope remains bounded to 131072 raw bytes; uploads/artifact storage
-remain deferred. Fresh four-case Sonnet/Sol qualification is pending; the earlier
-download/rename results do not qualify the expanded suite. Hosted Drive and
+remain deferred. A fresh four-case campaign produced six passes and two failures;
+the later conditional-v2 pair produced one pass and one failure. Neither campaign
+is a complete passing four-case suite. Hosted Drive and
 actual target-host acceptance remain separate.
 
 Run the required pair, or explicitly select all six cells:
@@ -481,7 +483,9 @@ states that version includes every server change, including invisible changes.
 The specific internal cause remains unknown. Conditional case version 2 adds
 readiness before capturing its baseline; it retains the independent version
 check. This fixture repair cannot be applied to the old baseline or turn the
-original failures into passes. A fresh version-2 conditional pair remains pending.
+original failures into passes. The separately authorized version-2 conditional pair
+below also remains failed; the early-readiness condition did not establish future
+version continuity.
 
 Per-attempt counters below include the failed cases. Claude input excludes its
 separate cache-read and cache-creation counters; GPT input includes cached reads.
@@ -510,6 +514,45 @@ different counter/cost bases, not a model-cost ranking. No model requests were
 made to recover or report metrics. The source, raw results, original failures
 and all earlier campaign failures remain retained. This is feasibility evidence,
 not reliability, a complete passing four-case suite, or host/hosted qualification.
+
+## Conditional version-2 pair (2026-11-05)
+
+Two separately authorized fresh attempts ran once on
+`8f9da43fd19d3104caa0dcd6d88366398d34de65`, with the same local product bundle as
+the eight-attempt campaign above. Case version 2 and grading version 3 retained
+the mandatory version guard. Sol passed all 17 criteria. Sonnet passed 16 of 17,
+failing only `drive_version_preserved`: readiness observed `1`, `2`, `2` and
+captured `2` at 6.968 seconds, while the actor-returned individual metadata and
+independent final readback reported `3`. Sol's baseline and final version were
+both `3`. The cause of the version change remains unknown. This is a
+counterexample to the readiness assumption, not evidence that a longer fixed
+wait or requiring version `3` would be reliable.
+
+Both actors discovered the required methods before execution, retrieved the
+Workspace skill, returned the exact status artifact and preserved file metadata
+and bytes. Complete trusted ledgers contain only acknowledged reads, with zero
+recorded mutation outcomes; both actors completed successfully with matching
+served identities and successful cleanup. Overall: **one pass, one fail, zero
+errors, zero unattempted**. No retries, fallback or cap increases ran. Original
+results from both campaigns remain unchanged; Drive qualification remains open.
+
+Each row below is one attempt and that model's complete total for this pair.
+All 17 model requests have complete identity receipts. Per-attempt system and
+tool hashes remained stable. Metrics extraction made no additional inference.
+
+| Model  | Gate | Requests |   Input | Output | Cache read | Cache creation | Estimate USD | GPT committed USD |
+| ------ | ---- | -------: | ------: | -----: | ---------: | -------------: | -----------: | ----------------: |
+| Sonnet | fail |        6 |      12 |  1,321 |     34,690 |         10,336 |     0.058047 |           unknown |
+| Sol    | pass |       11 | 298,126 |    618 |    246,144 |        unknown |    0.1347584 |          0.602432 |
+
+Sonnet's ordinary input excludes its separate cache-read and creation counters;
+its cost is a native CLI estimate. Sol input includes cached reads, with 51,982
+uncached input tokens; output includes zero reported reasoning tokens. GPT cache
+creation and normalized Claude reasoning are unknown. Sol's cost is an observed
+published-rate estimate, while its committed amount is conservative budget
+accounting, not an additional charge. Actual billing is unknown for both models.
+These are feasibility observations with different native counter bases, not a
+matched cost or cache-savings benchmark. No further paid attempts are authorized.
 
 ## Native Codex capability probe
 
