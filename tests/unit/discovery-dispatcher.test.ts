@@ -216,6 +216,104 @@ test('described parameters and declarations expose exactly the supported top-lev
   assert.deepEqual(document, original, 'Caller projection must not mutate the native document');
 });
 
+test('oversized method descriptions keep complete execution guidance within the first 1800 UTF-8 bytes', async () => {
+  const document = fixture();
+  const largeDescription = '詳細 🌍 native documentation '.repeat(2_000);
+  document.parameters!.fields.description = largeDescription;
+  const native = document.resources!.users.resources!.messages.methods!.send;
+  native.description = largeDescription;
+  // Native extension names must retain the existing computed-field precedence.
+  native.signature = 'native signature is superseded';
+  native.next = 'native next is superseded';
+  native.runtime = { native: 'superseded' };
+  document.schemas!.Message.properties!.largeNested = {
+    type: 'object',
+    properties: { child: { type: 'string', description: largeDescription } },
+  };
+  const original = structuredClone(document);
+  const dynamic = new DiscoveryCatalog({ document });
+  const described = await dynamic.describe(send);
+  const resolved = await dynamic.resolve(send);
+  const header = [
+    'path',
+    'signature',
+    'next',
+    'supported',
+    'mutation',
+    'httpMethod',
+    'runtime',
+    'excludedParameters',
+    'unsupportedReason',
+    'documentation',
+    'skill',
+  ];
+  assert.deepEqual(Object.keys(described).slice(0, header.length), header);
+  const computed = [
+    'revision',
+    'source',
+    'declarations',
+    'skill',
+    'documentation',
+    'signature',
+    'next',
+    'unsupportedReason',
+    'authorization',
+    'scopesSemantics',
+    'runtime',
+    'mediaResponseSchema',
+    'requestSchema',
+    'responseSchema',
+  ];
+  assert.deepEqual(
+    Object.keys(described).sort(),
+    [...new Set([...Object.keys(resolved), ...computed])].sort(),
+    'promotion preserves the exact field set, including undefined values',
+  );
+  for (const key of Object.keys(resolved))
+    if (!computed.includes(key)) assert.deepEqual(described[key], resolved[key], key);
+  assert.equal(described.description, largeDescription);
+  assert.equal(
+    described.signature,
+    'users.messages.send(params): Promise<{ data, status, headers }>',
+  );
+  assert.deepEqual(described.runtime, { json: true, mediaUpload: false, mediaDownload: false });
+  assert.match(described.next as string, /describe every distinct Google method/);
+  for (const indentation of [undefined, 2]) {
+    const text = JSON.stringify(described, null, indentation);
+    assert.ok(Buffer.byteLength(text) > 100_000, 'exercise host persistence-size output');
+    const prefix = Buffer.from(text).subarray(0, 1800).toString('utf8');
+    for (const key of [
+      'path',
+      'signature',
+      'next',
+      'supported',
+      'mutation',
+      'httpMethod',
+      'runtime',
+      'documentation',
+      'skill',
+    ]) {
+      const field = JSON.stringify({ [key]: described[key] }, null, indentation)
+        .slice(1, -1)
+        .trim();
+      assert.ok(
+        prefix.includes(field),
+        `${key} must be wholly visible in a truncated ${indentation ? 'pretty' : 'compact'} preview`,
+      );
+    }
+  }
+  assert.deepEqual(described.requestSchema, described.responseSchema);
+  const schema = described.requestSchema as {
+    definitions: Record<string, { properties: Record<string, unknown> }>;
+  };
+  assert.deepEqual(
+    schema.definitions.Message.properties.largeNested,
+    original.schemas!.Message.properties!.largeNested,
+  );
+  assert.match(described.declarations as string, /"largeNested"\?:/);
+  assert.deepEqual(document, original, 'presentation order must not mutate native Discovery');
+});
+
 test('transport-looking request-body fields remain native data rather than top-level overrides', async () => {
   const document = fixture();
   document.schemas!.Message.properties = {

@@ -211,8 +211,11 @@ describe({ path: 'gmail/v1/users.messages.list' });
 
 Method descriptions include native parameters, generated TypeScript declarations,
 selected request/response schemas and their reachable references, Google scope
-alternatives, source/revision, transport support, and documentation links. Methods
-come from Google's Discovery document; there is no handwritten method catalog.
+alternatives, source/revision, transport support, and documentation links. Results
+start with the callable signature, execution limits, and discovery guidance so
+these remain visible when a host previews only the start of a large response.
+The complete native metadata, schemas, and declarations follow in the same result.
+Methods come from Google's Discovery document; there is no handwritten method catalog.
 Successful documents are cached for the Worker isolate's lifetime. Failed loads
 can be retried. The first slice accepts no revision pin or refresh command.
 Executions report an array of all loaded service sources and revisions.
@@ -411,17 +414,17 @@ Live multi-page traversal and conditional-option refusal are now qualified throu
 the built Worker. Conditional mutations remain unsupported; concurrent lost
 updates are not prevented. See the
 [Drive qualification and limits](tests/eval/README.md#drive-pagination-and-conditional-write-boundary-2026-11-05).
-The fresh four-case Sonnet/Sol campaign passed download, pagination and rename;
-both conditional-limit attempts failed only an unsettled fixture-version check.
-A separately authorized version-2 conditional pair passed for Sol, while Sonnet
-again failed only the version guard: two equal early observations did not predict
-later continuity. The current conditional grader uses a trial-owned independent
-outbound recorder plus the existing ledger and metadata/content checks; native
-versions are diagnostic. Hosted conditional attempts stop before inference because
-that recorder is local. Neither old conditional run has the new evidence.
-Drive qualification remains open. See [per-attempt results and
-token/cache/cost metrics](tests/eval/README.md#conditional-version-2-pair-2026-11-05).
-Gmail/Drive media composition and advanced guidance follow Drive qualification.
+The current local Drive matrix passes all eight required cells: four cases each
+for Sonnet and Sol, on one product bundle. Method descriptions now put execution
+guidance before large native metadata so Claude's truncated preview retains it.
+The grader remains unchanged. Conditional case 3 uses independent outbound
+recording plus the complete ledger and metadata/content checks; native versions
+are diagnostic. All fixtures were cleaned, with no unknown effects.
+Earlier version-guard and discovery failures remain retained. Hosted conditional
+attempts stop before inference because independent recording is local. This is
+one-attempt-per-cell feasibility, with hosted Drive and target-host activation
+still unqualified. See [results and token/cache/cost metrics](tests/eval/README.md#current-candidate-drive-completion-2026-11-05).
+Gmail/Drive media composition and advanced guidance are next.
 Subsequent APIs are Sheets, Docs, and
 Calendar, in that order. Tasks and replay are deferred.
 

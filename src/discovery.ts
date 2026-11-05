@@ -268,7 +268,7 @@ export class DiscoveryCatalog {
       const download = method.supported && supportsDownload(method);
       const localPath = path.slice(key.length + 1);
       const separator = localPath.lastIndexOf('.');
-      return {
+      const described = {
         ...method,
         revision: document.revision,
         source: service.discoveryUrl,
@@ -299,6 +299,25 @@ export class DiscoveryCatalog {
         requestSchema: method.request ? this.schemaFor(document, method.request) : undefined,
         responseSchema: method.response ? this.schemaFor(document, method.response) : undefined,
       };
+      // Hosts may preview only the beginning of large native method descriptions.
+      // Promote guidance without changing any field or its computed value.
+      const header = [
+        'path',
+        'signature',
+        'next',
+        'supported',
+        'mutation',
+        'httpMethod',
+        'runtime',
+        'excludedParameters',
+        'unsupportedReason',
+        'documentation',
+        'skill',
+      ] as const;
+      return Object.fromEntries([
+        ...header.map((name) => [name, described[name]]),
+        ...Object.entries(described),
+      ]);
     }
     if (path.startsWith(`${key}#`)) {
       const name = path.slice(key.length + 1);

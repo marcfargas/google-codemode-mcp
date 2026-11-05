@@ -20,8 +20,8 @@ independent recording. Other Gmail/Drive criteria are unchanged.
 
 The maintained live Drive workflow calibrates a read-only session and a
 rename/revert that restores its timestamp, without models. These controls qualify
-the measurement, not agent feasibility. Fresh conditional actor acceptance still
-needs its own bounded run allocation.
+the measurement. The later [current-candidate matrix](#current-candidate-drive-completion-2026-11-05)
+also passed all eight required agent cells, including both conditional attempts.
 
 The no-model live calibration passed on 2026-11-05: the read-only session recorded
 two GETs despite native version `1`→`2`; the rename/revert restored name,
@@ -81,10 +81,10 @@ it does not relabel those retained trials.
 The file case uses UTF-8 content because runner Write tools accept text; synthetic
 native-SDK tests separately verify arbitrary binary and JSON-MIME downloads.
 The media envelope remains bounded to 131072 raw bytes; uploads/artifact storage
-remain deferred. A fresh four-case campaign produced six passes and two failures;
-the later conditional-v2 pair produced one pass and one failure. Neither campaign
-is a complete passing four-case suite. Hosted Drive and
-actual target-host acceptance remain separate.
+remain deferred. A historical four-case campaign produced six passes and two failures;
+the later conditional-v2 pair produced one pass and one failure. Those failed
+campaigns remain retained. A later current-candidate matrix passed all eight
+required cells. Hosted Drive and actual target-host acceptance remain separate.
 
 Run the required pair, or explicitly select all six cells:
 
@@ -604,6 +604,76 @@ published-rate estimate, while its committed amount is conservative budget
 accounting, not an additional charge. Actual billing is unknown for both models.
 These are feasibility observations with different native counter bases, not a
 matched cost or cache-savings benchmark. No further paid attempts are authorized.
+
+## Current-candidate Drive completion (2026-11-05)
+
+The first conditional-case-3 pair on clean a0b5a46 passed for Sol (17/17),
+but Sonnet failed only method discovery (16/17): it used files.list without
+describing it first. Both completed the task, preserved the file and had complete
+GET-only independent outbound evidence, clean cleanup and no unknown effects.
+That failed pair remains retained:
+
+| Case                           | Model  | Gate | Requests |  Input | Output | Cache read | Cache creation | Native USD | Published-rate USD |  GPT committed USD |
+| ------------------------------ | ------ | ---- | -------: | -----: | -----: | ---------: | -------------: | ---------: | -----------------: | -----------------: |
+| conditional-update-unsupported | sonnet | fail |        5 |     10 |   1212 |      24859 |           9421 |  0.0523099 |            unknown |            unknown |
+| conditional-update-unsupported | sol    | pass |       10 | 250979 |    581 |     202112 |        unknown |    unknown |          0.1237552 | 0.5077679999999999 |
+
+The actual Claude model input showed that large method descriptions were replaced
+with persisted-output wrappers and a 2 KB preview. Signature, runtime and existing
+discovery guidance were beyond that preview. The full skill was visible, so this
+is an established visibility defect rather than proof of the omission's sole cause.
+The correction promotes existing compact fields before native metadata, preserving
+all values, schemas, declarations, runtime behavior and grading. Real Drive
+get/update/list and Gmail send descriptors retain the complete compact guidance
+within 1,800 UTF-8 bytes in compact and pretty JSON; the fresh Claude model-visible
+previews also contain it. Named-schema deferral remains separate work.
+
+On the repaired candidate, all eight unique required cells passed: one fresh
+Sonnet conditional attempt, its three remaining cases, then Sol's four cases.
+The three maintained invocation reports retain their selected-only PENDING labels;
+combined evidence establishes four cases times both models, with no repeated cell.
+All 90 retained candidate-source file hashes matched across invocations and the
+checkout before results documentation changed. The product bundle digest is
+`67ffb5fed9e63399e9f010851afdeaa4f8aafb3a2fec3ff48ead4aa99590ad59`.
+
+| Case                           | Model  | Gate | Requests |  Input | Output | Cache read | Cache creation | Native USD | Published-rate USD |   GPT committed USD |
+| ------------------------------ | ------ | ---- | -------: | -----: | -----: | ---------: | -------------: | ---------: | -----------------: | ------------------: |
+| conditional-update-unsupported | sol    | pass |       11 | 297932 |    625 |     248448 |        unknown |    unknown |          0.1300628 |  0.6021140000000001 |
+| conditional-update-unsupported | sonnet | pass |        6 |     12 |   1272 |      37317 |           7854 |  0.0478917 |            unknown |             unknown |
+| list-pages                     | sol    | pass |        8 |  78259 |    643 |      56704 |        unknown |    unknown |          0.0552104 |            0.162948 |
+| list-pages                     | sonnet | pass |        5 |     10 |   1455 |      27103 |           8162 |  0.0499283 |            unknown |             unknown |
+| read-file                      | sol    | pass |        9 | 142642 |    495 |     113408 |        unknown |    unknown |          0.0747588 | 0.29023399999999994 |
+| read-file                      | sonnet | pass |        7 |     14 |   1702 |      42394 |           7544 |  0.0514634 |            unknown |             unknown |
+| rename-file                    | sol    | pass |        7 | 104993 |    488 |      68224 |        unknown |    unknown |          0.0852404 |            0.214866 |
+| rename-file                    | sonnet | pass |        5 |     10 |   1060 |      26295 |           6936 |  0.0409935 |            unknown |             unknown |
+
+Every criterion passed: download and rename 13/13, pagination and conditional
+17/17. All fixtures were cleaned; no unknown effects, errors or unattempted cells.
+Both conditional records are complete, disposed and contain only acknowledged
+GET requests. All 58 model requests have complete matching identity receipts,
+with stable system/tool hashes per attempt. The unchanged per-attempt limits were
+300 seconds, 18 requests and a $1 estimate; no retries, fallback or cap increases.
+Credential-free local act checks passed 254 tests (251 pass, three expected skips).
+The existing no-model live Drive calibration also passed; no repeat was needed
+for this presentation-only change.
+
+Sonnet's four attempts total 23 requests, 46 ordinary input tokens, 5,489 output,
+133,109 cache-read and 30,496 cache-creation tokens, with a $0.1902769 native CLI
+estimate. Sol totals 35 requests, 623,826 input (including 486,784 cached;
+137,042 uncached), 2,251 output including zero reported reasoning, a $0.3452724
+observed published-rate estimate and $1.270162 conservative committed accounting.
+GPT cache creation and normalized Claude reasoning are unknown. Billing is unknown;
+committed accounting is not an additional charge. Across the initial pair and
+repaired candidate, Sonnet used 28 requests and $0.2425868 native estimates; Sol
+used 45 requests and $0.4690276 usage estimates ($1.777930 committed).
+Token bases differ by runner and these are not matched cost-savings measurements.
+
+This completes the bounded local Drive matrix as one-attempt-per-cell feasibility,
+not reliability or a single combined invocation. Earlier version-guard, runner and
+discovery failures remain unchanged. Hosted Drive, real target-host activation,
+shared-drive behavior, a real incompleteSearch response, conditional writes/CAS
+and Gmail/Drive composition are not established by this result. Media composition
+and advanced guidance remain the next slice.
 
 ## Native Codex capability probe
 
