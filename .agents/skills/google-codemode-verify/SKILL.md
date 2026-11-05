@@ -27,19 +27,19 @@ readiness at the failed boundary and restart only trial-owned state when warrant
 
 ## Select the smallest useful proof
 
-| Goal                                                      | Maintained command                                                | What it establishes                                                                      |
-| --------------------------------------------------------- | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Ordinary change check                                     | `just check`                                                      | Check workflow in `act`: typecheck, Wrangler dry-run, credential-free tests, formatting  |
-| Fast host feedback / unavailable compatible Docker runner | `just verify`                                                     | Same `tests/run.mjs check` steps on this host; no claim of `act` compatibility           |
-| Runner/MCP/file plumbing                                  | `just eval-preflight /absolute/new/evidence`                      | Both isolated runners with synthetic responses; no model, OAuth, or Google calls         |
-| Saved trial grading                                       | `just eval-regrade /absolute/saved/trial-1 /absolute/new/regrade` | Offline current grader against retained evidence, preserving original results            |
-| Real Gmail behavior                                       | `just live`                                                       | Manual credentialed Gmail workflow through locally built Worker                          |
-| Real Drive behavior                                       | `just live-drive`                                                 | Manual credentialed Drive download/rename through locally built Worker                   |
-| Agent feasibility                                         | `just eval-matrix gmail PROXY_URL /absolute/new/evidence`         | Manual paid Sonnet/Sol required pair, one fresh attempt each                             |
-| Independent Gmail cases                                   | `just eval-gmail PROXY_URL /absolute/new/evidence`                | Six cases, one fresh attempt per model/case, up to twelve $1 estimates                   |
-| Independent Drive cases                                   | `just eval-drive PROXY_URL /absolute/new/evidence`                | Two cases after Drive consent, one fresh attempt per model/case, up to four $1 estimates |
-| Prepare private hosted probes                             | `just hosted-prepare /absolute/new/prepared`                      | Exact source/bundle identity and private dry-run; no deployment                          |
-| Hosted runtime limits                                     | `just hosted-verify /absolute/new/evidence`                       | Selected deployed version via protected ingress; requires documented `HOSTED_*` inputs   |
+| Goal                                                      | Maintained command                                                | What it establishes                                                                                               |
+| --------------------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Ordinary change check                                     | `just check`                                                      | Check workflow in `act`: typecheck, Wrangler dry-run, credential-free tests, formatting                           |
+| Fast host feedback / unavailable compatible Docker runner | `just verify`                                                     | Same `tests/run.mjs check` steps on this host; no claim of `act` compatibility                                    |
+| Runner/MCP/file plumbing                                  | `just eval-preflight /absolute/new/evidence`                      | Both isolated runners with synthetic responses; no model, OAuth, or Google calls                                  |
+| Saved trial grading                                       | `just eval-regrade /absolute/saved/trial-1 /absolute/new/regrade` | Offline current grader against retained evidence, preserving original results                                     |
+| Real Gmail behavior                                       | `just live`                                                       | Manual credentialed Gmail workflow through locally built Worker                                                   |
+| Real Drive behavior                                       | `just live-drive`                                                 | Manual credentialed Drive download/rename, conditional-option refusal and pagination through locally built Worker |
+| Agent feasibility                                         | `just eval-matrix gmail PROXY_URL /absolute/new/evidence`         | Manual paid Sonnet/Sol required pair, one fresh attempt each                                                      |
+| Independent Gmail cases                                   | `just eval-gmail PROXY_URL /absolute/new/evidence`                | Six cases, one fresh attempt per model/case, up to twelve $1 estimates                                            |
+| Independent Drive cases                                   | `just eval-drive PROXY_URL /absolute/new/evidence`                | Two cases after Drive consent, one fresh attempt per model/case, up to four $1 estimates                          |
+| Prepare private hosted probes                             | `just hosted-prepare /absolute/new/prepared`                      | Exact source/bundle identity and private dry-run; no deployment                                                   |
+| Hosted runtime limits                                     | `just hosted-verify /absolute/new/evidence`                       | Selected deployed version via protected ingress; requires documented `HOSTED_*` inputs                            |
 
 Maintained suites, helpers and local workflow launchers live under `tests/`;
 `.github/` contains GitHub workflows and repository-secret installation, with

@@ -110,6 +110,48 @@ test('sandbox network and transport overrides fail before credentials can escape
   assert.equal(out.execution.result.token, 'undefined');
 });
 
+test('isolated Drive proxy refuses every second argument before creating an outcome', async () => {
+  const out = await execute(`const files=google.drive({version:'v3'}).files;const errors=[];
+    for(const method of ['get','update']){
+      for(const options of [{headers:{'If-Match':'stale-etag'}},undefined,()=>{}]){
+        try{await files[method]({fileId:'fixture',...(method==='update'?{requestBody:{name:'must-not-rename'}}:{})},options)}
+        catch(e){errors.push(e.message)}
+      }
+    }return errors;`);
+  assert.equal(out.execution.status, 'completed');
+  assert.deepEqual(out.calls, []);
+  assert.deepEqual(out.execution.outcomes, []);
+  assert.deepEqual(
+    out.execution.result,
+    Array(6).fill('Only native parameters are supported; transport options are forbidden'),
+  );
+});
+
+test('isolated Drive dispatcher records forbidden first-argument fields as not dispatched', async () => {
+  const out = await execute(`const errors=[];
+    for(const [key,value] of Object.entries({
+      headers:{'If-Match':'stale-etag'},headers_:{'If-Match':'stale-etag'},
+      options:{headers:{'If-Match':'stale-etag'}},ifMatch:'stale-etag'
+    })){
+      try{await google.drive({version:'v3'}).files.update({fileId:'fixture',requestBody:{name:'must-not-rename'},[key]:value})}
+      catch(e){errors.push({code:e.code,outcome:e.outcome})}
+    }return errors;`);
+  assert.equal(out.execution.status, 'completed');
+  assert.deepEqual(out.calls, []);
+  assert.deepEqual(
+    out.execution.result,
+    Array(4).fill({ code: 'INVALID_PARAMS', outcome: 'not_dispatched' }),
+  );
+  assert.deepEqual(
+    out.execution.outcomes.map((entry: { path: string; mutation: boolean; outcome: string }) => ({
+      path: entry.path,
+      mutation: entry.mutation,
+      outcome: entry.outcome,
+    })),
+    Array(4).fill({ path: 'drive/v3/files.update', mutation: true, outcome: 'not_dispatched' }),
+  );
+});
+
 test('snippet code and exposed invocation share data and read-only restrictions', async () => {
   const inline = await execute(`return await snippets.run('gmailInbox',{maxResults:2})`);
   const tool = await execute('ignored', '', {

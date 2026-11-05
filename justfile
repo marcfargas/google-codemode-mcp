@@ -15,7 +15,7 @@ verify:
 live:
     node tests/act.mjs live
 
-# Verify Drive bytes and native rename through the built Worker.
+# Verify Drive files, conditional-option refusal and explicit pagination.
 live-drive:
     node tests/act.mjs live-drive
 

@@ -1,9 +1,16 @@
-import { spawn } from 'node:child_process';
-import { mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises';
+import { spawn, spawnSync } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdtemp, readFile, writeFile, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { localCredentials } from './support/credentials.mjs';
-import { acquireLocalEvalLock } from './eval/act.mjs';
+import { acquireLocalEvalLock, retainCandidateSource } from './eval/act.mjs';
+
+function gitOutput(args, purpose) {
+  const result = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+  if (result.error || result.status !== 0) throw new Error(`Cannot retain ${purpose}`);
+  return result.stdout;
+}
 
 const target = process.argv[2] ?? 'check';
 if (!['check', 'live', 'live-drive'].includes(target))
@@ -37,7 +44,34 @@ try {
     { mode: 0o600 },
   );
   const artifacts = join(process.cwd(), 'dist', 'act-artifacts');
-  if (live) await mkdir(artifacts, { recursive: true });
+  if (live) {
+    const candidate = join(artifacts, `candidate-${randomUUID()}`);
+    await mkdir(candidate, { recursive: true, mode: 0o700 });
+    const manifest = await retainCandidateSource(candidate);
+    const head = gitOutput(['rev-parse', 'HEAD'], 'candidate Git HEAD').trim();
+    // Restrict the diff to the same source allowlist; credentials are never evidence.
+    const patch = gitOutput(
+      ['diff', '--binary', 'HEAD', '--', ...Object.keys(manifest)],
+      'candidate source diff',
+    );
+    await writeFile(join(candidate, 'source.patch'), patch, { mode: 0o600 });
+    await writeFile(
+      join(candidate, 'source.json'),
+      JSON.stringify(
+        {
+          head,
+          diffSha256: createHash('sha256').update(patch).digest('hex'),
+          sourceManifestSha256: createHash('sha256')
+            .update(await readFile(join(candidate, 'candidate-source.json')))
+            .digest('hex'),
+        },
+        null,
+        2,
+      ) + '\n',
+      { mode: 0o600 },
+    );
+    console.log(`Local candidate source: ${candidate}`);
+  }
   const args = [
     live ? 'workflow_dispatch' : 'push',
     '-W',
@@ -54,6 +88,9 @@ try {
     '-P',
     'ubuntu-latest=catthehacker/ubuntu:act-latest',
     ...(live ? ['--artifact-server-path', artifacts] : []),
+    ...(process.env.ACT_NODE_OPTIONS !== undefined
+      ? ['--env', `NODE_OPTIONS=${process.env.ACT_NODE_OPTIONS}`]
+      : []),
     '--container-daemon-socket',
     '-',
   ];

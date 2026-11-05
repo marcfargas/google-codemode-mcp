@@ -389,10 +389,42 @@ with zero unknown mutations.
 Both required models now have passing download and rename cases across retained
 runs. This is qualified case coverage across runner candidates, not a fresh
 complete-suite pass or reliability evidence. All five executed actors had
-successful cleanup and zero unknown mutations. Conditional Drive updates and
-live multi-page traversal remain unverified; the bounded fixtures do not prove
-those broader acceptance items. Hosted Drive and actual target-host activation
-also remain unverified.
+successful cleanup and zero unknown mutations. At that checkpoint, conditional
+Drive behavior and live multi-page traversal still needed qualification; the
+bounded fixtures did not prove those broader acceptance items.
+
+## Drive pagination and conditional-write boundary (2026-11-05)
+
+The expanded `just live-drive` passed all four deterministic cases through the
+current local Worker: download, rename, conditional-option refusal and explicit
+multi-page traversal. Three owned files were returned exactly once across three
+pages with `pageSize: 1`, unchanged continuation tokens, stable name ordering and
+a terminal page. Fixture search readiness completed before the product traversal.
+Independent metadata/content readbacks and all six fixture cleanups passed, with
+zero unknown mutations. Synthetic tests separately cover empty intermediate pages,
+opaque token encoding and preservation of `incompleteSearch: true`.
+
+Drive v3 Discovery revision `20261102` exposes no conditional-update parameter on
+`files.update`; `File.version` is output-only. A separate owned-fixture Google
+probe accepted a deliberately mismatched `If-Match` header and applied the rename.
+That bounded observation does not characterize every Drive endpoint. The product
+refuses second-argument transport options before the bridge, with zero outcomes,
+and refuses invented/header parameters with `not_dispatched` outcomes. Independent
+readback confirmed no change after these refusals. **Conditional mutation/CAS is
+unsupported and not qualified**; refusal passes do not establish concurrency
+protection.
+
+The local live launcher now preserves working-tree bytes instead of fetching the
+baseline commit, and retains source files/hashes beside its fixture receipt.
+The first pre-fixture attempt on the old source remains failed. The successful
+run used the explicit local `ACT_NODE_OPTIONS=--no-network-family-autoselection`
+setting for a Node token-endpoint connection timeout; no OAuth re-consent or
+product network setting was needed.
+
+No additional agent trials ran for this qualification. Earlier Sonnet/Sol case
+passes and the original Sol runner failure retain their source/runner identities.
+Shared drives, a real `incompleteSearch: true` response, successful conditional
+writes, hosted Drive and actual target-host activation remain unqualified.
 
 ## Native Codex capability probe
 

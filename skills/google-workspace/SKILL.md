@@ -36,6 +36,9 @@ return data;
 
 Google method names, parameters, request bodies, and the `.data` response envelope
 are preserved. Handle `nextPageToken` explicitly when more results are needed.
+For Drive `files.list`, include `nextPageToken,incompleteSearch` in the field mask.
+Forward the token unchanged as `pageToken` with the same query. An empty page can still have a token.
+If `incompleteSearch` is `true`, do not claim that the search is complete.
 Use discovered snippet metadata for its inputs, required services and OAuth
 scopes. Some deployment snippets also appear as tools; tool arguments contain
 `accessToken`, `inputs`, and an optional correlation `requestId`.
@@ -64,10 +67,16 @@ bytes directly. Media `.data` is `{encoding: 'base64', data, size, mimeType, sha
 its byte length/hash. Downloads are limited to 131072 raw bytes. Media uploads,
 transport overrides and durable artifacts remain unavailable. Google acknowledgement of a send does not establish recipient delivery.
 
+Drive v3 `files.update` has no conditional-update parameter in Discovery revision 20261102. `File.version` is output-only, not a compare-and-swap input. Conditional
+headers such as `If-Match` and second-argument SDK options are refused before
+dispatch. A read followed by a write does not prevent concurrent lost updates.
+
 References:
 
 - [Gmail API reference](https://developers.google.com/workspace/gmail/api/reference/rest)
 - [Gmail send](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/send)
+- [Drive list and pagination](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list)
+- [Drive update](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/update)
 - [Google Developer Knowledge MCP](https://developers.google.com/knowledge/mcp)
 
 The separate Developer Knowledge MCP supplies official API guidance and can be

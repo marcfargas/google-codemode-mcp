@@ -253,6 +253,20 @@ before using `google.drive({version: 'v3'})`. Native JSON metadata and PATCH
 request bodies are preserved. For example, `files.update({fileId: inputs.id,
 requestBody: {name: inputs.name}})` renames an existing file.
 
+Drive v3 `files.update` has no conditional-update parameter in Discovery revision
+`20261102`. `File.version` is output-only and cannot act as a compare-and-swap
+input. Conditional transport headers such as `If-Match` and second-argument SDK
+options are refused before dispatch. Concurrent lost updates are not prevented.
+An owned-fixture Google probe accepted a deliberately mismatched `If-Match` and
+applied the rename; that observation covers the tested metadata update, not every
+Drive endpoint or conditional mechanism.
+
+For `files.list`, request `nextPageToken,incompleteSearch` in your field mask.
+Pass each returned token unchanged as `pageToken` with the same query. Continue across empty pages
+while a token exists. Preserve and inspect `incompleteSearch`: a value of `true`
+means the traversal cannot establish a complete search. The Worker does not fetch
+additional pages automatically. See the native [list reference](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list).
+
 Methods declaring `runtime.mediaDownload` expose their media selection and byte
 limit. `files.get({fileId: inputs.id, alt: 'media'})` returns `.data` as
 `{encoding: 'base64', data, size, mimeType, sha256}`. `data` is standard base64;
@@ -267,7 +281,8 @@ store. Gmail attachments continue to use Google's native base64url JSON fields.
 test user. The latter covers files created by this OAuth client; it does not grant
 access to every file in the account. Enable Drive API in that client's GCP project.
 `just live-drive` verifies the built Worker with owned file fixtures, exact byte
-readback, a native rename and cleanup. The manual agent suite is:
+readback, a native rename, conditional-option refusal and bounded multi-page
+traversal, followed by independent readback and cleanup. The manual agent suite is:
 
 ```sh
 just eval-gmail http://127.0.0.1:8317 /absolute/new/gmail-evidence
@@ -383,8 +398,10 @@ backend binding and provider-connected host journeys remain acceptance work. Dri
 authenticated download/rename checks passed. Both Sonnet and Sol now have passing
 download and rename agent cases across retained runs. Sol's original runner
 failure remains recorded; the fresh download validation passed after its repair.
-Drive conditional-update and live multi-page qualification remain open. See the
-[Drive results](tests/eval/README.md#drive-live-qualification-2026-11-04).
+Live multi-page traversal and conditional-option refusal are now qualified through
+the built Worker. Conditional mutations remain unsupported; concurrent lost
+updates are not prevented. See the
+[Drive qualification and limits](tests/eval/README.md#drive-pagination-and-conditional-write-boundary-2026-11-05).
 Subsequent APIs are Sheets, Docs, and
 Calendar, in that order. Tasks and replay are deferred.
 
@@ -417,6 +434,14 @@ workflow launchers live in `tests/`; the deployment entrypoint is root `deploy.m
 exposed through `justfile`; there is no project `scripts/` directory or npm task
 layer. Requires Node 24, Docker, `act`, `just`, and `gh` for secret installation.
 GitHub and local checks invoke `tests/run.mjs` directly.
+
+Local workflow launchers can set `ACT_NODE_OPTIONS` to pass Node options verbatim
+to the container. For a local network-family selection timeout, use
+`ACT_NODE_OPTIONS=--no-network-family-autoselection just live-drive`. This changes
+only Node in that invocation; it does not configure the Worker or GitHub runner.
+Live runs retain the current source files, hashes and baseline/diff identity under
+`dist/act-artifacts/candidate-*`, alongside the workflow's fixture receipt. The
+receipt's `source` field alone identifies the baseline commit, not dirty bytes.
 
 ```sh
 npm ci --ignore-scripts

@@ -8,6 +8,7 @@ import { SERVICES } from '../../src/services.ts';
 import { validateSnippets } from '../../src/snippets.ts';
 
 const token = 'synthetic-drive-secret';
+const list = 'drive/v3/files.list';
 const get = 'drive/v3/files.get';
 const update = 'drive/v3/files.update';
 const exportFile = 'drive/v3/files.export';
@@ -29,12 +30,31 @@ function drive(): DiscoveryDocument {
     },
     schemas: {
       File: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } } },
+      FileList: {
+        type: 'object',
+        properties: {
+          files: { type: 'array', items: { $ref: 'File' } },
+          nextPageToken: { type: 'string' },
+          incompleteSearch: { type: 'boolean' },
+          kind: { type: 'string' },
+        },
+      },
       Operation: { type: 'object', properties: { name: { type: 'string' } } },
     },
     methods: { rootDiagnostic: { httpMethod: 'GET', path: 'diagnostic' } },
     resources: {
       files: {
         methods: {
+          list: {
+            httpMethod: 'GET',
+            path: 'files',
+            parameters: {
+              q: { type: 'string', location: 'query' },
+              pageSize: { type: 'integer', location: 'query' },
+              pageToken: { type: 'string', location: 'query' },
+            },
+            response: { $ref: 'FileList' },
+          },
           get: {
             httpMethod: 'GET',
             path: 'files/{fileId}',
@@ -231,6 +251,151 @@ test('metadata GET and native PATCH retain JSON bodies and actual Drive paths', 
   assert.equal(calls[1].method, 'PATCH');
   assert.deepEqual(JSON.parse(calls[1].body!), { name: 'renamed' });
   assert.equal(dispatcher.outcomes[1].mutation, true);
+});
+
+test('Drive pagination requires explicit calls and preserves empty pages, opaque tokens and incomplete search', async () => {
+  const pages = [
+    { files: [{ id: 'first' }], nextPageToken: 'page-2', incompleteSearch: false },
+    { files: [], nextPageToken: 't+/=1', incompleteSearch: false },
+    { files: [{ id: 'last' }], incompleteSearch: true },
+  ];
+  const calls: URL[] = [];
+  const dispatcher = createDispatcher({
+    catalog: catalog(),
+    accessToken: token,
+    requestId: 'drive-pages',
+    transport: async (url) => {
+      calls.push(new URL(String(url)));
+      assert.ok(calls.length <= pages.length, 'unexpected automatic page fetch');
+      return json(pages[calls.length - 1]);
+    },
+  });
+  const params = { q: 'trashed = false', pageSize: 1 };
+  const first = await dispatcher.call(list, params);
+  assert.equal(first.ok, true);
+  assert.equal(calls.length, 1);
+  if (!first.ok) return;
+  assert.deepEqual(first.value.data, pages[0]);
+  const second = await dispatcher.call(list, {
+    ...params,
+    pageToken: (first.value.data as { nextPageToken: string }).nextPageToken,
+  });
+  assert.equal(second.ok, true);
+  assert.equal(calls.length, 2);
+  if (!second.ok) return;
+  assert.deepEqual(second.value.data, pages[1]);
+  const third = await dispatcher.call(list, {
+    ...params,
+    pageToken: (second.value.data as { nextPageToken: string }).nextPageToken,
+  });
+  assert.equal(third.ok, true);
+  assert.equal(calls.length, 3);
+  if (third.ok) assert.deepEqual(third.value.data, pages[2]);
+  assert.deepEqual(
+    calls.map((url) => url.searchParams.get('pageToken')),
+    [null, 'page-2', 't+/=1'],
+  );
+  assert.match(calls[2].search, /pageToken=t%2B%2F%3D1/);
+  for (const url of calls) {
+    assert.equal(url.pathname, '/drive/v3/files');
+    assert.equal(url.searchParams.get('pageSize'), '1');
+    assert.equal(url.searchParams.get('q'), params.q);
+  }
+  assert.equal(dispatcher.outcomes.length, 3);
+});
+
+test('Drive metadata response headers preserve an ETag only when Google supplies one', async () => {
+  for (const etag of ['"synthetic-etag"', undefined]) {
+    const dispatcher = createDispatcher({
+      catalog: catalog(),
+      accessToken: token,
+      requestId: 'drive-etag',
+      transport: async () =>
+        new Response(JSON.stringify({ id: 'fixture' }), {
+          headers: { 'content-type': 'application/json', ...(etag ? { etag } : {}) },
+        }),
+    });
+    const result = await dispatcher.call(get, { fileId: 'fixture' });
+    assert.equal(result.ok, true);
+    if (!result.ok) continue;
+    assert.equal(Object.hasOwn(result.value.headers, 'etag'), etag !== undefined);
+    assert.equal(result.value.headers.etag, etag);
+    assert.deepEqual(result.value.data, { id: 'fixture' });
+  }
+});
+
+test('Drive conditional and transport parameters are refused before any update dispatch', async () => {
+  let calls = 0;
+  const dispatcher = createDispatcher({
+    catalog: catalog(),
+    accessToken: token,
+    requestId: 'drive-no-transport-options',
+    transport: async () => {
+      calls++;
+      return json({ id: 'fixture' });
+    },
+  });
+  const forbidden = {
+    headers: { 'If-Match': 'stale-etag' },
+    headers_: { 'If-Match': 'stale-etag' },
+    options: { headers: { 'If-Match': 'stale-etag' } },
+    ifMatch: 'stale-etag',
+  };
+  for (const [key, value] of Object.entries(forbidden)) {
+    const result = await dispatcher.call(update, {
+      fileId: 'fixture',
+      requestBody: { name: 'must-not-rename' },
+      [key]: value,
+    });
+    assert.equal(result.ok, false, key);
+    if (!result.ok) {
+      assert.equal(result.error.code, 'INVALID_PARAMS', key);
+      assert.equal(result.error.outcome, 'not_dispatched', key);
+    }
+  }
+  assert.equal(calls, 0);
+  assert.deepEqual(
+    dispatcher.outcomes.map(({ path, mutation, outcome }) => ({ path, mutation, outcome })),
+    Object.keys(forbidden).map(() => ({ path: update, mutation: true, outcome: 'not_dispatched' })),
+  );
+});
+
+test('Drive descriptions and declaration parameter shapes invent no conditional or transport options', async () => {
+  const ts = await import('typescript');
+  for (const [path, expected] of [
+    [get, ['alt', 'fields', 'fileId']],
+    [update, ['fields', 'fileId', 'requestBody']],
+  ] as const) {
+    const described = await catalog().describe(path);
+    assert.deepEqual(
+      Object.keys(described.parameters as object).sort(),
+      expected.filter((key) => key !== 'requestBody').sort(),
+    );
+    const parsed = ts.createSourceFile(
+      'selected.ts',
+      described.declarations as string,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    const params = parsed.statements.find(
+      (node) => ts.isTypeAliasDeclaration(node) && node.name.text === 'Params',
+    );
+    assert.ok(params && ts.isTypeAliasDeclaration(params) && ts.isTypeLiteralNode(params.type));
+    const members = params.type.members.map((member) => {
+      assert.ok(ts.isPropertySignature(member) && member.name && ts.isStringLiteral(member.name));
+      return member.name.text;
+    });
+    assert.deepEqual(members.sort(), [...expected].sort());
+    const method = parsed.statements.find(ts.isVariableStatement);
+    assert.ok(method);
+    const declaration = method.declarationList.declarations[0];
+    assert.ok(declaration.type && ts.isTypeLiteralNode(declaration.type));
+    for (const signature of declaration.type.members) {
+      assert.ok(ts.isMethodSignature(signature));
+      assert.equal(signature.parameters.length, 1);
+    }
+  }
 });
 
 test('native byte mode preserves arbitrary, empty and JSON-MIME bytes with independent digests', async () => {

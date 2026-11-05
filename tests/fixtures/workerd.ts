@@ -72,6 +72,37 @@ const document: DiscoveryDocument = {
     },
   },
 };
+// Reduced native Drive Discovery; transport-option refusals run through the
+// same isolated executor and dispatcher as the Gmail fixture above.
+const driveDocument: DiscoveryDocument = {
+  name: 'drive',
+  version: 'v3',
+  revision: 'fixture-drive-20261102',
+  rootUrl: 'https://www.googleapis.com/',
+  servicePath: 'drive/v3/',
+  schemas: {
+    File: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } } },
+  },
+  resources: {
+    files: {
+      methods: {
+        get: {
+          path: 'files/{fileId}',
+          httpMethod: 'GET',
+          parameters: { fileId: { type: 'string', required: true, location: 'path' } },
+          response: { $ref: 'File' },
+        },
+        update: {
+          path: 'files/{fileId}',
+          httpMethod: 'PATCH',
+          parameters: { fileId: { type: 'string', required: true, location: 'path' } },
+          request: { $ref: 'File' },
+          response: { $ref: 'File' },
+        },
+      },
+    },
+  },
+};
 const snippets = validateSnippets(bundledSnippets);
 export default {
   async fetch(request: Request, env: { LOADER: WorkerLoader }) {
@@ -99,7 +130,9 @@ export default {
               : { messages: [], nextPageToken: 'empty-page-continues' },
           );
     };
-    const catalog = new DiscoveryCatalog({ document });
+    const catalog = new DiscoveryCatalog({
+      documents: { 'gmail/v1': document, 'drive/v3': driveDocument },
+    });
     const executor = createExecutor(env.LOADER, {
       timeoutMs: url.searchParams.has('timeout') ? 40 : undefined,
     });
