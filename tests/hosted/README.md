@@ -24,9 +24,11 @@ used to invoke tests.
 | Create the runner service token                                         | Account **Access: Service Tokens Write** (also labelled Edit)                                                              |
 | Add or change a custom route/domain, if selected instead of workers.dev | Worker authority plus **Workers Routes Write** on the selected zone; any required DNS changes use separate setup authority |
 
-The steady deployment token needs no Access administration, Google, KV, R2 or D1
-rights. Selecting `workers.dev` avoids zone/DNS provisioning permissions. Worker
-creation and Access setup can be performed by a separate bootstrap custodian;
+The storage-disabled deployment was verified with Worker Editor alone; it needs
+no Access administration, Google, KV, R2 or D1 rights. An R2-bound redeployment
+also passed after the owner removed temporary R2 administration, as recorded
+below. Selecting `workers.dev` avoids zone/DNS provisioning permissions.
+Worker creation and Access setup can be performed by a separate bootstrap custodian;
 keep that broader token out of the invoking runner. Some token interfaces still
 show the older account-wide `Workers Scripts Edit` permission: do not assume it
 is scoped to one Worker. Read back the issued token's actual resource scope and
@@ -250,3 +252,90 @@ lifecycle backstop separately. The one-hour application expiry denies artifact
 access, but does not physically delete bytes. Do not equate it with a one-hour
 retention guarantee. Hosted artifact access, bucket lifecycle and native host
 file presentation remain unqualified by the existing hosted media/Gmail records.
+
+## Artifact storage qualification (2026-11-05)
+
+Miniflare already emulates the R2 Worker object API. The maintained artifact suite
+passed 21 core/workerd checks, including persistent storage across Worker
+instances, capability refusal, expiry, exact binary/JSON content, bounded resource
+chunks and deletion. No new storage emulator or test service was added.
+
+After the pagination runtime change, two no-model controls through the final
+built Worker again passed with real Gmail fixtures: a 374834-byte native JSON
+artifact and a 96000-byte binary attachment. Trusted R2 snapshots verified the
+complete content before deletion; later helper/resource reads, unavailable reads
+after deletion, empty final buckets, unchanged Google sources and owned-fixture
+cleanup all passed. The local bundle matched the pagination agent trial's
+`fc13b0487cda73733d4792ecb28a1ceb37cfb0f870adb6e707ab73fba007fc11`.
+The earlier four artifact agent passes retain their own bundle/source identity.
+
+`ARTIFACTS_BUCKET=synthetic-private-artifacts just deploy --dry-run` also passed
+and produced the optional `ARTIFACTS` binding without publishing or provisioning.
+For a real deployment, supply an existing private bucket name through that
+variable. Keep public bucket access disabled and configure physical lifecycle
+separately; the one-hour capability expiry is an application access check.
+Miniflare object persistence does not emulate or prove the hosted lifecycle.
+
+The initial Worker-scoped Editor credential returned HTTP 403/error 10000 for
+account R2 bucket listing. The owner subsequently granted R2 administration and
+activated R2; the hosted controls below used that updated credential. The runner's
+Access service-token credential was not broadened.
+
+Resource links, manifests and byte chunks are verified interfaces. Neither the
+Claude CLI nor the Sol Responses runner establishes a downloadable-file UI in
+Claude, ChatGPT or OpenClaw. Keep that host-facing presentation claim separate
+from correct storage and resource byte retrieval.
+
+## Hosted artifact storage (2026-11-05)
+
+The product-backed candidate from clean `610de005e661f21cf48972d2d5cc75bc3d003bbb`
+was prepared with the private R2 binding and source digest
+`1e4a8f0e90f072516da04fd9c6adcbeaf944dd6d74c120074820fa9a7e11dc49`.
+The retained hosted bundle SHA-256 was
+`6e893cfab54d4109750e5a84f1cba15bdcd4cd5c1612e5de704d90e8618923a4`.
+Native deployment/version receipts link that bundle and binding to initial version
+`52c27d58-fcca-4db2-9ef1-49a0fb18fa10` and same-bundle redeployment
+`df1829e7-dae3-4e25-8137-63c3b5e885c0`, used for the full storage controls.
+
+Two no-model controls reused the existing Gmail fixtures and artifact grader.
+A 374834-byte native JSON result and a 96000-byte binary attachment each passed
+all eight storage/task criteria. Independent authenticated R2 object reads and
+metadata matched the trusted references and full native content. Later Code Mode
+reads, manifest/small-chunk reads, full resource reassembly and explicit deletion
+passed. The JSON artifact was also read unchanged across the redeployment, with
+each MCP response checked against its expected candidate and platform version.
+After deletion, resource reads were unavailable and exact-key R2 reads returned
+HTTP 404. Authenticated REST inventories showed empty, then the one owned object, then
+empty for each control; the final returned inventory was empty. The direct S3
+endpoint had a TLS handshake failure, so this does not qualify that interface.
+Gmail sources stayed unchanged and all owned fixtures were cleaned up. No model
+requests or inference spending occurred.
+
+The dedicated bucket has managed public access disabled and no custom domains.
+Its lifecycle configuration preserves the default multipart cleanup and adds an
+enabled one-day object-age deletion rule for `artifacts/v1/`. Configuration was
+read back; explicit deletion controls do not exercise that lifecycle rule or
+establish a physical deletion deadline. One-hour capability expiry remains an
+application access check. Native host download UI and paid-agent use of this
+hosted candidate are separate qualifications.
+
+Worker-level Access remains in place. Final admission checks returned 403 without
+credentials, 401 with a wrong secret and 200 with the runner pair and matching
+identity. Fresh owned-Worker metadata showed no attached domains, disabled version
+previews and disabled observability/logpush; the global domain listing was outside
+this token's scope.
+
+After the owner removed R2 permissions, the same retained bundle/config deployed
+successfully as version `49e44ee2-5a4a-4ed1-b1d6-a3af63a5080b` with the
+owner-confirmed Worker Editor credential. R2 bucket listing was denied with
+HTTP 403/error 10000. Native version receipts confirmed the same script etag and R2 binding;
+protected discovery returned the matching candidate/version. Missing credentials
+returned 403 and a wrong secret returned 401. Previews and observability stayed
+disabled, with no attached domains. A no-model native Gmail profile read admitted
+a small JSON artifact put, followed by matching helper/resource reads in later
+requests, explicit deletion and an unavailable resource read. No Google writes
+or model calls occurred. This verifies R2-bound redeployment and runtime storage
+with that supplied reduced credential. Token-policy introspection and a new
+direct-R2 inventory were not performed; the earlier full storage controls retain
+their own identities and independent cleanup evidence. Temporary R2 administration
+is no longer needed for this deployment path.

@@ -3,7 +3,8 @@ import { after, before, test } from 'node:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Miniflare } from 'miniflare';
+import type { Miniflare } from 'miniflare';
+import { createBuiltWorker } from '../support/worker-client.ts';
 import { prepareHosted } from '../hosted/prepare.ts';
 import { gradeProbe } from '../hosted/verify.ts';
 import { SYNTHETIC_TOKEN, PROTOCOL_VERSION, type Probe } from '../hosted/contract.ts';
@@ -26,34 +27,15 @@ before(async () => {
   assert.deepEqual(config.version_metadata, { binding: 'WORKER_VERSION' });
   assert.equal(config.routes, undefined);
   const bundle = await readFile(join(output, 'worker.js'), 'utf8');
-  worker = new Miniflare({
-    workers: [
-      {
-        config: {
-          name: 'hosted-local-only',
-          compatibilityDate: '2026-07-28',
-          compatibilityFlags: ['nodejs_compat'],
-          manifest: {
-            mainModule: 'worker.js',
-            modulesRoot: '/',
-            modules: { 'worker.js': { type: 'esm', contents: bundle } },
-          },
-          env: {
-            LOADER: { type: 'worker-loader' },
-            CANDIDATE_DIGEST: { type: 'text', value: candidateDigest },
-            WORKER_VERSION: { type: 'json', value: { id: workerVersion } },
-          },
-        },
-        dev: {
-          outboundService: {
-            type: 'fetcher',
-            handler: async () => {
-              throw new Error('Verification must not access a real network');
-            },
-          },
-        },
-      },
-    ],
+  worker = await createBuiltWorker({
+    bundle,
+    bindings: {
+      CANDIDATE_DIGEST: { type: 'text', value: candidateDigest },
+      WORKER_VERSION: { type: 'json', value: { id: workerVersion } },
+    },
+    outbound: async () => {
+      throw new Error('Verification must not access a real network');
+    },
   });
 });
 after(async () => {

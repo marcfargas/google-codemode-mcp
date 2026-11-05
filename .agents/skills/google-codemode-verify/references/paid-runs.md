@@ -13,7 +13,7 @@ model task alone does not pass the mechanism or cleanup criteria.
    [the launcher](../../../../tests/eval/act.mjs) when those inputs changed.
    Defaults are Sonnet 5.5 (`sonnet`) and GPT 6.1 Sol (`sol`), one fresh attempt
    per case/model. Gmail has six cases, at most twelve $1 estimates; Drive has
-   four cases, at most eight $1 estimates. Media has two cases, at most four $1 estimates, and requires ordered advanced-media resource retrieval. Use explicit case/model selections
+   four cases, at most eight $1 estimates. Artifacts has two cases through local Miniflare R2, at most four $1 estimates. Media has two cases, at most four $1 estimates, and requires ordered advanced-media resource retrieval. Use explicit case/model selections
    for a bounded subset. A subset does not qualify missing required cells.
 2. Identify the candidate: actual Git revision, dirty/untracked source,
    `candidate-source.json` and retained source bytes; then each cell's
@@ -40,6 +40,7 @@ model task alone does not pass the mechanism or cleanup criteria.
    checkout. For example:
 
    ```sh
+   just eval-artifacts PROXY_URL NEW_OUTPUT all required
    just eval-media PROXY_URL NEW_OUTPUT all required
    just eval-drive PROXY_URL NEW_OUTPUT all required
    just eval-gmail PROXY_URL NEW_OUTPUT attachment,pagination required
@@ -97,6 +98,8 @@ recorder. Incomplete coverage or uncertain writes stops later actors. Version an
 timestamps are diagnostic. Historical conditional evidence has no recorder and
 remains unknown under this criterion; original grades stay intact. Hosted
 conditional runs currently stop before inference. Resource retrieval does not establish Claude, ChatGPT or OpenClaw activation.
+
+Drive list-pages v2 requests bounded helper traversal. Its native grader remains unchanged: manually inspect successful executed `pagination.collect` code and preceding `pagination.md` retrieval before reporting helper use. Record whether the helper descriptor was actually requested, rather than inferring it from native method discovery.
 
 Use `just eval-regrade SAVED_TRIAL NEW_OUTPUT` for a grading question. It makes no
 Google/model/cleanup calls, preserves original errors and grades, and records the

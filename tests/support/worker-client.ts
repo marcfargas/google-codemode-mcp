@@ -1,3 +1,5 @@
+import { builtinModules } from 'node:module';
+import { build } from 'esbuild';
 import { readFile } from 'node:fs/promises';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { Miniflare, Response as MiniflareResponse } from 'miniflare';
@@ -24,6 +26,7 @@ export interface BuiltWorkerOptions {
   artifacts?: boolean;
   persistencePath?: string;
   bundle?: string;
+  bindings?: Record<string, { type: 'text'; value: string } | { type: 'json'; value: any }>;
 }
 export async function createBuiltWorker(options: BuiltWorkerOptions = {}) {
   const bundle = options.bundle ?? (await readFile('dist/worker.js', 'utf8'));
@@ -42,6 +45,7 @@ export async function createBuiltWorker(options: BuiltWorkerOptions = {}) {
           },
           env: {
             LOADER: { type: 'worker-loader' },
+            ...options.bindings,
             ...(options.artifacts
               ? { ARTIFACTS: { type: 'r2' as const, name: 'test-artifacts' } }
               : {}),
@@ -140,4 +144,37 @@ export async function openBuiltWorker(options: BuiltWorkerOptions = {}) {
       }
     },
   };
+}
+
+export async function bundleFixture(entry: string) {
+  const result = await build({
+    entryPoints: [entry],
+    bundle: true,
+    write: false,
+    format: 'esm',
+    platform: 'neutral',
+    conditions: ['workerd', 'worker', 'browser', 'import', 'default'],
+    mainFields: ['module', 'main'],
+    alias: Object.fromEntries(
+      builtinModules
+        .filter((name) => !name.startsWith('node:'))
+        .map((name) => [name, 'node:' + name]),
+    ),
+    external: ['cloudflare:workers', 'node:*'],
+  });
+  const bundle = result.outputFiles[0].text;
+  const builtins = [
+    ...new Set([...bundle.matchAll(/__require\("(node:[^"]+)"\)/g)].map((match) => match[1])),
+  ];
+  return (
+    builtins
+      .map((name, index) => `import * as builtin_${index} from ${JSON.stringify(name)};`)
+      .join('\n') +
+    '\nfunction require(name){switch(name){' +
+    builtins
+      .map((name, index) => `case ${JSON.stringify(name)}:return builtin_${index};`)
+      .join('') +
+    'default:throw new Error("Unknown require")}}\n' +
+    bundle
+  );
 }

@@ -320,7 +320,8 @@ test('uncertain put/delete preserve separate outcomes and never retry mutations'
 test('authoritative conditional collision preserves the existing object and exposes no capability', async () => {
   const fake = fakeBucket();
   let calls = 0;
-  fake.bucket.put = (async (key: string) => {
+  fake.bucket.put = (async (key: string, _value: Uint8Array, options: R2PutOptions) => {
+    assert.deepEqual(options.onlyIf, { etagDoesNotMatch: '*' });
     calls++;
     fake.objects.set(key, { bytes: Buffer.from('preexisting-owner-bytes'), metadata: {} });
     return null;

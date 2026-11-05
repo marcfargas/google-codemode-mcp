@@ -1,5 +1,5 @@
 import { DiscoveryCatalog } from './discovery.ts';
-import { executeProgram, createExecutor } from './runtime.ts';
+import { executeProgram, createExecutor, PAGINATION_CAPABILITIES } from './runtime.ts';
 import type { ExecutionArguments, SnippetArguments } from './runtime.ts';
 import { validateSnippets } from './snippets.ts';
 import { handleMcp } from './protocol.ts';
@@ -22,11 +22,13 @@ export default {
       readResource: artifactStore.readResource,
       describe: async (args: { path?: string }) => {
         if (args.path === 'snippets') return { snippets };
+        if (args.path === 'pagination') return PAGINATION_CAPABILITIES;
         if (args.path === 'artifacts')
           return { ...ARTIFACTS_CAPABILITIES, enabled: !!env.ARTIFACTS };
         if (!args.path)
           return {
             ...(await catalog.describe()),
+            pagination: { path: 'pagination', skill: PAGINATION_CAPABILITIES.skill },
             artifacts: {
               path: 'artifacts',
               enabled: !!env.ARTIFACTS,

@@ -4,10 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { selectCells, aggregateMatrix, MATRIX_VERSION, type MatrixCellResult } from './matrix.ts';
 import { runCell } from './run.ts';
 import { verifyModels } from './catalog.ts';
-import { getGmailCase, selectGmailCases } from './cases.ts';
+import { getCase, selectCases } from './cases.ts';
 import { GRADING_VERSION } from './mechanisms.ts';
-import { getDriveCase, selectDriveCases } from './drive.ts';
-import { getMediaCase, selectMediaCases } from './media.ts';
 
 const json = (file: string, value: unknown) =>
   writeFile(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
@@ -27,17 +25,12 @@ async function runMatrix(
   const cells = selectCells(process.env.EVAL_SELECTION);
   if (process.env.EVAL_MODEL) throw new Error('Select a matrix or one model, not both');
   const profile = process.env.EVAL_PROFILE;
-  if (!['gmail', 'drive', 'media'].includes(profile!))
+  if (!['gmail', 'drive', 'media', 'artifacts'].includes(profile!))
     throw new Error('Selected service has no implemented coverage');
   if ((process.env.EVAL_REPEATS ?? '1') !== '1')
     throw new Error('Matrix uses one declared attempt per cell');
   const output = resolve(configuration?.output ?? process.env.EVAL_OUTPUT!);
-  const selectedCase =
-    profile === 'gmail'
-      ? getGmailCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'combined')
-      : profile === 'media'
-        ? getMediaCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'gmail-to-drive')
-        : getDriveCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'read-file');
+  const selectedCase = getCase(profile!, configuration?.caseId ?? process.env.EVAL_CASE);
   await mkdir(output, { recursive: true, mode: 0o700 });
   const catalogue = await dependencies.verifyModels(
     process.env.EVAL_PROXY_URL!,
@@ -122,16 +115,7 @@ export async function runCampaign(dependencies = { runCell, verifyModels }) {
   if (!process.env.EVAL_CASES) return (await runMatrix(dependencies)).selectedStatus === 'pass';
   if (!process.env.EVAL_SELECTION || process.env.EVAL_MODEL)
     throw new Error('A case suite requires an explicit model selection');
-  const cases =
-    process.env.EVAL_PROFILE === 'gmail'
-      ? selectGmailCases(process.env.EVAL_CASES)
-      : process.env.EVAL_PROFILE === 'drive'
-        ? selectDriveCases(process.env.EVAL_CASES)
-        : process.env.EVAL_PROFILE === 'media'
-          ? selectMediaCases(process.env.EVAL_CASES)
-          : (() => {
-              throw new Error('Unsupported suite profile');
-            })();
+  const cases = selectCases(process.env.EVAL_PROFILE!, process.env.EVAL_CASES);
   const cells = selectCells(process.env.EVAL_SELECTION);
   const output = resolve(process.env.EVAL_OUTPUT!);
   await mkdir(output, { recursive: true, mode: 0o700 });

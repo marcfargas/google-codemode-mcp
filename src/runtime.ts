@@ -44,14 +44,23 @@ export function createExecutor(
   });
 }
 
+export const PAGINATION_CAPABILITIES = {
+  operations: ['collect'],
+  methods: ['gmail/v1/users.messages.list', 'drive/v3/files.list'],
+  limits: { maxPages: 50, maxBytes: 1_000_000, tokenCharacters: 4096 },
+  skill: 'skill://google-codemode-mcp/google-workspace/references/pagination.md',
+} as const;
+
 const PRELUDE = `
 function __freeze(value) {
   if (value && typeof value === 'object') { Object.values(value).forEach(__freeze); Object.freeze(value); }
   return value;
 }
 const inputs = __freeze(__bridgeInputs);
+const {google,pagination} = (() => {
+const methods = new WeakMap();
 function __nativeProxy(parts) {
-  return new Proxy(function(){}, {
+  const proxy = new Proxy(function(){}, {
     get(_, key) {
       if (key === 'then' || typeof key !== 'string') return undefined;
       return __nativeProxy([...parts, key]);
@@ -63,6 +72,8 @@ function __nativeProxy(parts) {
       return outcome.value;
     }
   });
+  methods.set(proxy, parts.join('.').replace('/.', '/'));
+  return proxy;
 }
 const google = Object.freeze(Object.fromEntries(${JSON.stringify(Object.values(SERVICES).map(({ name, version }) => ({ name, version })))}.map(service => [service.name, function(options) {
   if (!options || options.version !== service.version || Object.keys(options).some(k => k !== 'version')) {
@@ -70,6 +81,75 @@ const google = Object.freeze(Object.fromEntries(${JSON.stringify(Object.values(S
   }
   return __nativeProxy([service.name + '/' + service.version + '/']);
 }])));
+const pagination = Object.freeze({collect: async (method, params, options) => {
+  const invalid = message => Object.assign(new Error(message), {code:'PAGINATION_INVALID'});
+  const path = methods.get(method);
+  if (!${JSON.stringify(PAGINATION_CAPABILITIES.methods)}.includes(path))
+    throw invalid('Pagination requires a supported native list method');
+  try { __artifactJson(params); __artifactJson(options); }
+  catch { throw invalid('Pagination requires lossless plain JSON parameters and limits'); }
+  if (!params || typeof params !== 'object' || Array.isArray(params) || !options || typeof options !== 'object' || Array.isArray(options) ||
+      Object.keys(options).sort().join() !== 'maxBytes,maxPages' ||
+      !Number.isInteger(options.maxPages) || options.maxPages < 1 || options.maxPages > 50 ||
+      !Number.isInteger(options.maxBytes) || options.maxBytes < 1 || options.maxBytes > 1000000)
+    throw invalid('Pagination requires native parameters and bounded maxPages/maxBytes');
+  const original = __freeze(JSON.parse(__artifactStringify(params)));
+  const {maxPages,maxBytes} = options;
+  const drive = path === 'drive/v3/files.list';
+  const tokenValid = value => typeof value === 'string' && value.length > 0 && value.length <= 4096;
+  if (Object.hasOwn(original,'pageToken') && !tokenValid(original.pageToken))
+    throw invalid('Invalid initial pageToken');
+  if (Object.hasOwn(original,'fields')) {
+    if (typeof original.fields !== 'string') throw invalid('Invalid fields mask');
+    const fields = []; let depth = 0, start = 0;
+    for (let i = 0; i < original.fields.length; i++) {
+      const char = original.fields[i];
+      if (char === '(') depth++;
+      if (char === ')' && --depth < 0) throw invalid('Unbalanced fields mask');
+      if (char === ',' && depth === 0) { fields.push(original.fields.slice(start,i).trim()); start = i+1; }
+    }
+    fields.push(original.fields.slice(start).trim());
+    if (depth || fields.some(field => !field) ||
+        (!fields.includes('*') && (!fields.includes('nextPageToken') || (drive && !fields.includes('incompleteSearch')))))
+      throw invalid('Fields mask must expose top-level pagination fields');
+  }
+  const pages = [], seen = new Set();
+  let token = original.pageToken ?? null, incompleteSearch = null;
+  const envelope = (stoppedBy, exhausted = false) => ({pages,exhausted,stoppedBy,resumePageToken:token,incompleteSearch});
+  // Reserve the longest stop marker and boolean encodings, including for error partials.
+  const fits = (candidatePages, candidateToken) => new TextEncoder().encode(__artifactStringify({
+    pages:candidatePages,exhausted:false,stoppedBy:'maxPages',resumePageToken:candidateToken,incompleteSearch:false
+  })).length <= maxBytes;
+  if (!fits(pages,token)) throw invalid('maxBytes cannot hold pagination metadata');
+  const fail = (error, reason) => { error.partial = envelope(reason); throw error; };
+  while (true) {
+    if (token !== null) seen.add(token);
+    let data;
+    try {
+      const request = {...original};
+      if (token === null) delete request.pageToken; else request.pageToken = token;
+      data = (await method(request)).data;
+    } catch (error) { fail(error,'error'); }
+    if (!data || typeof data !== 'object' || Array.isArray(data))
+      fail(invalid('Native list response must be an object'),'invalid');
+    const next = Object.hasOwn(data,'nextPageToken') ? data.nextPageToken : null;
+    if ((next !== null && !tokenValid(next)) ||
+        (Object.hasOwn(data,'nextPageToken') && next === null) ||
+        (drive && Object.hasOwn(data,'incompleteSearch') && typeof data.incompleteSearch !== 'boolean'))
+      fail(invalid('Malformed native pagination metadata'),'invalid');
+    if (next !== null && seen.has(next))
+      fail(Object.assign(new Error('Repeated native page token'),{code:'PAGINATION_CYCLE'}),'cycle');
+    if (!fits([...pages,data],next)) return envelope('maxBytes');
+    pages.push(data); token = next;
+    if (drive) incompleteSearch = incompleteSearch === true || data.incompleteSearch === true ? true :
+      pages.length === 1 ? (data.incompleteSearch === false ? false : null) :
+      incompleteSearch === false && data.incompleteSearch === false ? false : null;
+    if (next === null) return envelope('end',true);
+    if (pages.length >= maxPages) return envelope('maxPages');
+  }
+}});
+return {google,pagination};
+})();
 const snippets = Object.freeze({run: async (name, input = {}) => {
   const outcome = await hostBridge.snippet(name, input);
   if (!outcome.ok) throw new Error(outcome.error);

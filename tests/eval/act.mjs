@@ -130,20 +130,11 @@ async function main() {
     if (repeats !== '1') throw new Error('Matrix uses one attempt per selected cell');
   } else getCellByModel(model);
   if (cases) {
-    if (profile === 'gmail') {
-      const { selectGmailCases } = await import('./cases.ts');
-      selectGmailCases(cases);
-    } else if (profile === 'drive') {
-      const { selectDriveCases } = await import('./drive.ts');
-      selectDriveCases(cases);
-    }
-    if (profile === 'media') {
-      const { selectMediaCases } = await import('./media.ts');
-      selectMediaCases(cases);
-    }
+    const { selectCases } = await import('./cases.ts');
+    selectCases(profile, cases);
     if (!selection) throw new Error('Case suites require a model selection');
   }
-  if (!['gmail', 'drive', 'media'].includes(profile))
+  if (!['gmail', 'drive', 'media', 'artifacts'].includes(profile))
     throw new Error(
       'Coverage unavailable: Gmail, Drive and media composition implemented; Sheets, Docs, Calendar remain pending',
     );

@@ -14,6 +14,7 @@ import {
 import { gradeMechanisms } from '../eval/mechanisms.ts';
 import { summarizeSavedRun } from '../eval/report.ts';
 import type { McpEvent } from '../eval/server.ts';
+import { event, resourceEvent, ordered } from '../support/audit.ts';
 
 const expected: MediaExpected = {
   profile: 'media',
@@ -69,20 +70,12 @@ function audit(
 ): McpEvent[] {
   const events: McpEvent[] = [];
   const add = (method: string, params: Record<string, unknown>, result: Record<string, unknown>) =>
-    events.push({ method, params, status: 200, response: { result } });
+    events.push(event(method, params, result));
   add('tools/call', { name: 'describe', arguments: {} }, { structuredContent: { services: [] } });
   const skill = 'skill://google-codemode-mcp/google-workspace/SKILL.md';
-  add(
-    'resources/read',
-    { uri: skill },
-    { contents: [{ uri: skill, text: '# Google Workspace Code Mode' }] },
-  );
+  events.push(resourceEvent(skill));
   const guide = () =>
-    add(
-      'resources/read',
-      { uri: MEDIA_RESOURCE },
-      { contents: [{ uri: MEDIA_RESOURCE, text: '# Media transfers\nActual deployment guide.' }] },
-    );
+    events.push(resourceEvent(MEDIA_RESOURCE, '# Media transfers\nActual deployment guide.'));
   if (options.guide !== false && !options.late) guide();
   for (const path of new Set(items.map((item) => item.path)))
     add(
@@ -104,11 +97,7 @@ function audit(
     },
   );
   if (options.late) guide();
-  return events.map((event, index) => ({
-    ...event,
-    startedOrdinal: index * 2 + 1,
-    completedOrdinal: index * 2 + 2,
-  }));
+  return ordered(...events);
 }
 const statuses = (
   e = expected,

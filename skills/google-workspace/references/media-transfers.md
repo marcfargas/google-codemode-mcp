@@ -106,8 +106,8 @@ Only Drive `files.create` multipart blob uploads with a metadata object are
 supported. Media-only upload, media on `files.update`, Google-native conversion,
 Gmail media upload endpoints, resumable upload, arbitrary streams/URLs, Range,
 headers and second-argument transport options are refused. Native metadata-only
-methods remain available. Artifacts and large-output storage are separate pending
-work; do not assume a returned byte envelope is a durable artifact.
+methods remain available. Optional artifact storage is separate; inspect its
+deployment capability before assuming a returned byte envelope is durable.
 
 A transfer loop is not atomic. Earlier writes may be acknowledged when a later
 file fails. Inspect all execution mutation outcomes, even if code catches an

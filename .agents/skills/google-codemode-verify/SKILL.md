@@ -47,7 +47,7 @@ readiness at the failed boundary and restart only trial-owned state when warrant
 Maintained suites, helpers and local workflow launchers live under `tests/`;
 `.github/` contains GitHub workflows and repository-secret installation, with
 commands in `justfile` and the deployment entrypoint at root `deploy.mjs`. Credential-free
-checks select `tests/unit/` and `tests/integration/`; credentialed suites in
+checks select `tests/unit/`, `tests/integration/` and `tests/preflight/`; credentialed suites in
 `tests/live/` run only through the explicit live targets. `just build` and `just deploy --dry-run`
 only bundle/validate; `just deploy` publishes and needs deployment scope.
 
@@ -76,6 +76,8 @@ receipts or offline regrading for reporting/grading questions; a new model call
 is not needed to recover recorded metrics. Authoring this skill does not authorize
 an additional paid attempt. Use `mafe-si:build-eval` when substantially changing
 cases/grading, rather than weakening expectations to turn a run green.
+
+`just eval-artifacts PROXY_URL NEW_OUTPUT all required` runs two local artifact cases × Sonnet/Sol under four $1 estimates. The trusted harness snapshots R2 content before actor deletion; later helper/resource reads, deletion, no residual objects, unchanged Gmail sources and cleanup are required. It does not qualify hosted retention or host file presentation.
 
 ## Observe, retain, and clean up
 
@@ -128,6 +130,8 @@ commands, receipt fields, budgets, models and links against source; preserve
 unrelated qualification limits. No full audit or paid/live trial follows merely
 from authoring it.
 
+For pagination changes, the maintained Gmail/Drive live workflows exercise `pagination.collect` through the built Worker. Drive list-pages v2 requests the helper while preserving its native page-chain grader. Before claiming helper adoption, inspect the retained executed code and ordered reference reads; native page outcomes alone cannot distinguish a helper from a handwritten loop. Older native pagination receipts do not qualify the new helper.
+
 For media changes, run the maintained workerd integration before live controls:
 Node stream behavior alone misses SDK multipart footer differences. In live and
 paid receipts verify exact bytes/hash, MIME, transformed name, source preservation,
@@ -152,8 +156,20 @@ A stored artifact URI is a bearer capability, not stable user identity. Inspect
 separate trusted artifact outcomes/references after program/output errors. A
 pending write retains an unknown outcome and tentative URI; completion-aware
 cleanup is best effort. Request-context cleanup and access expiry do not establish
-physical R2 retention. Bucket lifecycle, hosted storage, real-agent artifact use
-and native host downloadable-file presentation stay unqualified until separately
-exercised. The four passing media cells qualify cf98b51; they do not silently
+physical R2 retention. Two no-model hosted storage controls passed on the retained
+610de00 product-backed candidate: full JSON/binary contents, later helper/resource
+reads, explicit deletion, independent R2 absence and empty returned REST inventory;
+JSON also survived same-bundle redeployment. See [hosted storage evidence](../../../tests/hosted/README.md#hosted-artifact-storage-2026-11-05)
+for exact digest/version identities, protected admission and the S3 TLS limitation.
+The bucket's one-day prefix lifecycle was configured/read back, not exercised.
+Physical lifecycle execution and native host downloadable-file presentation remain
+unqualified. R2-bound same-bundle redeployment and a small cross-request storage
+smoke passed after the owner removed R2 permissions: native binding/version
+readback, protected admission, native Google read-admitted put, later helper/resource
+reads, delete and unavailable resource. R2 listing was denied. This qualifies the
+supplied owner-confirmed Worker Editor credential, without claiming token-policy
+introspection or repeating the prior independent R2 inventory. Four local artifact agent cells passed
+at the captured b2a8cf3 slice; the later pagination runtime has independent no-model
+artifact regression controls, not a repeated artifact actor campaign. The four passing media cells qualify cf98b51; they do not silently
 qualify later artifact code or an R2-enabled hosted deployment. Avoid new paid
 runs merely to report these existing metrics.

@@ -99,6 +99,28 @@ bucket or configure billing/lifecycle; provision those separately. Keep authenti
 ingress in place: a valid Google call before storage is an admission check, not a
 per-person quota or caller identity.
 
+Use `describe({path:'pagination'})` and its
+[reference](skills/google-workspace/references/pagination.md) to collect bounded
+Gmail or Drive list pages:
+
+```js
+const drive = google.drive({ version: 'v3' });
+const result = await pagination.collect(
+  drive.files.list,
+  {
+    pageSize: 100,
+    fields: 'nextPageToken,incompleteSearch,files(id,name)',
+  },
+  { maxPages: 5, maxBytes: 200000 },
+);
+return { ...result, pages: result.pages.map((page) => ({ files: page.files })) };
+```
+
+Inspect `exhausted`, `stoppedBy`, `resumePageToken` and `incompleteSearch` before
+claiming completeness. A cap preserves a whole-page continuation; native errors
+retain `.partial` without retry. For large results, store the bounded result with
+`artifacts.putJson` when enabled. Existing native single-page calls are unchanged.
+
 Use `describe({path:'artifacts'})` and read
 `skill://google-codemode-mcp/google-workspace/references/artifacts.md`. After an
 acknowledged native Google call, top-level code can explicitly store JSON or a byte
@@ -120,9 +142,12 @@ without changing acknowledged Google outcomes. Actual workerd/Miniflare R2 proof
 limit, cross-request/new-Worker reads, all byte values at the 128 KiB bound, exact
 chunk reassembly/hash, deletion, strict JSON and retained Google acknowledgements
 after storage failure. Core fault controls cover quotas, expiry, wrong capabilities
-and late writes. These are deterministic local tests; real-agent artifact use,
-hosted storage, physical retention and host downloadable-file presentation remain
-unqualified.
+and late writes. Four local Sonnet/Sol artifact attempts passed on their retained
+candidate. Two later no-model hosted controls verified full JSON/binary content,
+resource reads and deletion; JSON also survived redeployment. See the
+[hosted storage evidence](tests/hosted/README.md#hosted-artifact-storage-2026-11-05)
+for candidate identities and limits. Physical lifecycle execution and host
+downloadable-file presentation remain unqualified.
 
 ### Git-connected Workers Builds
 
@@ -500,9 +525,12 @@ Gmail/Drive media composition now passes all four local Sonnet/Sol cells, with
 also pass, including native-document export. Agents retrieved the advanced skill
 resource and discovered every used method before execution. See the
 [media results and token/cache/cost metrics](tests/eval/README.md#media-composition-results-2026-11-05).
-Optional artifact storage now has deterministic local R2/workerd proof. The
-passing media campaign qualifies its retained media candidate; real-agent artifact
-use, hosted media/storage and target-host activation remain unqualified.
+Optional artifact storage has local R2/workerd proof, four passing local
+Sonnet/Sol attempts, and two passing no-model hosted storage controls. Each result
+qualifies its retained candidate; see the [artifact agent results](tests/eval/README.md#artifact-agent-acceptance-2026-11-05)
+and [hosted storage evidence](tests/hosted/README.md#hosted-artifact-storage-2026-11-05).
+Hosted media composition, physical lifecycle execution and target-host activation
+remain unqualified.
 Subsequent APIs are Sheets, Docs, and
 Calendar, in that order. Tasks and replay are deferred.
 
@@ -596,6 +624,11 @@ conservatively, and a $1 estimate per cell (native CLI for Claude, recorded publ
 token rates for GPT). Estimates are separate from actual proxy billing. There are no performer retries or automatic model fallbacks.
 
 Gmail, Drive and their two-case media-composition profile are implemented.
+`just eval-artifacts PROXY_URL NEW_OUTPUT all required` exercises large native JSON
+and binary attachment storage through local Miniflare R2: two cases × Sonnet/Sol,
+up to four $1 estimates. It checks full content before actor deletion, later reads,
+unchanged sources and cleanup; hosted retention and native host file delivery
+remain separate qualifications.
 Sheets, Docs, and Calendar remain pending
 coverage targets; selecting them fails before model spending. This is a synthetic
 feasibility check, not acceptance of every host or service. See the

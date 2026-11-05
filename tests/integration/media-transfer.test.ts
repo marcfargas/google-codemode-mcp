@@ -1,6 +1,6 @@
+import { readMultipart } from '../support/multipart.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createHash } from 'node:crypto';
 import { openBuiltWorker, type ExecutionReceipt } from '../support/worker-client.ts';
 import { MEDIA_SKILL_URI } from '../../src/media.ts';
 
@@ -105,32 +105,6 @@ const docs = {
 const json = (data: unknown) => Response.json(data);
 const token = 'inert-workerd-media-token';
 
-function multipart(body: Buffer, type: string) {
-  const boundary = /boundary=([^;]+)/.exec(type)![1];
-  const marker = Buffer.from('--' + boundary);
-  const separator = Buffer.from('\r\n\r\n');
-  assert.equal(body.indexOf(marker), 0);
-  const metadataStart = body.indexOf(separator) + 4;
-  const second = body.indexOf(marker, metadataStart);
-  const mediaStart = body.indexOf(separator, second) + 4;
-  const end = body.lastIndexOf(Buffer.from('\r\n--' + boundary + '--'));
-  assert.ok(
-    end >= mediaStart,
-    JSON.stringify({
-      type,
-      boundary,
-      mediaStart,
-      end,
-      size: body.length,
-      tail: body.subarray(-160).toString('latin1'),
-    }),
-  );
-  return {
-    metadata: JSON.parse(body.subarray(metadataStart, second - 2).toString('utf8')),
-    headers: body.subarray(second + marker.length + 2, mediaStart - 4).toString('ascii'),
-    bytes: body.subarray(mediaStart, end),
-  };
-}
 function attachment(raw: string) {
   const message = Buffer.from(raw, 'base64url').toString('ascii');
   const boundary = /boundary="([^"]+)"/.exec(message)![1];
@@ -146,7 +120,7 @@ function attachment(raw: string) {
 
 test('actual workerd/native SDK composes Gmail attachments and Drive bytes without host intermediates', async () => {
   const bytes = Buffer.from(Array.from({ length: 131072 }, (_, index) => index % 256));
-  const uploads: ReturnType<typeof multipart>[] = [];
+  const uploads: ReturnType<typeof readMultipart>[] = [];
   const drafts: ReturnType<typeof attachment>[] = [];
   const client = await openBuiltWorker({
     outbound: async (request) => {
@@ -159,7 +133,10 @@ test('actual workerd/native SDK composes Gmail attachments and Drive bytes witho
       if (url.pathname === '/upload/drive/v3/files') {
         assert.equal(url.searchParams.get('uploadType'), 'multipart');
         uploads.push(
-          multipart(Buffer.from(await request.arrayBuffer()), request.headers.get('content-type')!),
+          readMultipart(
+            Buffer.from(await request.arrayBuffer()),
+            request.headers.get('content-type')!,
+          ),
         );
         return json({ id: 'created-file', name: uploads.at(-1)!.metadata.name });
       }
@@ -212,10 +189,6 @@ test('actual workerd/native SDK composes Gmail attachments and Drive bytes witho
     assert.deepEqual(drafts[0].bytes, bytes);
     assert.equal(drafts[0].name, 'résumé 🌍.bin');
     assert.match(drafts[0].headers, /Content-Type: application\/octet-stream/);
-    assert.equal(
-      createHash('sha256').update(drafts[0].bytes).digest('hex'),
-      createHash('sha256').update(bytes).digest('hex'),
-    );
   } finally {
     await client.close();
   }
@@ -242,7 +215,7 @@ test('workerd keeps empty multipart bodies and acknowledged writes when their re
     `,
     });
     assert.equal(calls, 1);
-    assert.equal(multipart(wire!, contentType).bytes.length, 0);
+    assert.equal(readMultipart(wire!, contentType).bytes.length, 0);
     assert.equal(result.outcomes[0].outcome, 'acknowledged');
     assert.equal(result.outcomes[0].httpStatus, 200);
   } finally {

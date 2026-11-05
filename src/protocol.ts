@@ -1,4 +1,4 @@
-import { ARTIFACTS_GUIDE, MEDIA_TRANSFERS_GUIDE } from './knowledge.ts';
+import { ARTIFACTS_GUIDE, MEDIA_TRANSFERS_GUIDE, PAGINATION_GUIDE } from './knowledge.ts';
 import { executionArtifactReferences } from './artifact-references.ts';
 import {
   createMcpHandler,
@@ -34,7 +34,7 @@ Use \`execute\` to submit JavaScript. The trusted caller supplies a short-lived
 OAuth \`accessToken\` as a request argument. When a gateway hides this argument,
 omit it: the gateway injects its current caller grant. Never invent or supply a
 token in code. The program receives \`google\`, \`inputs\`,
-deployment-provided \`snippets\`, and optional \`artifacts\`; it does not receive the token. Keep user data
+deployment-provided \`snippets\`, \`pagination\`, and optional \`artifacts\`; it does not receive the token. Keep user data
 in \`inputs\` instead of interpolating it into code.
 
 The following illustrates the native client shape after method discovery. It is
@@ -90,6 +90,15 @@ through MCP Resources for encoding, composeMime, scopes, examples and limits. Go
 Drive v3 \`files.update\` has no conditional-update parameter in Discovery revision 20261102. \`File.version\` is output-only, not a compare-and-swap input. Conditional
 headers such as \`If-Match\` and second-argument SDK options are refused before
 dispatch. A read followed by a write does not prevent concurrent lost updates.
+
+For bounded Gmail message or Drive file traversal, inspect
+\`describe({path:'pagination'})\` and read
+[bounded pagination](skill://google-codemode-mcp/google-workspace/references/pagination.md)
+before using \`pagination.collect(nativeMethod,params,{maxPages,maxBytes})\`. Native
+pages and parameters are preserved. Inspect \`exhausted\`, \`stoppedBy\`,
+\`resumePageToken\` and Drive \`incompleteSearch\`; an empty page may have a token,
+and a bounded partial result is not a complete search. Return a small projection
+or explicitly store larger results as an artifact.
 
 Artifact storage is optional. Check \`describe({path: 'artifacts'})\` and read
 [artifact storage](skill://google-codemode-mcp/google-workspace/references/artifacts.md)
@@ -199,6 +208,7 @@ export async function handleMcp(request: Request, app: ProtocolApp): Promise<Res
       'google-workspace/SKILL.md': WORKSPACE_SKILL,
       'google-workspace/references/media-transfers.md': MEDIA_TRANSFERS_GUIDE,
       'google-workspace/references/artifacts.md': ARTIFACTS_GUIDE,
+      'google-workspace/references/pagination.md': PAGINATION_GUIDE,
     }),
     { prefix: 'google-codemode-mcp', strict: true },
   );
@@ -234,7 +244,7 @@ export async function handleMcp(request: Request, app: ProtocolApp): Promise<Res
         'describe',
         {
           description:
-            'Discover available Google APIs, methods, schemas, and deployment snippets. Start with describe({}), read the returned Workspace skill through MCP Resources, and follow returned paths to inspect each needed method before execute.',
+            'Discover available Google APIs, methods, schemas, snippets and helper capabilities. Start with describe({}), read the returned Workspace skill through MCP Resources, and follow returned paths to inspect each needed method before execute.',
           inputSchema: fromJsonSchema<{ path?: string }>(
             {
               type: 'object',
@@ -242,7 +252,7 @@ export async function handleMcp(request: Request, app: ProtocolApp): Promise<Res
                 path: {
                   type: 'string',
                   description:
-                    'Omit to list services. Follow returned paths to inspect versions, resources, methods, or schemas. Version paths use service/version; resource and method paths use service/version/resource.method.',
+                    'Omit to list services and helper capabilities. Follow returned paths to inspect versions, resources, methods, or schemas. Version paths use service/version; resource and method paths use service/version/resource.method.',
                 },
               },
               additionalProperties: false,

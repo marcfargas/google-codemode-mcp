@@ -43,6 +43,10 @@ eval-drive $proxy_url $output $cases='all' $selection='required':
 eval-media $proxy_url $output $cases='all' $selection='required':
     profile=media node tests/eval/act.mjs
 
+# Two artifact cases through local Miniflare R2, four $1 attempts.
+eval-artifacts $proxy_url $output $cases='all' $selection='required':
+    profile=artifacts node tests/eval/act.mjs
+
 # Prove isolated runner/file/MCP behavior with synthetic responses only.
 eval-preflight $output:
     profile=gmail proxy_url=http://127.0.0.1:1 selection=required preflight_only=true node tests/eval/act.mjs

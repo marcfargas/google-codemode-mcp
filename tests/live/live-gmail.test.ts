@@ -256,12 +256,13 @@ test('live Gmail through the built sessionless Worker', { timeout: 240_000 }, as
     });
 
     await stage(
-      'explicit native pagination visits only this run drafts without duplicates',
+      'bounded message pagination visits only this run drafts without duplicates',
       async () => {
         // Gmail rewrites draft Message-ID headers and drafts cannot have custom
         // labels. The unique subject survives create/update and isolates this run.
         const q = `subject:"${draftSubjectPrefix}"`;
         let indexed = false;
+        let expectedMessages: string[] = [];
         for (let attempt = 0; attempt < 6 && !indexed; attempt++) {
           if (attempt) await delay(1_000);
           const response = await native<DraftPage>('users.drafts.list', {
@@ -269,34 +270,33 @@ test('live Gmail through the built sessionless Worker', { timeout: 240_000 }, as
             q,
             maxResults: 5,
           });
+          expectedMessages = (response.data.drafts ?? []).map((draft) => draft.message.id);
           indexed =
             response.data.drafts?.length === 2 &&
             response.data.drafts.every((draft) => drafts.has(draft.id));
         }
         assert.equal(indexed, true);
-        const ids = new Set<string>();
-        let pageToken: string | undefined;
-        let pages = 0;
-        do {
-          const response = await native<DraftPage>('users.drafts.list', {
-            userId: 'me',
-            q,
-            maxResults: 1,
-            ...(pageToken ? { pageToken } : {}),
-          });
-          for (const draft of response.data.drafts ?? []) {
-            assert.equal(typeof draft.message.id, 'string');
-            assert.equal(typeof draft.message.threadId, 'string');
-            assert.ok(drafts.has(draft.id));
-            assert.ok(!ids.has(draft.id));
-            ids.add(draft.id);
-          }
-          pageToken = response.data.nextPageToken;
-          pages++;
-        } while (pageToken && pages < 6);
-        assert.equal(pageToken, undefined);
-        assert.equal(ids.size, 2);
-        assert.ok(pages >= 2);
+        const result = completed(
+          await execute<{
+            pages: Page[];
+            exhausted: boolean;
+            stoppedBy: string;
+            resumePageToken: string | null;
+          }>(
+            "return pagination.collect(google.gmail({version:'v1'}).users.messages.list,inputs,{maxPages:6,maxBytes:32000});",
+            { userId: 'me', q, maxResults: 1 },
+          ),
+        );
+        assert.equal(result.exhausted, true);
+        assert.equal(result.stoppedBy, 'end');
+        assert.equal(result.resumePageToken, null);
+        assert.ok(result.pages.length >= 2);
+        const ids = result.pages.flatMap((page) => {
+          pageShape(page);
+          return (page.messages ?? []).map((message) => message.id);
+        });
+        assert.deepEqual(ids.sort(), expectedMessages.sort());
+        assert.equal(new Set(ids).size, 2);
       },
     );
 

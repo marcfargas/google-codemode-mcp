@@ -7,75 +7,87 @@ import test from 'node:test';
 import { startEvalServer, TOKEN_SENTINEL } from '../eval/server.ts';
 import { gradeModel } from '../eval/run.ts';
 
-test('agent relay injects tokens only at the trusted boundary and fences unknown writes across executions', async () => {
-  const output = await mkdtemp(join(tmpdir(), 'eval-relay-'));
-  const requests: any[] = [];
-  const relay = await startEvalServer({
-    output,
-    model: 'synthetic-model',
-    accessToken: 'private-google-token',
-    redactSecrets: ['private-access-secret'],
-    proxyKey: 'private-proxy-key',
-    proxyUrl: 'http://127.0.0.1:1',
-    dispatch: async (request) => {
-      const rpc = (await request.json()) as any;
-      requests.push(rpc);
-      return Response.json({
-        jsonrpc: '2.0',
-        id: rpc.id,
-        result: {
-          structuredContent: {
-            hasUnknownOutcome: true,
-            outcomesComplete: true,
-            outcomes: [
-              { path: 'gmail/v1/users.messages.send', mutation: true, outcome: 'unknown' },
-            ],
-            logs: ['private-google-token', 'private-access-secret'],
-          },
-        },
-      });
-    },
-  });
-  try {
-    const invoke = (token: string) =>
-      fetch(relay.url + '/mcp', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'MCP-Protocol-Version': '2026-07-28',
-          'MCP-Method': 'tools/call',
-          'MCP-Name': 'execute',
-        },
-        body: JSON.stringify({
+for (const uncertainty of ['google', 'artifacts', 'missing-storage-ledger'])
+  test(`agent relay injects tokens at the trusted boundary and fences ${uncertainty} uncertainty`, async () => {
+    const output = await mkdtemp(join(tmpdir(), 'eval-relay-'));
+    const requests: any[] = [];
+    const relay = await startEvalServer({
+      output,
+      model: 'synthetic-model',
+      accessToken: 'private-google-token',
+      redactSecrets: ['private-access-secret'],
+      requireArtifactLedger: uncertainty !== 'google',
+      proxyKey: 'private-proxy-key',
+      proxyUrl: 'http://127.0.0.1:1',
+      dispatch: async (request) => {
+        const rpc = (await request.json()) as any;
+        requests.push(rpc);
+        return Response.json({
           jsonrpc: '2.0',
-          id: 1,
-          method: 'tools/call',
-          params: { name: 'execute', arguments: { accessToken: token, code: 'return {};' } },
-        }),
-      });
-    assert.equal((await invoke('wrong')).status, 400);
-    assert.equal(requests.length, 0);
-    const first = await invoke(TOKEN_SENTINEL);
-    assert.equal(first.status, 200);
-    assert.equal(requests[0].params.arguments.accessToken, 'private-google-token');
-    const actorResponse = await first.text();
-    assert.ok(!actorResponse.includes('private-google-token'));
-    assert.ok(!actorResponse.includes('private-access-secret'));
-    assert.equal(relay.hasUnknownMutation, true);
-    assert.equal((await invoke(TOKEN_SENTINEL)).status, 400);
-    assert.equal(requests.length, 1);
-    assert.ok(
-      !(await readFile(join(output, 'mcp.jsonl'), 'utf8')).includes('private-google-token'),
-    );
-    assert.ok(
-      !(await readFile(join(output, 'mcp.jsonl'), 'utf8')).includes('private-access-secret'),
-    );
-    assert.equal((await fetch(relay.url + '/mcp')).status, 405);
-  } finally {
-    await relay.close();
-    await rm(output, { recursive: true, force: true });
-  }
-});
+          id: rpc.id,
+          result: {
+            structuredContent: {
+              hasUnknownOutcome: uncertainty === 'google',
+              ...(uncertainty === 'artifacts'
+                ? {
+                    artifacts: {
+                      outcomesComplete: true,
+                      hasUnknownOutcome: true,
+                      outcomes: [{ operation: 'putJson', outcome: 'unknown' }],
+                    },
+                  }
+                : {}),
+              outcomesComplete: true,
+              outcomes:
+                uncertainty === 'google'
+                  ? [{ path: 'gmail/v1/users.messages.send', mutation: true, outcome: 'unknown' }]
+                  : [],
+              logs: ['private-google-token', 'private-access-secret'],
+            },
+          },
+        });
+      },
+    });
+    try {
+      const invoke = (token: string) =>
+        fetch(relay.url + '/mcp', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'MCP-Protocol-Version': '2026-07-28',
+            'MCP-Method': 'tools/call',
+            'MCP-Name': 'execute',
+          },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'tools/call',
+            params: { name: 'execute', arguments: { accessToken: token, code: 'return {};' } },
+          }),
+        });
+      assert.equal((await invoke('wrong')).status, 400);
+      assert.equal(requests.length, 0);
+      const first = await invoke(TOKEN_SENTINEL);
+      assert.equal(first.status, 200);
+      assert.equal(requests[0].params.arguments.accessToken, 'private-google-token');
+      const actorResponse = await first.text();
+      assert.ok(!actorResponse.includes('private-google-token'));
+      assert.ok(!actorResponse.includes('private-access-secret'));
+      assert.equal(relay.hasUnknownMutation, true);
+      assert.equal((await invoke(TOKEN_SENTINEL)).status, 400);
+      assert.equal(requests.length, 1);
+      assert.ok(
+        !(await readFile(join(output, 'mcp.jsonl'), 'utf8')).includes('private-google-token'),
+      );
+      assert.ok(
+        !(await readFile(join(output, 'mcp.jsonl'), 'utf8')).includes('private-access-secret'),
+      );
+      assert.equal((await fetch(relay.url + '/mcp')).status, 405);
+    } finally {
+      await relay.close();
+      await rm(output, { recursive: true, force: true });
+    }
+  });
 
 test('LLM relay forwards cache controls, preserves receipts and limits requests without provider credentials reaching the actor', async () => {
   const output = await mkdtemp(join(tmpdir(), 'eval-model-'));

@@ -2,6 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { appendFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { join } from 'node:path';
+import { requestText, responseText } from '../support/io.ts';
 import { codexRequestHashes, validateCodexInput, validateCodexOutput } from './codex.ts';
 
 const MAX_REQUESTS = 18;
@@ -27,37 +28,6 @@ export const RESPONSES_PRICING = Object.freeze({
     'gpt-6-luna': { input: 0.1, output: 0.5, cachedInput: 0.01 },
   }),
 });
-
-async function readBody(request: IncomingMessage) {
-  const chunks: Buffer[] = [];
-  let bytes = 0;
-  for await (const chunk of request) {
-    bytes += chunk.length;
-    if (bytes > MAX_INPUT_BYTES) throw new Error('Responses input exceeds evaluation limit');
-    chunks.push(Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks).toString('utf8');
-}
-
-async function responseText(response: Response) {
-  if (!response.body) return '';
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let bytes = 0;
-  try {
-    for (;;) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      bytes += chunk.value.length;
-      if (bytes > MAX_RESPONSE_BYTES) throw new Error('Responses output exceeds evaluation limit');
-      chunks.push(chunk.value);
-    }
-  } catch (error) {
-    await reader.cancel().catch(() => {});
-    throw error;
-  }
-  return Buffer.concat(chunks).toString('utf8');
-}
 
 function validateInput(payload: any, allowedToolNames: string[]) {
   if (payload.store !== false) throw new Error('Responses storage must be disabled');
@@ -177,7 +147,9 @@ export function createResponsesHandler(options: {
       if (stopped) throw new Error('Responses evaluation is closed');
       if (request.headers.authorization !== 'Bearer local-eval-relay')
         throw new Error('Invalid local Responses credential');
-      const payload = JSON.parse(await readBody(request));
+      const payload = JSON.parse(
+        await requestText(request, MAX_INPUT_BYTES, 'Responses input exceeds evaluation limit'),
+      );
       if (payload.model !== options.model)
         throw new Error('Unexpected requested model; fallback is disabled');
       if (options.nativeCodex) validateCodexInput(payload);
@@ -250,7 +222,13 @@ export function createResponsesHandler(options: {
           signal: AbortSignal.any([controller.signal, AbortSignal.timeout(90_000)]),
           redirect: 'error',
         });
-        const text = options.redact(await responseText(upstream));
+        const text = options.redact(
+          await responseText(
+            upstream,
+            MAX_RESPONSE_BYTES,
+            'Responses output exceeds evaluation limit',
+          ),
+        );
         record.status = upstream.status;
         record.responseSha256 = hash(text);
         const streaming =
