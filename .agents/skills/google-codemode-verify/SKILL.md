@@ -156,8 +156,16 @@ A stored artifact URI is a bearer capability, not stable user identity. Inspect
 separate trusted artifact outcomes/references after program/output errors. A
 pending write retains an unknown outcome and tentative URI; completion-aware
 cleanup is best effort. Request-context cleanup and access expiry do not establish
-physical R2 retention. Bucket lifecycle, hosted storage and native host downloadable-file presentation
-stay unqualified until separately exercised. Four local artifact agent cells passed
+physical R2 retention. Two no-model hosted storage controls passed on the retained
+610de00 product-backed candidate: full JSON/binary contents, later helper/resource
+reads, explicit deletion, independent R2 absence and empty returned REST inventory;
+JSON also survived same-bundle redeployment. See [hosted storage evidence](../../../tests/hosted/README.md#hosted-artifact-storage-2026-11-05)
+for exact digest/version identities, protected admission and the S3 TLS limitation.
+The bucket's one-day prefix lifecycle was configured/read back, not exercised.
+Physical lifecycle execution and native host downloadable-file presentation remain
+unqualified. After temporary R2 administration is removed, verify an R2-bound
+redeployment before claiming Worker Editor alone suffices; the earlier reduced-token
+proof covered storage-disabled deployment. Four local artifact agent cells passed
 at the captured b2a8cf3 slice; the later pagination runtime has independent no-model
 artifact regression controls, not a repeated artifact actor campaign. The four passing media cells qualify cf98b51; they do not silently
 qualify later artifact code or an R2-enabled hosted deployment. Avoid new paid
