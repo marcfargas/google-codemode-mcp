@@ -163,7 +163,15 @@ JSON also survived same-bundle redeployment. See [hosted storage evidence](../..
 for exact digest/version identities, protected admission and the S3 TLS limitation.
 The bucket's one-day prefix lifecycle was configured/read back, not exercised.
 Physical lifecycle execution and native host downloadable-file presentation remain
-unqualified. R2-bound same-bundle redeployment and a small cross-request storage
+unqualified. An installed Claude Code 2.1.318 no-model probe saved two resource
+blob fragments totalling 98304 bytes; independent concatenation matched the
+manifest hash. Its native resource tool omitted chunk metadata. This qualifies
+fragment persistence only, not agent-driven assembly or file presentation.
+For another host, inspect actual native resource results: base64 preserved in
+model-visible text is not a saved file. Keep synthetic model responses distinct
+from paid agent feasibility and retain the source/bundle and host versions.
+Navigation through a gateway is a separate seam; sandbox helpers need the raw
+manifest capability even when resource links are namespaced. R2-bound same-bundle redeployment and a small cross-request storage
 smoke passed after the owner removed R2 permissions: native binding/version
 readback, protected admission, native Google read-admitted put, later helper/resource
 reads, delete and unavailable resource. R2 listing was denied. This qualifies the

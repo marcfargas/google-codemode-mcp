@@ -133,7 +133,12 @@ Artifact URIs are random bearer capabilities: possession grants access and shari
 delegates it. They are not bound to a stable user or Google token. Base URIs read as
 small manifests, with bounded byte-chunk resource URIs for exact reassembly/hash
 verification. Trusted stored references appear as MCP resource links. Keep full
-URIs private; host retrieval does not prove a downloadable host file.
+URIs private; host retrieval does not prove a downloadable host file. Claude Code
+2.1.318 saved two binary resource chunks whose combined bytes/hash matched a
+98,304-byte artifact in a deterministic local probe. It omitted chunk metadata;
+use the manifest and byte offsets as described in the artifact guide. This proves
+native fragment persistence, with no model or real Google calls, rather than
+whole-file assembly or downloadable-file presentation.
 
 Access expires after one hour; physical R2 deletion requires a separately configured
 bucket lifecycle. Explicit delete, logical expiry and eventual physical cleanup are
