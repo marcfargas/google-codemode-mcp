@@ -33,6 +33,7 @@ readiness at the failed boundary and restart only trial-owned state when warrant
 | Fast host feedback / unavailable compatible Docker runner | `just verify`                                                     | Same `tests/run.mjs check` steps on this host; no claim of `act` compatibility                                    |
 | Runner/MCP/file plumbing                                  | `just eval-preflight /absolute/new/evidence`                      | Both isolated runners with synthetic responses; no model, OAuth, or Google calls                                  |
 | Saved trial grading                                       | `just eval-regrade /absolute/saved/trial-1 /absolute/new/regrade` | Offline current grader against retained evidence, preserving original results                                     |
+| Saved run reporting                                       | `just eval-report /absolute/saved/evidence /absolute/new/report`  | Offline recorded gates and token/cache/cost summary; no inference, OAuth, cleanup or regrading                    |
 | Real Gmail behavior                                       | `just live`                                                       | Manual credentialed Gmail workflow through locally built Worker                                                   |
 | Real Drive behavior                                       | `just live-drive`                                                 | Manual credentialed Drive download/rename, conditional-option refusal and pagination through locally built Worker |
 | Agent feasibility                                         | `just eval-matrix gmail PROXY_URL /absolute/new/evidence`         | Manual paid Sonnet/Sol required pair, one fresh attempt each                                                      |
@@ -95,6 +96,11 @@ seven days. Copy needed receipts to retained evidence before another build/run.
 Record actual SHA/diff separately; don't infer identity from a requested SHA field.
 Agent directories retain candidate-source manifests, per-trial audit/model/files/
 readback/results, campaign reports, and cleanup. Preserve them after teardown.
+Use the workflow's `workflow-report/summary.md` and `summary.json` for the paid-run
+handback, checking their recorded gates against authoritative results. For older
+or interrupted evidence, generate a separate report with `just eval-report`.
+Reporting and offline regrading are distinct operations; neither makes a fresh
+actor attempt. A failed report step is a reporting gap, never a passing gate.
 
 An acknowledged write remains acknowledged if a later assertion/evidence write
 fails; a missing/unknown outer response can conceal effects. Inspect the ledger,

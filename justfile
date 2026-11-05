@@ -51,6 +51,10 @@ eval-native-preflight $output:
 eval-regrade $saved $output:
     node tests/eval/regrade.ts "$saved" "$output"
 
+# Generate metrics and Markdown from saved evidence without inference or regrading.
+eval-report $saved $output:
+    node tests/eval/report.ts "$saved" "$output"
+
 # Retain a private hosted-verification bundle; no authentication or deployment.
 hosted-prepare output:
     node tests/hosted/prepare.ts {{quote(output)}}

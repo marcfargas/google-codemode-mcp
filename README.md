@@ -492,6 +492,15 @@ and infrastructure failures stop the campaign. Claude uses native CLI 2.1.318;
 GPT uses an isolated Responses tool loop, which does not qualify the ChatGPT host.
 Single-model runs remain available through `just eval`.
 
+After evaluation, including failures, the workflow generates
+`workflow-report/summary.md` and `summary.json` in the evidence directory, with
+gates, unattempted cells, cleanup, and model-separated token/cache/cost metrics.
+It also appends the report to the workflow step summary. Missing measurements
+stay unknown and estimates remain separate from billing. Regenerate offline with
+`just eval-report SAVED_EVIDENCE NEW_REPORT_DIRECTORY`; this makes no Google or
+model calls and preserves original grades. See the
+[report contract](tests/eval/README.md#generated-run-reports).
+
 The Gmail case requires discovery, retrieval of the server's `skill://` resource,
 reading and replying to an email, applying a label, and saving its attachment.
 Independent Google readback and exact file bytes determine success. The actor

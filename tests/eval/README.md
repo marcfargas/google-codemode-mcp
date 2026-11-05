@@ -142,6 +142,35 @@ commands above with the local CLIProxyAPI; no proxy or model credentials need
 publishing to GitHub. Local evidence stays in the selected external directory.
 Ordinary push and PR checks never invoke models.
 
+### Generated run reports
+
+The workflow always runs an offline summarizer after evaluation, including score
+and infrastructure failures. It writes `workflow-report/summary.json` and
+`workflow-report/summary.md` beneath the evidence directory and appends the
+Markdown to the GitHub step summary when available. The report contains recorded
+gates, failed criterion IDs, declared and unattempted cells, source/backend
+identities, cleanup and mutation certainty, and per-attempt/model token, cache,
+request and separately labeled cost metrics. Missing telemetry stays unknown;
+partial totals show their measured coverage. Estimates are not provider billing.
+`sourceReceiptSha256` fingerprints the exact per-cell `source.json` receipt,
+including its harness file hashes; it is not a code-only bundle digest.
+
+Regenerate a report from retained evidence without OAuth, inference or regrading:
+
+```sh
+just eval-report /absolute/saved/evidence /absolute/new/report-directory
+```
+
+The output directory must be new. Source evidence and original grades are
+preserved. The report uses allowlisted fields and excludes prompts, account/file
+identifiers, raw requests and private error text; raw evidence remains private.
+Reporting success never changes the evaluation gate. A report-generation error
+fails its own workflow step and leaves the original failure in place.
+
+`just eval-preflight NEW_OUTPUT` exercises this same reporting step using an
+explicitly synthetic campaign with one failed and one passing cell. Its report
+does not describe real model attempts or Google activity.
+
 There are no performer retries, fallbacks, judge votes, or automatic optimization.
 A single-model invocation may request a second fresh trial as an explicit cache
 probe; matrices use one attempt per cell. Neither is statistical reliability proof.

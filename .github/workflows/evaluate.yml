@@ -100,6 +100,12 @@ jobs:
       - name: Run isolated native agent and independent outcome checks
         if: inputs.preflight_only != true
         run: sudo -E "$(command -v node)" --experimental-strip-types tests/eval/campaign.ts
+      - name: Prepare synthetic failed-campaign report evidence without inference
+        if: inputs.preflight_only == true
+        run: sudo -E "$(command -v node)" --experimental-strip-types tests/eval/report-preflight.ts
+      - name: Summarize retained gates, tokens, cache and cost even on failure
+        if: always() && env.ACT == 'true'
+        run: sudo -E "$(command -v node)" --experimental-strip-types tests/eval/report.ts "$EVAL_OUTPUT" "$EVAL_OUTPUT/workflow-report" --step-summary
       - name: Retain private evidence even on failure
         if: always() && !env.ACT && inputs.preflight_only != true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

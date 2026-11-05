@@ -19,6 +19,8 @@ model task alone does not pass the mechanism or cleanup criteria.
    `candidate-source.json` and retained source bytes; then each cell's
    `source.json` backend, case/version, runner/version, grading/accounting
    versions and source hashes. A requested SHA or a prior pass is insufficient.
+   The report's `sourceReceiptSha256` identifies the exact source receipt;
+   compare its retained file hashes to resolve dirty harness identity.
    Hosted acceptance also needs the actual protected deployment/version identity.
 3. Run affected deterministic checks and `just eval-preflight NEW_ABSOLUTE_OUTPUT`
    before spending when runner/MCP/file behavior changed. This preflight exercises
@@ -56,6 +58,24 @@ unknown-effect or cleanup failures and retains later cells as unattempted.
 
 ## Inspect acceptance and retained evidence
 
+Start with the workflow-generated `workflow-report/summary.md` and `summary.json`.
+The workflow runs the deterministic report step even after an evaluation failure
+and appends its Markdown to `GITHUB_STEP_SUMMARY` when available. It reads saved
+evidence only. For an older run or interrupted report step, run:
+
+```sh
+just eval-report /absolute/saved/evidence /absolute/new/report-directory
+```
+
+The new directory must not exist; never overwrite existing evidence or reports.
+This command does not call Google or models, perform cleanup, or regrade anything.
+The JSON report retains metric coverage and unknown counts; the Markdown is the
+normal human handback. Neither report replaces authoritative gate results.
+Inspect any missing/malformed evidence and reporting failures explicitly rather
+than buying another attempt to recover metrics. Keep raw evidence private; the
+summary allowlists fields and omits account/file identifiers, prompts, raw
+payloads, private paths and freeform error/evidence text.
+
 Read `suite-results.json` and each case's `matrix-results.json`, not only the
 Markdown headline. Count case/model pairs: the suite's `unattempted` list names
 cases, while matrices also retain unattempted cells within an attempted case.
@@ -79,7 +99,12 @@ Never overwrite the source evidence or replace a failed trial with a later pass.
 ## Report tokens, cache and cost
 
 Every paid-run handback includes metrics beside the gate result, both per
-case/model attempt and aggregated for the selected campaign. Read the maintained
+case/model attempt and aggregated for the selected campaign. Use the generated
+report rather than manually reconstructing totals. Check its coverage before
+quoting a complete total, and retain report-generation failures alongside the
+original gate. `just eval-preflight` exercises the workflow's report step with an
+explicitly synthetic failed/passing campaign; it is no evidence of paid model or
+Google acceptance. Read the maintained
 [actor summaries](../../../../tests/eval/actor.ts),
 [Responses summaries](../../../../tests/eval/responses.ts) and
 [Responses accounting](../../../../tests/eval/responses-relay.ts) if telemetry
