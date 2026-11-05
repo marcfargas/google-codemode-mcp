@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { MATRIX, getCellByModel, selectCells } from './matrix.ts';
 import { GMAIL_CASES, getGmailCase, selectGmailCases } from './cases.ts';
 import { DRIVE_CASES, getDriveCase, selectDriveCases } from './drive.ts';
+import { MEDIA_CASES, getMediaCase, selectMediaCases } from './media.ts';
 
 export interface ReportDeclaration {
   profile?: string;
@@ -36,6 +37,7 @@ const caseIds = [
   'combined',
   ...GMAIL_CASES.map((item) => item.id),
   ...DRIVE_CASES.map((item) => item.id),
+  ...MEDIA_CASES.map((item) => item.id),
 ];
 const models = MATRIX.map((cell) => cell.model);
 const cellIds = [...MATRIX.map((cell) => cell.id), 'sol-native-codex'];
@@ -78,6 +80,15 @@ const criteria = new Set([
   'model_identity',
   'mutation_certainty',
   'native_execution',
+  'required_resource',
+  'media_mutation_ledger',
+  'media_created_identity',
+  'media_source_read',
+  'media_files_only',
+  'media_readback',
+  'media_source_preserved',
+  'media_transfer',
+  'media_answer',
 ]);
 interface Artifact {
   state: 'present' | 'missing' | 'malformed';
@@ -256,7 +267,7 @@ function cell(value: unknown) {
 }
 function declarationSource(declaration: ReportDeclaration) {
   try {
-    const profile = oneOf(declaration.profile, ['gmail', 'drive']);
+    const profile = oneOf(declaration.profile, ['gmail', 'drive', 'media']);
     const nativeProbe = declaration.runner === 'codex';
     if (
       !profile ||
@@ -280,11 +291,15 @@ function declarationSource(declaration: ReportDeclaration) {
     const cases = declaration.cases
       ? profile === 'gmail'
         ? selectGmailCases(declaration.cases)
-        : selectDriveCases(declaration.cases)
+        : profile === 'media'
+          ? selectMediaCases(declaration.cases)
+          : selectDriveCases(declaration.cases)
       : [
           profile === 'gmail'
             ? getGmailCase(declaration.caseId || (nativeProbe ? 'read-search' : 'combined'))
-            : getDriveCase(declaration.caseId || 'read-file'),
+            : profile === 'media'
+              ? getMediaCase(declaration.caseId || 'gmail-to-drive')
+              : getDriveCase(declaration.caseId || 'read-file'),
         ];
     const cells = nativeProbe
       ? [{ id: 'sol-native-codex', model: 'gpt-6.1-sol', runner: 'codex', role: 'probe' }]

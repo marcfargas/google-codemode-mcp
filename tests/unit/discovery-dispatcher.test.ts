@@ -276,7 +276,12 @@ test('oversized method descriptions keep complete execution guidance within the 
     described.signature,
     'users.messages.send(params): Promise<{ data, status, headers }>',
   );
-  assert.deepEqual(described.runtime, { json: true, mediaUpload: false, mediaDownload: false });
+  assert.deepEqual(described.runtime, {
+    json: true,
+    maxParameterBytes: 2097152,
+    mediaUpload: false,
+    mediaDownload: false,
+  });
   assert.match(described.next as string, /describe every distinct Google method/);
   for (const indentation of [undefined, 2]) {
     const text = JSON.stringify(described, null, indentation);

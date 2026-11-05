@@ -183,6 +183,7 @@ test('descriptions and generated declarations expose metadata and bounded byte s
     'media',
   ]);
   assert.deepEqual(described.runtime, {
+    maxParameterBytes: 2097152,
     json: true,
     mediaDownload: true,
     mediaUpload: false,

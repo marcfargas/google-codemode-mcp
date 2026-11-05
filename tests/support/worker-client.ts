@@ -101,6 +101,9 @@ export async function openBuiltWorker(options: BuiltWorkerOptions = {}) {
     throw new Error('Built Worker MCP connection failed; remote diagnostics suppressed');
   }
   return {
+    async resource(uri: string) {
+      return client.readResource({ uri });
+    },
     async tool<T>(name: string, args: Record<string, unknown>): Promise<T> {
       try {
         const response = await client.callTool({ name, arguments: args });

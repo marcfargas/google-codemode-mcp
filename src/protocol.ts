@@ -1,3 +1,4 @@
+import { MEDIA_TRANSFERS_GUIDE } from './knowledge.ts';
 import {
   createMcpHandler,
   fromJsonSchema,
@@ -77,8 +78,11 @@ Supported media methods declare \`runtime.mediaDownload\`, \`mediaSelection\`, a
 \`maxDownloadBytes\`: \`files.get\` accepts \`alt: 'media'\`, while \`files.export\` returns
 bytes directly. Media \`.data\` is \`{encoding: 'base64', data, size, mimeType, sha256}\`;
 \`data\` contains standard base64. Decode it in the host when saving a file and verify
-its byte length/hash. Downloads are limited to 131072 raw bytes. Media uploads,
-transport overrides and durable artifacts remain unavailable. Google acknowledgement of a send does not establish recipient delivery.
+its byte length/hash. Downloads are limited to 131072 raw bytes. Bounded Drive files.create multipart
+uploads accept native media:{mimeType,body:<byte envelope>}; other upload modes,
+transport overrides and durable artifacts remain unavailable. Before composing
+Gmail/Drive transfers, read [media transfers](skill://google-codemode-mcp/google-workspace/references/media-transfers.md)
+through MCP Resources for encoding, composeMime, scopes, examples and limits. Google acknowledgement of a send does not establish recipient delivery.
 
 Drive v3 \`files.update\` has no conditional-update parameter in Discovery revision 20261102. \`File.version\` is output-only, not a compare-and-swap input. Conditional
 headers such as \`If-Match\` and second-argument SDK options are refused before
@@ -156,7 +160,10 @@ export async function handleMcp(request: Request, app: ProtocolApp): Promise<Res
 
   const validator = new CfWorkerJsonSchemaValidator();
   const skills = await SkillsExtension.load(
-    memorySkillFiles({ 'google-workspace/SKILL.md': WORKSPACE_SKILL }),
+    memorySkillFiles({
+      'google-workspace/SKILL.md': WORKSPACE_SKILL,
+      'google-workspace/references/media-transfers.md': MEDIA_TRANSFERS_GUIDE,
+    }),
     { prefix: 'google-codemode-mcp', strict: true },
   );
   const handler = createMcpHandler(

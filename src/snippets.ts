@@ -1,6 +1,7 @@
 import { Validator } from '@cfworker/json-schema';
 import type { Schema } from '@cfworker/json-schema';
 import { SERVICES } from './services.ts';
+import { composeMimeSnippet } from './mime.ts';
 
 export interface SnippetDefinition {
   name: string;
@@ -26,7 +27,7 @@ export function validateSnippets(definitions: readonly SnippetDefinition[]) {
     if (!snippet.description || !snippet.code || snippet.code.length > 64_000) {
       throw new Error(`Invalid snippet definition: ${snippet.name}`);
     }
-    if (!snippet.services.length || snippet.services.some((s) => !Object.hasOwn(SERVICES, s))) {
+    if (snippet.services.some((s) => !Object.hasOwn(SERVICES, s))) {
       throw new Error(`Unsupported snippet service: ${snippet.name}`);
     }
     if (snippet.scopes.some((s) => !s.startsWith('https://www.googleapis.com/auth/'))) {
@@ -82,4 +83,5 @@ export const bundledSnippets: readonly SnippetDefinition[] = [
     readOnly: true,
     tool: { name: 'gmail_inbox' },
   },
+  composeMimeSnippet,
 ];

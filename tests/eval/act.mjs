@@ -137,11 +137,15 @@ async function main() {
       const { selectDriveCases } = await import('./drive.ts');
       selectDriveCases(cases);
     }
+    if (profile === 'media') {
+      const { selectMediaCases } = await import('./media.ts');
+      selectMediaCases(cases);
+    }
     if (!selection) throw new Error('Case suites require a model selection');
   }
-  if (!['gmail', 'drive'].includes(profile))
+  if (!['gmail', 'drive', 'media'].includes(profile))
     throw new Error(
-      'Coverage unavailable: Gmail and Drive implemented; Sheets, Docs, Calendar remain pending',
+      'Coverage unavailable: Gmail, Drive and media composition implemented; Sheets, Docs, Calendar remain pending',
     );
   if (!isAbsolute(output)) throw new Error('Output must be an absolute path outside the checkout');
   await mkdir(dirname(output), { recursive: true });

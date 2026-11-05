@@ -1,6 +1,6 @@
 ---
 name: google-codemode-verify
-description: Verify a Google Code Mode change with the maintained just and GitHub workflows; distinguish credential-free checks, synthetic runner proof, live Gmail/Drive, paid agent gates with token/cache/cost reporting, and unverified hosts or Cloudflare deployment.
+description: Verify a Google Code Mode change with the maintained just and GitHub workflows; distinguish credential-free checks, synthetic runner proof, live Gmail/Drive/media, paid agent gates with token/cache/cost reporting, and unverified hosts or Cloudflare deployment.
 ---
 
 # Verify a candidate
@@ -27,20 +27,22 @@ readiness at the failed boundary and restart only trial-owned state when warrant
 
 ## Select the smallest useful proof
 
-| Goal                                                      | Maintained command                                                | What it establishes                                                                                               |
-| --------------------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Ordinary change check                                     | `just check`                                                      | Check workflow in `act`: typecheck, Wrangler dry-run, credential-free tests, formatting                           |
-| Fast host feedback / unavailable compatible Docker runner | `just verify`                                                     | Same `tests/run.mjs check` steps on this host; no claim of `act` compatibility                                    |
-| Runner/MCP/file plumbing                                  | `just eval-preflight /absolute/new/evidence`                      | Both isolated runners with synthetic responses; no model, OAuth, or Google calls                                  |
-| Saved trial grading                                       | `just eval-regrade /absolute/saved/trial-1 /absolute/new/regrade` | Offline current grader against retained evidence, preserving original results                                     |
-| Saved run reporting                                       | `just eval-report /absolute/saved/evidence /absolute/new/report`  | Offline recorded gates and token/cache/cost summary; no inference, OAuth, cleanup or regrading                    |
-| Real Gmail behavior                                       | `just live`                                                       | Manual credentialed Gmail workflow through locally built Worker                                                   |
-| Real Drive behavior                                       | `just live-drive`                                                 | Manual credentialed Drive download/rename, conditional-option refusal and pagination through locally built Worker |
-| Agent feasibility                                         | `just eval-matrix gmail PROXY_URL /absolute/new/evidence`         | Manual paid Sonnet/Sol required pair, one fresh attempt each                                                      |
-| Independent Gmail cases                                   | `just eval-gmail PROXY_URL /absolute/new/evidence`                | Six cases, one fresh attempt per model/case, up to twelve $1 estimates                                            |
-| Independent Drive cases                                   | `just eval-drive PROXY_URL /absolute/new/evidence`                | Four cases after Drive consent, one fresh attempt per model/case, up to eight $1 estimates                        |
-| Prepare private hosted probes                             | `just hosted-prepare /absolute/new/prepared`                      | Exact source/bundle identity and private dry-run; no deployment                                                   |
-| Hosted runtime limits                                     | `just hosted-verify /absolute/new/evidence`                       | Selected deployed version via protected ingress; requires documented `HOSTED_*` inputs                            |
+| Goal                                                      | Maintained command                                                | What it establishes                                                                                                      |
+| --------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Ordinary change check                                     | `just check`                                                      | Check workflow in `act`: typecheck, Wrangler dry-run, credential-free tests, formatting                                  |
+| Fast host feedback / unavailable compatible Docker runner | `just verify`                                                     | Same `tests/run.mjs check` steps on this host; no claim of `act` compatibility                                           |
+| Runner/MCP/file plumbing                                  | `just eval-preflight /absolute/new/evidence`                      | Both isolated runners with synthetic responses; no model, OAuth, or Google calls                                         |
+| Saved trial grading                                       | `just eval-regrade /absolute/saved/trial-1 /absolute/new/regrade` | Offline current grader against retained evidence, preserving original results                                            |
+| Saved run reporting                                       | `just eval-report /absolute/saved/evidence /absolute/new/report`  | Offline recorded gates and token/cache/cost summary; no inference, OAuth, cleanup or regrading                           |
+| Real Gmail behavior                                       | `just live`                                                       | Manual credentialed Gmail workflow through locally built Worker                                                          |
+| Real Drive behavior                                       | `just live-drive`                                                 | Manual credentialed Drive download/rename, conditional-option refusal and pagination through locally built Worker        |
+| Real attachment composition                               | `just live-media`                                                 | Three built-Worker controls: Gmail to Drive, Drive blob/native export to Gmail draft, exact bytes/MIME and owned cleanup |
+| Agent media feasibility                                   | `just eval-media PROXY_URL /absolute/new/evidence all required`   | Two cases × Sonnet/Sol, ordered advanced-resource retrieval, independent readback and four $1 estimates                  |
+| Agent feasibility                                         | `just eval-matrix gmail PROXY_URL /absolute/new/evidence`         | Manual paid Sonnet/Sol required pair, one fresh attempt each                                                             |
+| Independent Gmail cases                                   | `just eval-gmail PROXY_URL /absolute/new/evidence`                | Six cases, one fresh attempt per model/case, up to twelve $1 estimates                                                   |
+| Independent Drive cases                                   | `just eval-drive PROXY_URL /absolute/new/evidence`                | Four cases after Drive consent, one fresh attempt per model/case, up to eight $1 estimates                               |
+| Prepare private hosted probes                             | `just hosted-prepare /absolute/new/prepared`                      | Exact source/bundle identity and private dry-run; no deployment                                                          |
+| Hosted runtime limits                                     | `just hosted-verify /absolute/new/evidence`                       | Selected deployed version via protected ingress; requires documented `HOSTED_*` inputs                                   |
 
 Maintained suites, helpers and local workflow launchers live under `tests/`;
 `.github/` contains GitHub workflows and repository-secret installation, with
@@ -96,7 +98,7 @@ Sheets, Docs, Calendar, target hosts, binary artifacts, or hosted Cloudflare CPU
 enforcement. Pending profiles fail before spending; don't silently substitute Gmail.
 
 Live receipts are written as `dist/live-gmail-receipt.json` or
-`dist/live-drive-receipt.json` inside the selected workflow;
+`dist/live-drive-receipt.json` or `dist/live-media-receipt.json` inside the selected workflow;
 local `act` retrieves artifacts under `dist/act-artifacts`, remote uploads last
 seven days. Copy needed receipts to retained evidence before another build/run.
 Record actual SHA/diff separately; don't infer identity from a requested SHA field.
@@ -125,3 +127,14 @@ Updating this verifier follows changed-interface evidence. Recheck affected
 commands, receipt fields, budgets, models and links against source; preserve
 unrelated qualification limits. No full audit or paid/live trial follows merely
 from authoring it.
+
+For media changes, run the maintained workerd integration before live controls:
+Node stream behavior alone misses SDK multipart footer differences. In live and
+paid receipts verify exact bytes/hash, MIME, transformed name, source preservation,
+complete native ledgers and created IDs. The advanced media resource must precede
+execution in paid cases. No send is necessary. Cleanup ownership comes only from
+fixture-created and trusted acknowledged create IDs. Markers, folder membership
+and answer.json IDs never authorize deletion. Inspect folder-child inventory and
+unreconciled writes before folder deletion; retained folders or unknown effects
+fail cleanup. Live controls cover native export; the paid reverse case uses a blob.
+Neither establishes durable artifacts or hosted media qualification.

@@ -80,8 +80,8 @@ it does not relabel those retained trials.
 
 The file case uses UTF-8 content because runner Write tools accept text; synthetic
 native-SDK tests separately verify arbitrary binary and JSON-MIME downloads.
-The media envelope remains bounded to 131072 raw bytes; uploads/artifact storage
-remain deferred. A historical four-case campaign produced six passes and two failures;
+The media envelope remains bounded to 131072 raw bytes. A separate media profile
+now covers bounded create uploads; durable artifact storage remains deferred. A historical four-case campaign produced six passes and two failures;
 the later conditional-v2 pair produced one pass and one failure. Those failed
 campaigns remain retained. A later current-candidate matrix passed all eight
 required cells. Hosted Drive and actual target-host acceptance remain separate.
@@ -672,8 +672,8 @@ This completes the bounded local Drive matrix as one-attempt-per-cell feasibilit
 not reliability or a single combined invocation. Earlier version-guard, runner and
 discovery failures remain unchanged. Hosted Drive, real target-host activation,
 shared-drive behavior, a real incompleteSearch response, conditional writes/CAS
-and Gmail/Drive composition are not established by this result. Media composition
-and advanced guidance remain the next slice.
+and Gmail/Drive composition are not established by this Drive result. The later
+[media campaign](#media-composition-results-2026-11-05) qualifies local composition separately.
 
 ## Native Codex capability probe
 
@@ -746,3 +746,73 @@ still rejecting unknown names, explicit other namespaces and collaboration calls
 The credential-free integration replays the captured opening before its synthetic
 MCP/file/refusal checks. The original live pilot remains failed; no paid retry
 was made, and native live task completion remains unqualified.
+
+### Gmail/Drive media composition gate
+
+`just eval-media PROXY_URL NEW_ABSOLUTE_OUTPUT all required` runs two independent
+cases, `gmail-to-drive` and `drive-to-gmail`, with Sonnet and Sol. The four cells
+each retain the existing 300-second, 18-request and $1 estimate caps, with no
+retry or fallback. Use `just live-media` first for deterministic forward, reverse
+blob and reverse Google-native export controls. Existing grants suffice.
+
+The actor must read the served advanced media-transfer resource before execution,
+discover every used native method before that execution, transform the attachment
+name, and write only answer.json. Random binary fixture bytes must match independent
+Google readback exactly. The reverse case creates a draft, never sends it. Native
+create IDs must be recorded in complete trusted ledgers; program output cannot
+authorize cleanup. Source content and metadata must remain unchanged. Unnamed MIME
+attachments count, so extra attachments fail. Association through a marker or
+folder is evidence, never ownership. Cleanup deletes only recorded owned IDs,
+checks every known folder for children before deletion, and retains unknown effects
+or incomplete inventories as failures. An acknowledged unexpected non-create
+mutation remains unreconciled and stops the campaign. Workflow reports provide
+per-attempt token, cache and cost metrics. The local results below qualify this bounded media slice; existing Drive
+results alone do not qualify media composition.
+
+### Media composition results (2026-11-05)
+
+One fresh required campaign passed all four cells on product bundle
+`79857ce86b7dd3e2098e09c0f37f50625a29663b7f15dfa148795c2c27db8915`:
+**68/68 criteria**, **34/34 complete model-identity receipts**, zero unknown
+effects and complete owned cleanup. Both models retrieved the root Workspace
+skill and advanced media-transfer resource before execution and described each
+used Google method before its execution. Gmail-to-Drive transformed the filename
+in JavaScript and uploaded the exact bytes to the chosen folder. Drive-to-Gmail
+used the deployment's pure composeMime snippet and created an unsent draft with
+one exact attachment. Independent Google readback checked bytes, SHA-256, MIME,
+name, destination and unchanged sources. Each cell was attempted once, with the
+existing 300-second/$1 estimate limits and no retry or fallback.
+
+| Case           | Required model / runner        | Criteria | Requests |  Input | Output | Cache read | Cache creation | Estimate USD                        |
+| -------------- | ------------------------------ | -------- | -------: | -----: | -----: | ---------: | -------------: | ----------------------------------- |
+| gmail-to-drive | Sonnet 5.5 / Claude 2.1.318    | 17/17    |        8 |     16 |   1765 |      79563 |          16071 | 0.0899223 native CLI                |
+| gmail-to-drive | GPT 6.1 Sol / responses-loop-3 | 17/17    |        9 | 110262 |    601 |      79616 |        unknown | 0.0752636 usage; 0.226534 committed |
+| drive-to-gmail | Sonnet 5.5 / Claude 2.1.318    | 17/17    |        7 |     14 |   1395 |      63831 |          17453 | 0.0901731 native CLI                |
+| drive-to-gmail | GPT 6.1 Sol / responses-loop-3 | 17/17    |       10 | 130553 |    520 |     102016 |        unknown | 0.0724756 usage; 0.266306 committed |
+
+Sonnet totals: 15 requests, 30 ordinary input, 3160 output, 143394 cache-read
+and 33524 cache-creation tokens; $0.1800954 native CLI estimate. Sol totals:
+19 requests, 240815 input **including** 181632 cached tokens, 1121 output
+(including zero reported reasoning), $0.1477392 cache-aware published-rate usage
+estimate and $0.49284 conservative commitment. GPT cache creation and actual
+provider/proxy billing remain unknown. The two input bases are different;
+these are observed cache counters, not a controlled cache-savings comparison.
+System/tools prefix hashes were stable for all four attempts. The maintained
+workflow generated the report directly from retained evidence.
+
+Before inference, the maintained synthetic runner preflight passed without
+Google/model calls. The three built-Worker live controls passed 24/24 criteria:
+Gmail attachment to Drive, Drive blob to Gmail draft, and native-document export
+to Gmail draft. Their cleanup completed without unknown mutations. The corrected
+candidate's local act Check passed 279 tests with 3 skips, plus typecheck, bundle
+and formatting. Actual workerd tests cover all byte values, the 128 KiB bound,
+zero-byte uploads and MIME composition; Node-only tests would have missed the
+SDK's absent multipart footer under workerd's stream polyfill.
+
+Raw evidence remains private in the retained media-composition campaign, including
+candidate source manifests, live receipts, audit/model/readback/cleanup records and
+workflow-generated report. Results documentation was appended after the frozen
+source trial. Earlier Drive failures remain unchanged. This is bounded local
+one-attempt feasibility; durable artifacts, hosted media and Claude/ChatGPT/OpenClaw
+host activation are still unqualified. Issue #11 remains open for its artifact
+lifecycle and host-facing delivery work.

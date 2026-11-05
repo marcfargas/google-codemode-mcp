@@ -19,6 +19,10 @@ live:
 live-drive:
     node tests/act.mjs live-drive
 
+# Verify exact Gmail/Drive byte composition and native exports.
+live-media:
+    node tests/act.mjs live-media
+
 # One on-demand agent case; an optional second trial observes caching.
 eval $profile $model $proxy_url $output $repeats='1':
     node tests/eval/act.mjs
@@ -34,6 +38,10 @@ eval-gmail $proxy_url $output $cases='all' $selection='required':
 # Four independent Drive cases after just oauth --drive.
 eval-drive $proxy_url $output $cases='all' $selection='required':
     profile=drive node tests/eval/act.mjs
+
+# Two Gmail/Drive composition cases, one attempt per selected model/case.
+eval-media $proxy_url $output $cases='all' $selection='required':
+    profile=media node tests/eval/act.mjs
 
 # Prove isolated runner/file/MCP behavior with synthetic responses only.
 eval-preflight $output:

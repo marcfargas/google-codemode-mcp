@@ -10,6 +10,7 @@ import { gradeMechanisms, GRADING_VERSION } from './mechanisms.ts';
 import { getGmailCase } from './cases.ts';
 import { getDriveCase, gradeDrive, type DriveExpected, type DriveObservation } from './drive.ts';
 import type { McpEvent } from './server.ts';
+import { getMediaCase, gradeMedia, type MediaExpected, type MediaObservation } from './media.ts';
 
 type RecordValue = Record<string, any>;
 const hash = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -17,8 +18,8 @@ const json = (file: string, value: unknown) =>
   writeFile(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
 
 export function gradeSavedEvidence(evidence: {
-  expected: GmailExpected | DriveExpected | null;
-  observation: GmailObservation | DriveObservation | null;
+  expected: GmailExpected | DriveExpected | MediaExpected | null;
+  observation: GmailObservation | DriveObservation | MediaObservation | null;
   files: Record<string, string> | null;
   actor: RecordValue | null;
   audit: McpEvent[];
@@ -33,7 +34,11 @@ export function gradeSavedEvidence(evidence: {
   let currentCaseVersion: number | null = null;
   try {
     currentCaseVersion = (
-      source?.profile === 'drive' ? getDriveCase(expected?.caseId) : getGmailCase(expected?.caseId)
+      source?.profile === 'media'
+        ? getMediaCase(expected?.caseId)
+        : source?.profile === 'drive'
+          ? getDriveCase(expected?.caseId)
+          : getGmailCase(expected?.caseId)
     ).version;
   } catch {
     evidence.evidenceErrors.push('Unknown retained case identity');
@@ -79,15 +84,22 @@ export function gradeSavedEvidence(evidence: {
   };
   const task = safeGrade('task_evidence', () =>
     expected
-      ? 'fileId' in expected
-        ? gradeDrive(
-            expected,
-            observation as DriveObservation | null,
-            files ?? {},
-            retainedAudit,
-            evidence.outbound,
-          )
-        : gradeGmail(expected, observation as GmailObservation | null, files ?? {}, retainedAudit)
+      ? 'profile' in expected && expected.profile === 'media'
+        ? gradeMedia(expected, observation as MediaObservation | null, files ?? {}, retainedAudit)
+        : 'fileId' in expected
+          ? gradeDrive(
+              expected,
+              observation as DriveObservation | null,
+              files ?? {},
+              retainedAudit,
+              evidence.outbound,
+            )
+          : gradeGmail(
+              expected as GmailExpected,
+              observation as GmailObservation | null,
+              files ?? {},
+              retainedAudit,
+            )
       : [
           {
             id: 'task_evidence',
@@ -134,9 +146,11 @@ export function gradeSavedEvidence(evidence: {
     ...safeGrade('mechanism_evidence', () => {
       const criteria = gradeMechanisms(
         retainedAudit,
-        (source?.profile === 'drive'
-          ? getDriveCase(expected?.caseId)
-          : getGmailCase(expected?.caseId)
+        (source?.profile === 'media'
+          ? getMediaCase(expected?.caseId)
+          : source?.profile === 'drive'
+            ? getDriveCase(expected?.caseId)
+            : getGmailCase(expected?.caseId)
         ).policy,
       );
       return attempts === null
@@ -278,6 +292,7 @@ export async function regradeTrial(saved: string, output: string) {
     'mechanisms.ts',
     'gmail.ts',
     'drive.ts',
+    'media.ts',
     'cases.ts',
     'run.ts',
     'actor.ts',

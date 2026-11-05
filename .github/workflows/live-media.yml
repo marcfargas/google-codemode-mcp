@@ -1,0 +1,35 @@
+name: Live media
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: live-gmail-test-account
+  cancel-in-progress: false
+jobs:
+  live-media:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Verify Gmail and Drive composition through the built Worker
+        run: node tests/run.mjs live-media
+        env:
+          GOOGLE_TEST_USER: ${{ secrets.GOOGLE_TEST_USER }}
+          GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.GOOGLE_OAUTH_CLIENT_JSON }}
+          GOOGLE_TEST_REFRESH_TOKEN: ${{ secrets.GOOGLE_TEST_REFRESH_TOKEN }}
+          WRANGLER_SEND_METRICS: 'false'
+      - name: Retain owned fixture reconciliation receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: live-media-receipt-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/live-media-receipt.json
+          if-no-files-found: ignore
+          retention-days: 7

@@ -22,6 +22,14 @@ import {
   type DriveObservation,
 } from './drive.ts';
 import type { GmailExpected, GmailObservation } from './gmail.ts';
+import {
+  getMediaCase,
+  prepareMediaFixture,
+  gradeMedia,
+  type MediaExpected,
+  type MediaObservation,
+  type MediaFixture,
+} from './media.ts';
 import type { McpEvent } from './server.ts';
 
 const required = (name: string) => {
@@ -41,6 +49,10 @@ const profiles = {
     status: 'implemented',
     task: 'Find and read a run-owned fixture file; save its bytes locally.',
   },
+  media: {
+    status: 'implemented',
+    task: 'Compose Gmail attachments and Drive files with exact bytes and an unsent Gmail draft.',
+  },
   sheets: {
     status: 'unsupported',
     task: 'Read a fixture value and update one designated cell; preserve surrounding cells.',
@@ -56,15 +68,17 @@ const profiles = {
 };
 
 function gradeTask(
-  expected: GmailExpected | DriveExpected,
-  observation: GmailObservation | DriveObservation | null,
+  expected: GmailExpected | DriveExpected | MediaExpected,
+  observation: GmailObservation | DriveObservation | MediaObservation | null,
   files: Record<string, string>,
   audit: McpEvent[],
   outbound?: unknown,
 ) {
-  return 'fileId' in expected
-    ? gradeDrive(expected, observation as DriveObservation | null, files, audit, outbound)
-    : gradeGmail(expected, observation as GmailObservation | null, files, audit);
+  return 'profile' in expected && expected.profile === 'media'
+    ? gradeMedia(expected, observation as MediaObservation | null, files, audit)
+    : 'fileId' in expected
+      ? gradeDrive(expected, observation as DriveObservation | null, files, audit, outbound)
+      : gradeGmail(expected as GmailExpected, observation as GmailObservation | null, files, audit);
 }
 
 export function gradeModel(model: string, receipts: any[]) {
@@ -112,7 +126,7 @@ export async function runCell(configuration?: {
   await mkdir(output, { recursive: true, mode: 0o700 });
   await chmod(output, 0o700);
   await json(join(output, 'coverage.json'), profiles);
-  if (!['gmail', 'drive'].includes(profile))
+  if (!['gmail', 'drive', 'media'].includes(profile))
     throw new Error(`Coverage unavailable for ${profile}; no model call made`);
   const selectedCase =
     profile === 'gmail'
@@ -121,7 +135,9 @@ export async function runCell(configuration?: {
             process.env.EVAL_CASE ??
             (nativeProbe ? 'read-search' : 'combined'),
         )
-      : getDriveCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'read-file');
+      : profile === 'media'
+        ? getMediaCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'gmail-to-drive')
+        : getDriveCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'read-file');
   const captureOutbound =
     profile === 'drive' && selectedCase.id === 'conditional-update-unsupported';
   if (captureOutbound && process.env.EVAL_BACKEND === 'hosted')
@@ -155,9 +171,10 @@ export async function runCell(configuration?: {
     if (!accessToken) throw new Error();
     const info = await oauth.getTokenInfo(accessToken);
     if (
-      !info.scopes.includes(
-        `https://www.googleapis.com/auth/${profile === 'gmail' ? 'gmail.modify' : 'drive.file'}`,
-      )
+      (profile === 'media'
+        ? ['gmail.modify', 'drive.file']
+        : [profile === 'gmail' ? 'gmail.modify' : 'drive.file']
+      ).some((scope) => !info.scopes.includes('https://www.googleapis.com/auth/' + scope))
     )
       throw new Error();
   } catch {
@@ -191,6 +208,8 @@ export async function runCell(configuration?: {
             'tests/eval/mechanisms.ts',
             'tests/eval/cases.ts',
             'tests/eval/drive.ts',
+            'tests/eval/media.ts',
+            'skills/google-workspace/references/media-transfers.md',
             'skills/google-workspace/SKILL.md',
             'package-lock.json',
           ].map(async (file) => [file, sha256(await readFile(file))]),
@@ -241,7 +260,8 @@ export async function runCell(configuration?: {
         criteria: [],
       };
       results.push(result);
-      let fixture: GmailFixture | Awaited<ReturnType<typeof prepareDriveFixture>> | undefined;
+      let fixture:
+        GmailFixture | Awaited<ReturnType<typeof prepareDriveFixture>> | MediaFixture | undefined;
       let relay: Awaited<ReturnType<typeof startEvalServer>> | undefined;
       let observed = false;
       let outbound: unknown;
@@ -257,7 +277,9 @@ export async function runCell(configuration?: {
                 ...fixtureOptions,
                 caseId: getGmailCase(selectedCase.id).id,
               })
-            : await prepareDriveFixture({ ...fixtureOptions, caseId: selectedCase.id });
+            : profile === 'media'
+              ? await prepareMediaFixture({ ...fixtureOptions, caseId: selectedCase.id })
+              : await prepareDriveFixture({ ...fixtureOptions, caseId: selectedCase.id });
         await json(join(trial, 'expected.json'), fixture.expected);
         relay = await startEvalServer({
           accessToken,
@@ -288,7 +310,10 @@ export async function runCell(configuration?: {
           result.infrastructureAbort = true;
           throw new Error('Independent outbound coverage incomplete; no later actor may start');
         }
-        const observation = await fixture.observe();
+        const observation =
+          profile === 'media'
+            ? await (fixture as MediaFixture).observe(actor.files, relay.audit)
+            : await fixture.observe();
         await json(join(trial, 'observation.json'), observation);
         observed = true;
         await json(join(trial, 'files.json'), actor.files);
@@ -369,7 +394,12 @@ export async function runCell(configuration?: {
         if (fixture) {
           if (!observed) {
             try {
-              await json(join(trial, 'observation.json'), await fixture.observe());
+              await json(
+                join(trial, 'observation.json'),
+                profile === 'media'
+                  ? await (fixture as MediaFixture).observe(undefined, relay?.audit)
+                  : await fixture.observe(),
+              );
             } catch {
               result.observationError = true;
             }
@@ -405,7 +435,7 @@ export async function runCell(configuration?: {
         ? 'Optional native Codex CLI capability probe with a broader tool surface. This does not replace or qualify the required Sol Responses matrix performer.'
         : `Runner: ${runner}.`,
       '',
-      'Gmail and Drive have implemented profiles. Sheets, Docs, and Calendar remain pending.',
+      'Gmail, Drive and their media-composition profiles are implemented. Sheets, Docs, and Calendar remain pending.',
       '',
       ...results.flatMap((result) => [
         `## Trial ${result.repetition}: ${result.status}`,

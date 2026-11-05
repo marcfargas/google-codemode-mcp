@@ -246,7 +246,7 @@ parameters at its boundary. Credential arguments, SDK transport options, arbitra
 headers/URLs, callbacks, streams, and unsupported media overrides are rejected.
 Sandbox networking is denied by workerd. JSON requests/responses include Gmail
 base64url message/attachment fields. Drive media reads use the bounded channel
-below. Media uploads and durable artifacts remain unavailable. Scope availability for opaque tokens is
+below. Bounded Drive create uploads are described below; durable artifacts remain unavailable. Scope availability for opaque tokens is
 `unknown`; Discovery scopes describe alternatives and do not grant access.
 
 ### Drive metadata and bounded files
@@ -279,6 +279,39 @@ Downloads are limited to **131072 raw bytes** and the execution's overall output
 limit still applies. Metadata reads retain Google's normal JSON `.data` shape.
 The host decodes the bytes when saving a file; this Worker has no durable artifact
 store. Gmail attachments continue to use Google's native base64url JSON fields.
+
+### Compose Gmail and Drive attachments
+
+Read `skill://google-codemode-mcp/google-workspace/references/media-transfers.md`
+for executable transfers and discover the native methods before execution.
+`drive.files.create` accepts native `requestBody` metadata plus
+`media: {mimeType, body: {encoding, data, size?, sha256?, mimeType?}}`.
+The body accepts canonical base64 or base64url and checks optional integrity
+assertions. Pass Gmail attachment bodies directly, transform names in JavaScript,
+and set native `parents` to choose a Drive folder. Downloads can be forwarded in
+the same way without a host-side intermediate file.
+
+Uploads allow 131072 decoded bytes per file, 1048576 per execution, 65536 bytes
+of metadata and 262144 multipart wire bytes. Every native call has a 2097152-byte
+serialized parameter limit. Existing call, output, time and download caps apply.
+Media-only, update-media, conversion and resumable uploads remain unsupported.
+The trusted host verifies the SDK multipart body and restores a missing closing
+boundary caused by workerd's stream polyfill; other wire differences are refused.
+
+For the reverse direction, describe the pure `composeMime` snippet and pass Drive
+byte envelopes as attachments. It returns Gmail base64url `raw` for a native
+`users.drafts.create` call. It handles nested MIME encoding and Unicode filenames;
+it makes no Google calls and is not exposed as another tool. See the advanced
+reference for its input limits. Draft verification does not require sending mail.
+
+`just live-media` runs three deterministic real-account controls: Gmail to Drive,
+Drive blob to Gmail draft and native-document export to Gmail draft. The manual
+paid gate is `just eval-media PROXY_URL NEW_ABSOLUTE_OUTPUT all required`: two
+cases × Sonnet/Sol, one attempt each, at most four $1 estimates. Both use the
+existing Gmail/Drive grant. Cleanup deletes only fixture-created and trusted
+acknowledged create IDs, preserves uncertain folders and reports associated
+unowned objects instead of deleting them. Neither command qualifies durable
+artifacts, hosted media or host activation.
 
 `just oauth --drive` requests `gmail.modify` and `drive.file` for the dedicated
 test user. The latter covers files created by this OAuth client; it does not grant
@@ -424,7 +457,12 @@ Earlier version-guard and discovery failures remain retained. Hosted conditional
 attempts stop before inference because independent recording is local. This is
 one-attempt-per-cell feasibility, with hosted Drive and target-host activation
 still unqualified. See [results and token/cache/cost metrics](tests/eval/README.md#current-candidate-drive-completion-2026-11-05).
-Gmail/Drive media composition and advanced guidance are next.
+Gmail/Drive media composition now passes all four local Sonnet/Sol cells, with
+68/68 criteria and complete fixture cleanup. Three independent live controls
+also pass, including native-document export. Agents retrieved the advanced skill
+resource and discovered every used method before execution. See the
+[media results and token/cache/cost metrics](tests/eval/README.md#media-composition-results-2026-11-05).
+Durable artifacts remain next; hosted media and target-host activation remain unqualified.
 Subsequent APIs are Sheets, Docs, and
 Calendar, in that order. Tasks and replay are deferred.
 
@@ -517,7 +555,8 @@ Limits include five minutes, 18 model requests, 15,000 output tokens reserved
 conservatively, and a $1 estimate per cell (native CLI for Claude, recorded published
 token rates for GPT). Estimates are separate from actual proxy billing. There are no performer retries or automatic model fallbacks.
 
-Gmail and Drive profiles are implemented. Sheets, Docs, and Calendar remain pending
+Gmail, Drive and their two-case media-composition profile are implemented.
+Sheets, Docs, and Calendar remain pending
 coverage targets; selecting them fails before model spending. This is a synthetic
 feasibility check, not acceptance of every host or service. See the
 [gate documentation](tests/eval/README.md) for isolation, usage accounting,

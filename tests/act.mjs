@@ -13,8 +13,8 @@ function gitOutput(args, purpose) {
 }
 
 const target = process.argv[2] ?? 'check';
-if (!['check', 'live', 'live-drive'].includes(target))
-  throw new Error('Use check, live, or live-drive');
+if (!['check', 'live', 'live-drive', 'live-media'].includes(target))
+  throw new Error('Use check, live, live-drive, or live-media');
 const live = target.startsWith('live');
 const release = live ? await acquireLocalEvalLock() : undefined;
 const directory = await mkdtemp(join(tmpdir(), 'google-codemode-act-'));

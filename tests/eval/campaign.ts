@@ -7,6 +7,7 @@ import { verifyModels } from './catalog.ts';
 import { getGmailCase, selectGmailCases } from './cases.ts';
 import { GRADING_VERSION } from './mechanisms.ts';
 import { getDriveCase, selectDriveCases } from './drive.ts';
+import { getMediaCase, selectMediaCases } from './media.ts';
 
 const json = (file: string, value: unknown) =>
   writeFile(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
@@ -26,7 +27,7 @@ async function runMatrix(
   const cells = selectCells(process.env.EVAL_SELECTION);
   if (process.env.EVAL_MODEL) throw new Error('Select a matrix or one model, not both');
   const profile = process.env.EVAL_PROFILE;
-  if (!['gmail', 'drive'].includes(profile!))
+  if (!['gmail', 'drive', 'media'].includes(profile!))
     throw new Error('Selected service has no implemented coverage');
   if ((process.env.EVAL_REPEATS ?? '1') !== '1')
     throw new Error('Matrix uses one declared attempt per cell');
@@ -34,7 +35,9 @@ async function runMatrix(
   const selectedCase =
     profile === 'gmail'
       ? getGmailCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'combined')
-      : getDriveCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'read-file');
+      : profile === 'media'
+        ? getMediaCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'gmail-to-drive')
+        : getDriveCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'read-file');
   await mkdir(output, { recursive: true, mode: 0o700 });
   const catalogue = await dependencies.verifyModels(
     process.env.EVAL_PROXY_URL!,
@@ -104,7 +107,7 @@ async function runMatrix(
     '',
     'Reports and raw usage: CELL/trial-1/result.json, actor-result.json and model-receipts.jsonl. Estimates are not proxy billing. Cache reads are provider-reported observations. Different runners do not isolate model-only effects or qualify Claude/ChatGPT/OpenClaw hosts.',
     '',
-    'Gmail and Drive profiles exist. Sheets, Docs and Calendar remain pending.',
+    'Gmail, Drive and their media-composition profiles exist. Sheets, Docs and Calendar remain pending.',
     '',
   ].join('\n');
   await writeFile(join(output, 'report.md'), report, { mode: 0o600 });
@@ -124,9 +127,11 @@ export async function runCampaign(dependencies = { runCell, verifyModels }) {
       ? selectGmailCases(process.env.EVAL_CASES)
       : process.env.EVAL_PROFILE === 'drive'
         ? selectDriveCases(process.env.EVAL_CASES)
-        : (() => {
-            throw new Error('Unsupported suite profile');
-          })();
+        : process.env.EVAL_PROFILE === 'media'
+          ? selectMediaCases(process.env.EVAL_CASES)
+          : (() => {
+              throw new Error('Unsupported suite profile');
+            })();
   const cells = selectCells(process.env.EVAL_SELECTION);
   const output = resolve(process.env.EVAL_OUTPUT!);
   await mkdir(output, { recursive: true, mode: 0o700 });

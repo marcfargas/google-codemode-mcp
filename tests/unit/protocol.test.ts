@@ -5,6 +5,7 @@ import { URL as NodeURL } from 'node:url';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { SkillsClient } from '@modelcontextprotocol/client/ext/skills';
 import { handleMcp, MCP_VERSION, WORKSPACE_SKILL, type ProtocolApp } from '../../src/protocol.ts';
+import { MEDIA_TRANSFERS_GUIDE } from '../../src/knowledge.ts';
 
 function fixture() {
   const calls: { kind: string; args: unknown; name?: string }[] = [];
@@ -175,6 +176,13 @@ test('official pinned client discovers, calls tools, and verifies the bundled sk
     assert.equal(file.text, WORKSPACE_SKILL);
     const resources = await client.listResources();
     assert.ok(resources.resources.some((resource) => resource.uri === skill.uri));
+    const guideUri = 'skill://google-codemode-mcp/google-workspace/references/media-transfers.md';
+    const guide = await client.readResource({ uri: guideUri });
+    assert.equal((guide.contents[0] as { text: string }).text, MEDIA_TRANSFERS_GUIDE);
+    assert.equal(
+      MEDIA_TRANSFERS_GUIDE,
+      await readFile('skills/google-workspace/references/media-transfers.md', 'utf8'),
+    );
 
     assert.equal(requests[0].rpc.method, 'server/discover');
     for (const request of requests) {

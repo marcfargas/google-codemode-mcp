@@ -1,6 +1,15 @@
 import type { Schema } from '@cfworker/json-schema';
 import { methodDeclaration } from './declarations.ts';
 import { callableParameters, supportsDownload } from './parameters.ts';
+import {
+  supportsUpload,
+  MEDIA_SKILL_URI,
+  MAX_UPLOAD_BYTES,
+  MAX_EXECUTION_UPLOAD_BYTES,
+  MAX_UPLOAD_METADATA_BYTES,
+  MAX_UPLOAD_PARAMS_BYTES,
+  MAX_UPLOAD_WIRE_BYTES,
+} from './media.ts';
 import { SERVICES, servicePath } from './services.ts';
 import type { ServicePath } from './services.ts';
 import type { ExcludedParameter } from './parameters.ts';
@@ -215,6 +224,7 @@ export class DiscoveryCatalog {
           mutation: !['GET', 'HEAD'].includes(method.httpMethod.toUpperCase()),
           ...callableParameters({
             ...method,
+            path,
             parameters: { ...document.parameters, ...method.parameters },
           }),
         });
@@ -266,6 +276,7 @@ export class DiscoveryCatalog {
     const method = methods.get(path);
     if (method) {
       const download = method.supported && supportsDownload(method);
+      const upload = method.supported && supportsUpload(method);
       const localPath = path.slice(key.length + 1);
       const separator = localPath.lastIndexOf('.');
       const described = {
@@ -286,8 +297,20 @@ export class DiscoveryCatalog {
         scopesSemantics: 'alternatives',
         runtime: {
           json: method.supported && (!download || !!method.response),
-          mediaUpload: false,
+          maxParameterBytes: MAX_UPLOAD_PARAMS_BYTES,
+          mediaUpload: upload,
           mediaDownload: download,
+          ...(upload
+            ? {
+                uploadSelection: 'media with requestBody; multipart only',
+                maxUploadBytes: MAX_UPLOAD_BYTES,
+                maxExecutionUploadBytes: MAX_EXECUTION_UPLOAD_BYTES,
+                maxUploadMetadataBytes: MAX_UPLOAD_METADATA_BYTES,
+                maxUploadParamsBytes: MAX_UPLOAD_PARAMS_BYTES,
+                maxUploadWireBytes: MAX_UPLOAD_WIRE_BYTES,
+                skill: MEDIA_SKILL_URI,
+              }
+            : {}),
           ...(download
             ? {
                 maxDownloadBytes: MAX_DOWNLOAD_BYTES,

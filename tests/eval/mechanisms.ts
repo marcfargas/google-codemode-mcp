@@ -6,6 +6,7 @@ export interface MechanismPolicy {
   expectedSends: number;
   allowedMutations: readonly string[];
   requiredDescriptionsBeforeExecution?: readonly string[];
+  requiredResourcesBeforeExecution?: readonly string[];
 }
 
 const combinedPolicy: MechanismPolicy = {
@@ -57,7 +58,14 @@ export function gradeMechanisms(
     !policy.allowedMutations.every(canonical) ||
     (policy.requiredDescriptionsBeforeExecution !== undefined &&
       (!Array.isArray(policy.requiredDescriptionsBeforeExecution) ||
-        !policy.requiredDescriptionsBeforeExecution.every(canonical)))
+        !policy.requiredDescriptionsBeforeExecution.every(canonical))) ||
+    (policy.requiredResourcesBeforeExecution !== undefined &&
+      (!Array.isArray(policy.requiredResourcesBeforeExecution) ||
+        !policy.requiredResourcesBeforeExecution.every(
+          (uri) =>
+            typeof uri === 'string' &&
+            /^skill:\/\/google-codemode-mcp\/[A-Za-z0-9_./-]+\.md$/.test(uri),
+        )))
   )
     throw new Error('Invalid mechanism policy');
 
@@ -176,6 +184,34 @@ export function gradeMechanisms(
   const causal = (condition: boolean): Status =>
     !ordered ? 'unknown' : !executions.length ? 'fail' : condition ? 'pass' : 'fail';
   return [
+    ...(policy.requiredResourcesBeforeExecution?.length
+      ? [
+          {
+            id: 'required_resource',
+            status: causal(
+              policy.requiredResourcesBeforeExecution.every((uri) =>
+                events.some(
+                  (event) =>
+                    event.method === 'resources/read' &&
+                    event.params.uri === uri &&
+                    successful(event) &&
+                    Array.isArray(event.response.result.contents) &&
+                    event.response.result.contents.some(
+                      (entry: unknown) =>
+                        object(entry) &&
+                        entry.uri === uri &&
+                        typeof entry.text === 'string' &&
+                        entry.text.trim().length > 0,
+                    ) &&
+                    beforeExecution(event),
+                ),
+              ),
+            ),
+            evidence:
+              'Case-required advanced resource contents must be retrieved before the first execution',
+          },
+        ]
+      : []),
     ...(policy.requiredDescriptionsBeforeExecution?.length
       ? [
           {

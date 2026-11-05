@@ -1,5 +1,6 @@
 import type { DiscoveryDocument, DiscoverySchema, MethodMetadata } from './discovery.ts';
 import { callableParameters, supportsDownload } from './parameters.ts';
+import { supportsUpload } from './media.ts';
 
 // Descriptions are generated for one method and only its referenced types.
 // Native Discovery remains the source for runtime validation and dispatch.
@@ -71,7 +72,9 @@ export function methodDeclaration(document: DiscoveryDocument, method: MethodMet
     ? method.response
       ? `${name}(params: Omit<Params, 'alt'> & {alt: 'media'}): ${result('GoogleMediaBytes')}; ${name}(params: Omit<Params, 'alt'> & {alt?: 'json'}): ${result('Data')}; ${name}(params: Params): ${result('Data | GoogleMediaBytes')};`
       : `${name}(params: Params): ${result('GoogleMediaBytes')};`
-    : `${name}(params: Params): ${result('Data')};`;
+    : supportsUpload(method)
+      ? `${name}(params: Omit<Params, 'media'> & {media?: never}): ${result('Data')}; ${name}(params: Params & {media: NonNullable<Params['media']>; requestBody: NonNullable<Params['requestBody']>}): ${result('Data')};`
+      : `${name}(params: Params): ${result('Data')};`;
   return [
     ...aliases,
     ...(download

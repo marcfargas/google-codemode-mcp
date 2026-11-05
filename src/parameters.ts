@@ -1,11 +1,15 @@
 import type { DiscoverySchema } from './discovery.ts';
+import { supportsUpload, UPLOAD_SCHEMA } from './media.ts';
 
 interface ParameterMethod {
+  path?: string;
   parameters?: Record<string, DiscoverySchema>;
   parameterOrder?: string[];
   supportsMediaDownload?: boolean;
   httpMethod?: string;
   response?: DiscoverySchema;
+  supportsMediaUpload?: boolean;
+  mediaUpload?: unknown;
 }
 
 export function supportsDownload(method: ParameterMethod): boolean {
@@ -33,6 +37,7 @@ export function callableParameters(method: ParameterMethod) {
   const parameters: Record<string, DiscoverySchema> = Object.create(null);
   const excludedParameters: ExcludedParameter[] = [];
   for (const [name, schema] of Object.entries(method.parameters ?? {})) {
+    if (name === 'media' && supportsUpload(method)) continue;
     if (name === 'alt' && supportsDownload(method)) {
       parameters.alt = {
         ...schema,
@@ -46,6 +51,7 @@ export function callableParameters(method: ParameterMethod) {
     if (reason) excludedParameters.push({ name, reason, required: schema.required === true });
     else parameters[name] = schema;
   }
+  if (supportsUpload(method)) parameters.media = UPLOAD_SCHEMA;
   return {
     parameters,
     excludedParameters,

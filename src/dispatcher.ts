@@ -1,4 +1,5 @@
 import { Validator } from '@cfworker/json-schema';
+import { Readable } from 'node:stream';
 import { Discovery } from 'googleapis-common/build/src/discovery.js';
 import {
   DiscoveryCatalog,
@@ -9,6 +10,15 @@ import {
 import type { DiscoveryDocument, MethodMetadata } from './discovery.ts';
 import { callableParameters, parameterExclusion, supportsDownload } from './parameters.ts';
 import { servicePath } from './services.ts';
+import {
+  supportsUpload,
+  prepareUpload,
+  uploadWireBody,
+  normalizeUploadWire,
+  MAX_EXECUTION_UPLOAD_BYTES,
+  MAX_UPLOAD_PARAMS_BYTES,
+  jsonBytes,
+} from './media.ts';
 
 export type Outcome = 'not_dispatched' | 'rejected' | 'acknowledged' | 'unknown';
 export interface CallOutcome {
@@ -99,7 +109,11 @@ function validate(method: MethodMetadata, params: unknown, document: DiscoveryDo
   for (const key of Object.keys(params)) {
     // The native SDK unaliases trailing underscores after extracting auth and
     // headers. Never allow an alias to bypass the actual Discovery whitelist.
-    if (parameterExclusion(key) && !(key === 'alt' && Object.hasOwn(projection.parameters, 'alt')))
+    if (
+      parameterExclusion(key) &&
+      !(key === 'alt' && Object.hasOwn(projection.parameters, 'alt')) &&
+      !(key === 'media' && supportsUpload(method))
+    )
       return false;
   }
   for (const [name, schema] of Object.entries(projection.parameters)) {
@@ -148,6 +162,7 @@ export function createDispatcher(options: DispatcherOptions) {
   let unknown = false;
   let mutations = Promise.resolve();
   let sequence = 0;
+  let uploadedBytes = 0;
   const active = new Map<CallOutcome, AbortController>();
   const interrupted = new Set<CallOutcome>();
   const limits = {
@@ -261,6 +276,34 @@ export function createDispatcher(options: DispatcherOptions) {
     const responseLimit = media
       ? Math.min(limits.maxResponseBytes, MAX_DOWNLOAD_BYTES)
       : limits.maxResponseBytes;
+    const uploading = Object.hasOwn(params as object, 'media');
+    let nativeParams = params;
+    let expectedUpload: { metadataJson: string; mimeType: string; bytes: Uint8Array } | undefined;
+    if (uploading) {
+      try {
+        if (!supportsUpload(method)) throw new Error('Unsupported media upload');
+        const prepared = await prepareUpload(params as Record<string, unknown>);
+        if (uploadedBytes + prepared.bytes.length > MAX_EXECUTION_UPLOAD_BYTES)
+          throw new Error('Execution upload limit exceeded');
+        // Failed/unknown attempts still consume the conservative execution budget.
+        uploadedBytes += prepared.bytes.length;
+        expectedUpload = {
+          ...prepared,
+          metadataJson: JSON.stringify((params as Record<string, unknown>).requestBody),
+        };
+        nativeParams = {
+          ...(params as Record<string, unknown>),
+          media: {
+            mimeType: prepared.mimeType,
+            body: Readable.from([prepared.bytes], { objectMode: false }),
+          },
+        };
+      } catch {
+        return failure(record, 'INVALID_MEDIA_UPLOAD', 'Invalid or oversized media upload');
+      }
+      if (closed || (method.mutation && unknown))
+        return failure(record, 'DISPATCH_CLOSED', 'Further Google dispatch is blocked');
+    }
     const controller = new AbortController();
     active.set(record, controller);
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -284,6 +327,16 @@ export function createDispatcher(options: DispatcherOptions) {
             throw new Error('Dispatch gate closed');
           const headers = new Headers(init?.headers);
           headers.set('Authorization', `Bearer ${accessToken}`);
+          // Workerd fetch must receive bytes, not the native SDK's Node stream.
+          const uploadBody = expectedUpload
+            ? normalizeUploadWire(
+                await uploadWireBody(init?.body),
+                headers.get('content-type'),
+                expectedUpload,
+              )
+            : undefined;
+          if (closed || timedOut || (method.mutation && unknown))
+            throw new Error('Dispatch gate closed');
           const id = (params as Record<string, unknown>).id;
           if (method.path === 'gmail/v1/users.messages.get' && safeAnnotation(id, 256))
             record.resourceId = id;
@@ -311,6 +364,7 @@ export function createDispatcher(options: DispatcherOptions) {
           record.outcome = 'unknown';
           const response = await (options.transport ?? fetch)(url, {
             ...init,
+            ...(uploading ? { body: uploadBody as BodyInit } : {}),
             headers,
             redirect: 'manual',
             signal: controller.signal,
@@ -375,7 +429,7 @@ export function createDispatcher(options: DispatcherOptions) {
         }, limits.callTimeoutMs);
       });
       const response = await Promise.race([
-        target(structuredClone(params)) as Promise<{
+        target(nativeParams) as Promise<{
           data?: unknown;
           status: number;
           headers: HeadersInit;
@@ -426,6 +480,11 @@ export function createDispatcher(options: DispatcherOptions) {
         };
       }
       const serialized = JSON.stringify(response.status === 204 ? null : (response.data ?? null));
+      if (['drive/v3/files.create', 'gmail/v1/users.drafts.create'].includes(method.path)) {
+        const created = response.data as { id?: unknown } | null;
+        if (created && safeAnnotation(created.id, 256) && created.id)
+          record.resourceId = created.id;
+      }
       if (new TextEncoder().encode(serialized).length > limits.maxResponseBytes) {
         return failure(record, 'RESPONSE_LIMIT', 'Google response exceeds execution limit');
       }
@@ -539,6 +598,12 @@ export function createDispatcher(options: DispatcherOptions) {
             'POLICY_DENIED',
             'Snippet policy does not permit this Google call',
           );
+        }
+        try {
+          if (jsonBytes(params) > MAX_UPLOAD_PARAMS_BYTES)
+            return failure(record, 'REQUEST_LIMIT', 'Google parameters exceed execution limit');
+        } catch {
+          return failure(record, 'INVALID_PARAMS', 'Google parameters must be JSON serializable');
         }
         if (!validate(method, params, await catalog.document(servicePath(method.path)))) {
           return failure(

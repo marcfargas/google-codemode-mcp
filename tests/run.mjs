@@ -26,7 +26,7 @@ else if (target === 'check') {
   if (!tests.length) throw new Error('No credential-free tests found');
   run(process.execPath, ['--experimental-strip-types', '--test', ...tests]);
   run('node_modules/.bin/prettier', ['--check', '.']);
-} else if (target === 'live' || target === 'live-drive') {
+} else if (['live', 'live-drive', 'live-media'].includes(target)) {
   for (const name of [
     'GOOGLE_TEST_USER',
     'GOOGLE_OAUTH_CLIENT_JSON',
@@ -40,6 +40,6 @@ else if (target === 'check') {
     '--experimental-strip-types',
     '--test',
     '--test-concurrency=1',
-    target === 'live-drive' ? 'tests/live/live-drive.test.ts' : 'tests/live/live-gmail.test.ts',
+    target === 'live' ? 'tests/live/live-gmail.test.ts' : `tests/live/${target}.test.ts`,
   ]);
-} else throw new Error('Use check, build, live, or live-drive');
+} else throw new Error('Use check, build, live, live-drive, or live-media');
