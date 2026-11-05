@@ -4,7 +4,8 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import test from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { OAuth2Client } from 'google-auth-library';
-import { gradeDrive, prepareDriveFixture } from '../eval/drive.ts';
+import { gradeDrive, gradeDriveOutbound, prepareDriveFixture } from '../eval/drive.ts';
+import { createOutboundRecorder, type OutboundEvidence } from '../eval/outbound.ts';
 import type { McpEvent } from '../eval/server.ts';
 import type { CallOutcome } from '../../src/dispatcher.ts';
 import { openBuiltWorker, type ExecutionReceipt } from '../support/worker-client.ts';
@@ -20,6 +21,11 @@ type File = {
   description: string;
   trashed: boolean;
   parents?: string[];
+  version?: string;
+  modifiedTime?: string;
+  modifiedByMeTime?: string;
+  headRevisionId?: string;
+  md5Checksum?: string;
 };
 
 function required(name: string) {
@@ -104,6 +110,31 @@ test(
         ),
       );
     await retain();
+    async function openObservedWorker(entry: (typeof evidence)[number]) {
+      entry.qualification ??= {};
+      const recorder = createOutboundRecorder({
+        onEvent: async (snapshot) => {
+          entry.qualification!.outbound = snapshot;
+          await retain();
+        },
+      });
+      const observed = await openBuiltWorker({ outbound: recorder.handler });
+      let finished: Promise<OutboundEvidence & { workerDisposed: true }> | undefined;
+      return {
+        tool: observed.tool,
+        finish() {
+          return (finished ??= (async () => {
+            await recorder.seal();
+            await observed.close();
+            const snapshot = await recorder.finalize();
+            const final = { ...snapshot, workerDisposed: true as const };
+            entry.qualification!.outbound = final;
+            await retain();
+            return final;
+          })());
+        },
+      };
+    }
     let worker: Awaited<ReturnType<typeof openBuiltWorker>> | undefined;
     try {
       const { expectedUser, accessToken } = await credentials();
@@ -260,6 +291,7 @@ test(
         };
         evidence.push(entry);
         let fixture: Awaited<ReturnType<typeof prepareDriveFixture>> | undefined;
+        let observedWorker: Awaited<ReturnType<typeof openObservedWorker>> | undefined;
         try {
           fixture = await prepareDriveFixture({
             accessToken,
@@ -271,16 +303,17 @@ test(
             },
           });
           entry.expected = fixture.expected;
-          const described = await worker!.tool<Record<string, unknown>>('describe', {
+          observedWorker = await openObservedWorker(entry);
+          const described = await observedWorker.tool<Record<string, unknown>>('describe', {
             path: 'drive/v3/files.update',
           });
           const parameters = Object.keys(described.parameters as Record<string, unknown>);
           const refusals: { shape: string; receipt: Receipt<unknown> }[] = [];
-          entry.qualification = {
+          Object.assign(entry.qualification!, {
             discovery: { revision: described.revision, source: described.source, parameters },
             conditionalMutation: 'unsupported; not qualified',
             refusals,
-          };
+          });
           await retain();
           assert.equal(typeof described.revision, 'string');
           assert.equal(described.supported, true);
@@ -294,16 +327,34 @@ test(
             fileId: fixture.expected.fileId,
             requestBody: { name: fixture.expected.renamed },
           };
+          const read = await observedWorker.tool<Receipt<Native<File>>>('execute', {
+            accessToken,
+            code: "return await google.drive({version:'v3'}).files.get(inputs);",
+            inputs: {
+              fileId: fixture.expected.fileId,
+              fields: 'id,name,version,modifiedTime,modifiedByMeTime,headRevisionId,md5Checksum',
+            },
+          });
+          entry.outcomes.push(...read.outcomes);
+          entry.qualification!.nativeRead = read;
+          await retain();
+          assert.equal(read.status, 'completed');
+          assert.equal(read.hasUnknownOutcome, false);
+          assert.equal(read.outcomesComplete, true);
+          assert.equal(read.result.data.id, fixture.expected.fileId);
           for (const [shape, suffix, extra] of [
             ['second-argument', ", {headers:{'If-Match':'\\\"deliberately-mismatched\\\"'}}", {}],
             ['headers-parameter', '', { headers: { 'If-Match': '"deliberately-mismatched"' } }],
             ['invented-ifMatch', '', { ifMatch: '"deliberately-mismatched"' }],
           ] as const) {
-            const receipt = await worker!.tool<Receipt<unknown>>('execute', {
-              accessToken,
-              code: `return await google.drive({version:'v3'}).files.update(inputs${suffix});`,
-              inputs: { ...inputs, ...extra },
-            });
+            const receipt: Receipt<unknown> = await observedWorker.tool<Receipt<unknown>>(
+              'execute',
+              {
+                accessToken,
+                code: `return await google.drive({version:'v3'}).files.update(inputs${suffix});`,
+                inputs: { ...inputs, ...extra },
+              },
+            );
             refusals.push({ shape, receipt });
             entry.outcomes.push(...receipt.outcomes);
             await retain();
@@ -318,9 +369,15 @@ test(
               assert.equal(receipt.outcomes[0].httpStatus, undefined);
             }
           }
+          const outbound = await observedWorker.finish();
+          assert.equal(gradeDriveOutbound(outbound, fixture.expected.fileId), true);
           const observation = await fixture.observe();
-          entry.qualification.observation = observation;
-          assert.equal(observation.file?.version, fixture.expected.version);
+          entry.qualification!.observation = observation;
+          entry.qualification!.versionDiagnostic = {
+            fixtureBaseline: fixture.expected.version,
+            nativeRead: read.result.data.version,
+            independentFinal: observation.file?.version,
+          };
           const criteria = gradeDrive(
             { ...fixture.expected, caseId: 'rename-file', renamed: fixture.expected.name },
             observation,
@@ -333,6 +390,13 @@ test(
           entry.failed = true;
           throw new Error('Drive refusal qualification failed; inspect retained receipt');
         } finally {
+          if (observedWorker) {
+            try {
+              await observedWorker.finish();
+            } catch {
+              failures.push('conditional-options-refused:worker.close');
+            }
+          }
           if (fixture) {
             try {
               const cleanup = await fixture.cleanup();
@@ -348,6 +412,128 @@ test(
       });
       if (evidence.at(-1)?.failed || failures.length)
         throw new Error('Live Drive dependent cases stopped after refusal failure');
+
+      await t.test('rename-revert-recorder-control', async () => {
+        const entry: (typeof evidence)[number] = {
+          caseId: 'rename-revert-recorder-control',
+          outcomes: [],
+          qualification: { control: 'rename-revert-and-restore-modifiedTime' },
+        };
+        evidence.push(entry);
+        let fixture: Awaited<ReturnType<typeof prepareDriveFixture>> | undefined;
+        let observedWorker: Awaited<ReturnType<typeof openObservedWorker>> | undefined;
+        try {
+          fixture = await prepareDriveFixture({
+            accessToken,
+            expectedUser,
+            caseId: 'conditional-update-unsupported',
+            onEvent: async (manifest) => {
+              entry.manifest = structuredClone(manifest);
+              await retain();
+            },
+          });
+          entry.expected = fixture.expected;
+          observedWorker = await openObservedWorker(entry);
+          const execute = async (method: 'get' | 'update', params: Record<string, unknown>) => {
+            const receipt = await observedWorker!.tool<Receipt<Native<File>>>('execute', {
+              accessToken,
+              code: `return await google.drive({version:'v3'}).files.${method}(inputs);`,
+              inputs: params,
+            });
+            entry.outcomes.push(...receipt.outcomes);
+            await retain();
+            assert.equal(receipt.status, 'completed');
+            assert.equal(receipt.outcomesComplete, true);
+            assert.equal(receipt.hasUnknownOutcome, false);
+            assert.equal(receipt.outcomes.length, 1);
+            assert.equal(receipt.outcomes[0].outcome, 'acknowledged');
+            assert.equal(receipt.outcomes[0].path, `drive/v3/files.${method}`);
+            assert.equal(receipt.outcomes[0].resourceId, fixture!.expected.fileId);
+            assert.equal(receipt.result.status, 200);
+            return receipt.result.data;
+          };
+          const fields =
+            'id,name,mimeType,description,trashed,parents,version,modifiedTime,modifiedByMeTime,headRevisionId,md5Checksum';
+          const fileId = fixture.expected.fileId;
+          const baseline = await execute('get', { fileId, fields });
+          entry.qualification!.nativeBaseline = baseline;
+          await retain();
+          assert.equal(baseline.id, fileId);
+          assert.equal(baseline.name, fixture.expected.name);
+          assert.ok(
+            typeof baseline.modifiedTime === 'string' &&
+              Number.isFinite(Date.parse(baseline.modifiedTime)),
+          );
+          const renamed = await execute('update', {
+            fileId,
+            fields,
+            requestBody: { name: fixture.expected.renamed },
+          });
+          assert.equal(renamed.name, fixture.expected.renamed);
+          const reverted = await execute('update', {
+            fileId,
+            fields,
+            requestBody: { name: fixture.expected.name, modifiedTime: baseline.modifiedTime },
+          });
+          entry.qualification!.nativeRevert = reverted;
+          await retain();
+          assert.equal(reverted.name, fixture.expected.name);
+          const outbound = await observedWorker.finish();
+          const patches = outbound.requests.filter((request) => request.method === 'PATCH');
+          assert.equal(patches.length, 2);
+          assert.ok(
+            patches.every(
+              (request) =>
+                request.dispatched && request.outcome === 'acknowledged' && request.status === 200,
+            ),
+          );
+          assert.equal(gradeDriveOutbound(outbound, fileId), false);
+          const observation = await fixture.observe();
+          entry.qualification!.observation = observation;
+          entry.qualification!.versionDiagnostic = {
+            fixtureBaseline: fixture.expected.version,
+            nativeBaseline: baseline.version,
+            independentFinal: observation.file?.version,
+          };
+          entry.criteria = gradeDrive(
+            { ...fixture.expected, caseId: 'rename-file', renamed: fixture.expected.name },
+            observation,
+            {},
+          ).filter((criterion) => criterion.id !== 'drive_write_target');
+          await retain();
+          assert.ok(entry.criteria.every((criterion) => criterion.status === 'pass'));
+          assert.equal(
+            observation.file?.modifiedTime,
+            baseline.modifiedTime,
+            'independent original modification time restored',
+          );
+          assert.equal(observation.file?.md5Checksum, baseline.md5Checksum);
+        } catch {
+          entry.failed = true;
+          throw new Error('Drive rename/revert recorder control failed; inspect retained receipt');
+        } finally {
+          if (observedWorker) {
+            try {
+              await observedWorker.finish();
+            } catch {
+              failures.push('rename-revert-recorder-control:worker.close');
+            }
+          }
+          if (fixture) {
+            try {
+              const cleanup = await fixture.cleanup();
+              entry.cleanup = cleanup;
+              if (cleanup.failures.length || cleanup.unknownMutations.length)
+                failures.push('rename-revert-recorder-control:cleanup');
+            } catch {
+              failures.push('rename-revert-recorder-control:cleanup-interrupted');
+            }
+          }
+          await retain();
+        }
+      });
+      if (evidence.at(-1)?.failed || failures.length)
+        throw new Error('Live Drive dependent cases stopped after recorder control failure');
 
       await t.test('list-pages', async () => {
         const entry: (typeof evidence)[number] = { caseId: 'list-pages', outcomes: [] };

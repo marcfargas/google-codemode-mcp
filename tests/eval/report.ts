@@ -68,6 +68,7 @@ const criteria = new Set([
   'drive_conditional_answer',
   'drive_conditional_read',
   'drive_version_preserved',
+  'drive_outbound_reads_only',
   'required_method_discovery',
   'root_discovery',
   'method_discovery',

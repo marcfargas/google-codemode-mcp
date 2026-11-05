@@ -1,6 +1,34 @@
 # Agent feasibility gate
 
-## Independent cases and grading version 3
+## Independent cases and grading version 4
+
+Conditional case 3 retains the refusal task, complete native ledger and independent
+metadata/content checks. A separate trial-owned recorder requires only recognized
+Drive/Discovery GET requests, including the owned file read, through the actual
+local Worker. It closes admission, drains requests, retains `product-outbound.json`
+and disposes that Worker before declaring coverage complete. Query values,
+credentials and bodies are excluded. Redirects are not followed by the host
+forwarder; unexpected routes, overrides or unobserved results cannot qualify.
+Native version and timestamp changes are diagnostic rather than a no-write test;
+a valid intact baseline is sampled once without a stability wait.
+
+Missing or incomplete recordings remain unknown. Historical conditional traces
+cannot acquire this evidence by regrading: their original results stay unchanged,
+and both old conditional models lack the independent record required by grading 4.
+Hosted conditional evaluation stops before inference while that backend lacks
+independent recording. Other Gmail/Drive criteria are unchanged.
+
+The maintained live Drive workflow calibrates a read-only session and a
+rename/revert that restores its timestamp, without models. These controls qualify
+the measurement, not agent feasibility. Fresh conditional actor acceptance still
+needs its own bounded run allocation.
+
+The no-model live calibration passed on 2026-11-05: the read-only session recorded
+two GETs despite native version `1`→`2`; the rename/revert restored name,
+`modifiedTime` and bytes while recording two acknowledged PATCH requests, which
+the outbound oracle rejected as read-only. Download, rename, refusal and pagination
+checks also passed, with all seven owned fixtures cleaned and no unknown mutations.
+This validates the revised recorder, not a fresh agent result.
 
 Grading version 3 retains the requirement for each native method in the trusted execution
 ledger to have a matching successful description completed before execution
@@ -43,18 +71,12 @@ owned-file read. This measures discovery and adherence to the documented limit,
 not independent API reasoning or successful conditional writes. Zero recorded
 mutation outcomes cannot prove no expression was rejected before the bridge.
 
-Conditional case version 2 adds a bounded pre-launch readiness check: native
-versions must agree across successive observations after at least five seconds,
-with unchanged owned metadata and content. It stops before inference if readiness
-cannot be established within 12 observations or 30 seconds. Readiness observations
-are retained in the fixture manifest. This is an observed fixture precondition,
-not a guarantee that Google cannot make later internal changes. The other three
-cases remain version 1; grading version 3 and its version-preservation check are
-unchanged. The maintained live Drive check passed with the repair: readiness
-observed versions `1`, `3`, `3`, captured `3` after 6.8 seconds, and independent
-final readback remained `3`; cleanup completed with no unknown mutations. The
-version-2 conditional agent pair subsequently produced one pass and one version-only
-failure; the readiness assumption remains inadequate for the strict version guard.
+Historical conditional case version 2 used successive equal native versions after
+at least five seconds, bounded to 12 observations/30 seconds. A live check passed
+with versions `1`, `3`, `3`, but the subsequent agent pair produced one pass and
+one version-only failure. That counterexample invalidated the readiness
+assumption. Case 3 replaces version equality with independent egress evidence;
+it does not relabel those retained trials.
 
 The file case uses UTF-8 content because runner Write tools accept text; synthetic
 native-SDK tests separately verify arbitrary binary and JSON-MIME downloads.

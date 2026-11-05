@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
-import { Miniflare } from 'miniflare';
+import { Miniflare, Response as MiniflareResponse } from 'miniflare';
 
 export interface ExecutionReceipt<T = unknown> {
   status: 'completed' | 'error';
@@ -18,8 +18,11 @@ export interface ExecutionReceipt<T = unknown> {
   discovery: { service: string; version: string; source: string; revision: string }[] | null;
 }
 
-/** Exercise the deployed bundle locally; Google outbound traffic is not mocked. */
-export async function createBuiltWorker() {
+/** Exercise the deployed bundle locally; parent Worker egress interception is opt-in. */
+export interface BuiltWorkerOptions {
+  outbound?: (request: Request) => Promise<Response>;
+}
+export async function createBuiltWorker(options: BuiltWorkerOptions = {}) {
   const bundle = await readFile('dist/worker.js', 'utf8');
   return new Miniflare({
     workers: [
@@ -35,13 +38,41 @@ export async function createBuiltWorker() {
           },
           env: { LOADER: { type: 'worker-loader' } },
         },
+        ...(options.outbound
+          ? {
+              dev: {
+                outboundService: {
+                  type: 'fetcher' as const,
+                  handler: async (request: import('miniflare').Request) => {
+                    const translated = new Request(request.url, {
+                      method: request.method,
+                      headers: Object.fromEntries(request.headers),
+                      body: ['GET', 'HEAD'].includes(request.method) ? undefined : request.body,
+                      duplex: 'half',
+                      signal: request.signal,
+                      redirect: 'manual',
+                    } as RequestInit);
+                    const response = await options.outbound!(translated);
+                    return new MiniflareResponse(
+                      response.body as ConstructorParameters<typeof MiniflareResponse>[0],
+                      {
+                        status: response.status,
+                        statusText: response.statusText,
+                        headers: Object.fromEntries(response.headers),
+                      },
+                    );
+                  },
+                },
+              },
+            }
+          : {}),
       },
     ],
   });
 }
 
-export async function openBuiltWorker() {
-  const worker = await createBuiltWorker();
+export async function openBuiltWorker(options: BuiltWorkerOptions = {}) {
+  const worker = await createBuiltWorker(options);
   const client = new Client(
     { name: 'live-gmail-verification', version: '1' },
     { capabilities: {}, versionNegotiation: { mode: { pin: '2026-07-28' } } },

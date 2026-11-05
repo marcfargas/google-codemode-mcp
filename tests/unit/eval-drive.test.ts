@@ -105,7 +105,7 @@ test('Drive rename oracle requires owned name-only acknowledged PATCH evidence a
   );
   assert.deepEqual(
     selectDriveCases().map((item) => item.version),
-    [1, 1, 1, 2],
+    [1, 1, 1, 3],
   );
   assert.throws(() => selectDriveCases('read-file,read-file'));
   assert.throws(() => getDriveCase('fallback'));

@@ -1,6 +1,6 @@
 import type { McpEvent } from './server.ts';
 
-export const GRADING_VERSION = 3;
+export const GRADING_VERSION = 4;
 
 export interface MechanismPolicy {
   expectedSends: number;

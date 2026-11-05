@@ -59,7 +59,7 @@ const statuses = (audit: McpEvent[], policy: MechanismPolicy = readOnly) =>
   Object.fromEntries(gradeMechanisms(audit, policy).map((c) => [c.id, c.status]));
 
 test('grading version 3 uses all ledger methods and supports exact per-case policies', () => {
-  assert.equal(GRADING_VERSION, 3);
+  assert.equal(GRADING_VERSION, 4);
   assert.ok(Object.values(statuses(basic())).every((status) => status === 'pass'));
   const combined = ordered(describe(), skill(), describe(send), execute([outcome(send, true)]));
   assert.ok(gradeMechanisms(combined).every((c) => c.status === 'pass'));

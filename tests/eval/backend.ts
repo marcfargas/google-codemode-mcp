@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createBuiltWorker } from '../support/worker-client.ts';
+import { createOutboundRecorder, type OutboundEvidence } from './outbound.ts';
 
 const MCP_VERSION = '2026-07-28';
 const MAX_RESPONSE_BYTES = 524288;
@@ -202,22 +203,55 @@ export async function createHostedBackend(
     identity,
     dispatch,
     secrets: Object.values(configuration.accessHeaders),
+    hasUnknownMutation: false,
+    async finishObservation() {
+      return null;
+    },
     async close() {},
   };
 }
 
-export async function createEvaluationBackend(output: string) {
+export async function createEvaluationBackend(
+  output: string,
+  options: { captureOutbound?: boolean } = {},
+) {
   const backend = process.env.EVAL_BACKEND || 'local';
   if (backend === 'hosted') return createHostedBackend(hostedConfiguration(), { output });
   if (backend !== 'local') throw new Error('Select local or hosted evaluation backend');
   const bundleSha256 = createHash('sha256')
     .update(await readFile('dist/worker.js'))
     .digest('hex');
-  const worker = await createBuiltWorker();
+  const retain = (evidence: unknown) =>
+    writeFile(join(output, 'product-outbound.json'), JSON.stringify(evidence, null, 2) + '\n', {
+      mode: 0o600,
+    });
+  const recorder = options.captureOutbound
+    ? createOutboundRecorder({ onEvent: retain })
+    : undefined;
+  const worker = await createBuiltWorker(recorder ? { outbound: recorder.handler } : undefined);
+  let finishing: Promise<(OutboundEvidence & { workerDisposed: true }) | null> | undefined;
+  const finishObservation = () =>
+    (finishing ??= (async () => {
+      try {
+        await recorder?.seal();
+      } finally {
+        await worker.dispose();
+      }
+      if (!recorder) return null;
+      const evidence = await recorder.finalize();
+      const completed = { ...evidence, workerDisposed: true as const };
+      await retain(completed);
+      return completed;
+    })());
   return {
-    identity: { kind: 'local', bundleSha256 },
+    identity: { kind: 'local', bundleSha256, ...(recorder ? { outboundRecorderVersion: 1 } : {}) },
     secrets: [] as string[],
+    get hasUnknownMutation() {
+      return recorder?.hasUnknownMutation ?? false;
+    },
+    finishObservation,
     async dispatch(request: Request) {
+      if (finishing) throw new Error('Evaluation backend admission closed');
       const response = await worker.dispatchFetch(request.url, {
         method: request.method,
         headers: Object.fromEntries(request.headers),
@@ -231,7 +265,7 @@ export async function createEvaluationBackend(output: string) {
       return response as unknown as Response;
     },
     async close() {
-      await worker.dispose();
+      await finishObservation();
     },
   };
 }

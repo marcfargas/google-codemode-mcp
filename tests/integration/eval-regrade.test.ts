@@ -307,7 +307,29 @@ test('offline Drive limitation grading applies maintained discovery policy and c
     startedOrdinal: i * 2 + 1,
     completedOrdinal: i * 2 + 2,
   })) as McpEvent[];
-  const grade = (audit: McpEvent[], attempts: McpEvent[] | null = attemptRecords(audit)) =>
+  const outbound = {
+    version: 1,
+    complete: true,
+    workerDisposed: true,
+    requests: [
+      {
+        ordinal: 1,
+        method: 'GET',
+        origin: 'https://www.googleapis.com',
+        pathname: '/drive/v3/files/' + expected.fileId,
+        queryKeys: [],
+        methodOverride: false,
+        dispatched: true,
+        outcome: 'acknowledged',
+        status: 200,
+      },
+    ],
+  };
+  const grade = (
+    audit: McpEvent[],
+    attempts: McpEvent[] | null = attemptRecords(audit),
+    recording: unknown = outbound,
+  ) =>
     gradeSavedEvidence({
       expected,
       observation,
@@ -329,9 +351,16 @@ test('offline Drive limitation grading applies maintained discovery policy and c
         cleanup: { failures: [], unknownMutations: [] },
       },
       evidenceErrors: [],
+      outbound: recording,
     });
   assert.equal(grade(events).status, 'pass');
-  assert.equal(grade(events).gradingVersion, 3);
+  assert.equal(
+    grade(events, attemptRecords(events), null).criteria.find(
+      (c) => c.id === 'drive_outbound_reads_only',
+    )?.status,
+    'unknown',
+  );
+  assert.equal(grade(events).gradingVersion, 4);
   const noUpdate = structuredClone(events);
   noUpdate[2].params.arguments.path = 'drive/v3/files.list';
   noUpdate[2].response.result.structuredContent.path = 'drive/v3/files.list';

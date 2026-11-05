@@ -415,7 +415,11 @@ The fresh four-case Sonnet/Sol campaign passed download, pagination and rename;
 both conditional-limit attempts failed only an unsettled fixture-version check.
 A separately authorized version-2 conditional pair passed for Sol, while Sonnet
 again failed only the version guard: two equal early observations did not predict
-later continuity. Drive qualification remains open. See [per-attempt results and
+later continuity. The current conditional grader uses a trial-owned independent
+outbound recorder plus the existing ledger and metadata/content checks; native
+versions are diagnostic. Hosted conditional attempts stop before inference because
+that recorder is local. Neither old conditional run has the new evidence.
+Drive qualification remains open. See [per-attempt results and
 token/cache/cost metrics](tests/eval/README.md#conditional-version-2-pair-2026-11-05).
 Gmail/Drive media composition and advanced guidance follow Drive qualification.
 Subsequent APIs are Sheets, Docs, and

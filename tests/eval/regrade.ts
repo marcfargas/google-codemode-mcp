@@ -27,6 +27,7 @@ export function gradeSavedEvidence(evidence: {
   source: RecordValue | null;
   original: RecordValue | null;
   evidenceErrors: string[];
+  outbound?: unknown;
 }) {
   const { expected, observation, files, actor, audit, receipts, source, original } = evidence;
   let currentCaseVersion: number | null = null;
@@ -79,7 +80,13 @@ export function gradeSavedEvidence(evidence: {
   const task = safeGrade('task_evidence', () =>
     expected
       ? 'fileId' in expected
-        ? gradeDrive(expected, observation as DriveObservation | null, files ?? {}, retainedAudit)
+        ? gradeDrive(
+            expected,
+            observation as DriveObservation | null,
+            files ?? {},
+            retainedAudit,
+            evidence.outbound,
+          )
         : gradeGmail(expected, observation as GmailObservation | null, files ?? {}, retainedAudit)
       : [
           {
@@ -112,6 +119,7 @@ export function gradeSavedEvidence(evidence: {
     !!original?.error ||
     !!original?.relayCloseError ||
     !!original?.cleanupError;
+  const observationError = !!original?.outboundError;
   const outerUnknown = retainedAudit.some(
     (event) => event?.response?.outerUnknown === true || event?.response?.pending === true,
   );
@@ -184,7 +192,7 @@ export function gradeSavedEvidence(evidence: {
     caseId: expected?.caseId ?? 'combined',
     currentCaseVersion,
     status:
-      originalError || (cleanupKnown && !cleanupClean)
+      originalError || observationError || (cleanupKnown && !cleanupClean)
         ? 'error'
         : criteria.every((criterion) => criterion.status === 'pass')
           ? 'pass'
@@ -248,6 +256,10 @@ export async function regradeTrial(saved: string, output: string) {
   const audit = await load('mcp.jsonl', undefined, true);
   const attempts = await load('mcp-attempts.jsonl', undefined, true);
   const receipts = await load('model-receipts.jsonl', undefined, true);
+  const outbound =
+    expected?.caseId === 'conditional-update-unsupported'
+      ? await load('product-outbound.json')
+      : undefined;
   const result = gradeSavedEvidence({
     source,
     original,
@@ -259,6 +271,7 @@ export async function regradeTrial(saved: string, output: string) {
     attempts,
     receipts: receipts ?? [],
     evidenceErrors,
+    outbound,
   });
   const gradingFiles = [
     'regrade.ts',

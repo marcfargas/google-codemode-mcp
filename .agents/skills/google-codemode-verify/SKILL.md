@@ -80,12 +80,18 @@ cases/grading, rather than weakening expectations to turn a run green.
 Inspect the exit status **and** meaningful results: test failures/skips, runner
 isolation refusals and exact file bytes, task versus discovery/skill criteria,
 model identity, mutation outcomes, and cleanup. A retrieved `skill://` resource is
-not proof of host activation. Grading version 3 retains the requirement for every trusted ledger
+not proof of host activation. Grading version 4 retains the requirement for every trusted ledger
 method to have a matching description completed before execution starts, including
 failed and snippet calls. Root discovery and actual skill retrieval must precede
 the first execution. Case-required unused-method descriptions must also precede
 the first execution when configured. Missing ordinals or incomplete ledgers stay unknown; offline
-regrades preserve original results. Gmail feasibility does not qualify Drive,
+regrades preserve original results. Conditional Drive case 3 additionally requires
+complete trial-owned `product-outbound.json` with Worker disposal and only recognized
+normal Drive/Discovery GETs, including the owned file read. The maintained live
+Drive workflow calibrates this with read-only and rename/revert controls; versions
+and timestamps remain diagnostics. Hosted conditional evaluation refuses before
+inference without a recorder. Old conditional traces lack this evidence and cannot
+pass the new criterion through regrading. Gmail feasibility does not qualify Drive,
 Sheets, Docs, Calendar, target hosts, binary artifacts, or hosted Cloudflare CPU
 enforcement. Pending profiles fail before spending; don't silently substitute Gmail.
 

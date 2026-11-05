@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import {
   gradeDrive,
+  gradeDriveOutbound,
   prepareDriveFixture,
   getDriveCase,
   type DriveExpected,
@@ -92,6 +93,93 @@ const statuses = (...args: Parameters<typeof gradeDrive>) =>
   Object.fromEntries(gradeDrive(...args).map((criterion) => [criterion.id, criterion.status]));
 const checked = (outcomes: any[] = pages()) =>
   statuses(expected, observation(), answer(), audit(outcomes));
+
+function outboundReads(fileId: string) {
+  return {
+    version: 1,
+    complete: true,
+    workerDisposed: true,
+    requests: [
+      {
+        ordinal: 1,
+        method: 'GET',
+        origin: 'https://www.googleapis.com',
+        pathname: '/discovery/v1/apis/drive/v3/rest',
+        queryKeys: [],
+        methodOverride: false,
+        dispatched: true,
+        outcome: 'acknowledged',
+        status: 200,
+      },
+      {
+        ordinal: 2,
+        method: 'GET',
+        origin: 'https://www.googleapis.com',
+        pathname: '/drive/v3/files/' + encodeURIComponent(fileId),
+        queryKeys: ['fields'],
+        methodOverride: false,
+        dispatched: true,
+        outcome: 'acknowledged',
+        status: 200,
+      },
+    ],
+  };
+}
+
+test('independent outbound oracle refuses incomplete, malformed, foreign or redirected coverage and unrecorded reads', () => {
+  const good = outboundReads('owned-1');
+  assert.equal(gradeDriveOutbound(good, 'owned-1'), true);
+  for (const mutate of [
+    (e: any) => {
+      e.complete = false;
+    },
+    (e: any) => {
+      e.workerDisposed = false;
+    },
+    (e: any) => {
+      e.failure = 'persistence_failed';
+    },
+    (e: any) => {
+      e.requests = [];
+    },
+    (e: any) => {
+      e.requests[0].ordinal = 2;
+    },
+    (e: any) => {
+      e.requests[0].dispatched = false;
+    },
+    (e: any) => {
+      delete e.requests[0].queryKeys;
+    },
+    (e: any) => {
+      e.requests[0].status = 307;
+      e.requests[0].outcome = 'unknown';
+    },
+    (e: any) => {
+      e.requests[0].outcome = 'pending';
+    },
+    (e: any) => {
+      e.requests[0].origin = 'https://foreign.invalid';
+    },
+    (e: any) => {
+      e.requests[0].pathname = '/unexpected';
+    },
+  ]) {
+    const bad = structuredClone(good);
+    mutate(bad);
+    assert.equal(gradeDriveOutbound(bad, 'owned-1'), undefined);
+  }
+  assert.equal(gradeDriveOutbound(undefined, 'owned-1'), undefined);
+  assert.equal(gradeDriveOutbound(good, 'other'), false);
+  for (const method of ['PATCH', 'DELETE', 'POST', 'HEAD']) {
+    const bad = structuredClone(good);
+    bad.requests[1].method = method;
+    assert.equal(gradeDriveOutbound(bad, 'owned-1'), false);
+  }
+  const override = structuredClone(good);
+  override.requests[1].methodOverride = true;
+  assert.equal(gradeDriveOutbound(override, 'owned-1'), false);
+});
 
 test('Drive page oracle accepts native continuation, empty intermediate and empty terminal pages', () => {
   for (const outcomes of [
@@ -309,6 +397,7 @@ test('conditional limit oracle requires exact unsupported artifact, actual owned
     renamed: false,
     reason: 'conditional-update-unsupported',
   });
+  const outbound = outboundReads(goal.fileId);
   const read = {
     path: 'drive/v3/files.get',
     resourceId: goal.fileId,
@@ -316,7 +405,7 @@ test('conditional limit oracle requires exact unsupported artifact, actual owned
     outcome: 'acknowledged',
   };
   assert.ok(
-    Object.values(statuses(goal, observed, artifact, audit([read]))).every(
+    Object.values(statuses(goal, observed, artifact, audit([read]), outbound)).every(
       (status) => status === 'pass',
     ),
   );
@@ -367,18 +456,28 @@ test('conditional limit oracle requires exact unsupported artifact, actual owned
     );
   const changed = structuredClone(observed);
   changed.file!.version = '8';
-  assert.equal(statuses(goal, changed, artifact, audit([read])).drive_version_preserved, 'fail');
-  // Restored visible metadata cannot hide a rename/revert, or repair the old 1→3 baseline.
-  for (const [before, after] of [
-    ['3', '5'],
-    ['1', '3'],
-  ]) {
-    const restored = structuredClone(observed);
-    restored.file!.version = after;
+  assert.ok(
+    Object.values(statuses(goal, changed, artifact, audit([read]), outbound)).every(
+      (status) => status === 'pass',
+    ),
+    'version drift alone is diagnostic',
+  );
+  assert.equal(
+    statuses(goal, changed, artifact, audit([read])).drive_outbound_reads_only,
+    'unknown',
+  );
+  for (const method of ['PATCH', 'DELETE', 'POST']) {
+    const hiddenWrite = structuredClone(outbound);
+    hiddenWrite.requests.push({
+      ...hiddenWrite.requests[0],
+      ordinal: 3,
+      method,
+      pathname: '/upload/drive/v3/files/' + goal.fileId,
+    });
     assert.equal(
-      statuses({ ...goal, version: before }, restored, artifact, audit([read]))
-        .drive_version_preserved,
+      statuses(goal, observed, artifact, audit([read]), hiddenWrite).drive_outbound_reads_only,
       'fail',
+      'read-only ledger and restored visible state cannot conceal ' + method,
     );
   }
   const renamed = structuredClone(observed);
@@ -449,20 +548,20 @@ test('conditional fixture retains output-only version and makes the special insp
     assert.equal(fixture.expected.version, '7');
     assert.match(fixture.prompt, /Inspect the update method before executing any code/);
     assert.match(fixture.prompt, /only if the available API can make Google atomically enforce/);
-    assert.ok(calls.some((call) => call.fields?.endsWith(',version')));
-    assert.equal(getDriveCase('conditional-update-unsupported').version, 2);
+    assert.ok(calls.some((call) => call.fields?.includes(',version,modifiedTime')));
+    assert.equal(getDriveCase('conditional-update-unsupported').version, 3);
     const readiness = manifests.at(-1).readiness;
     assert.deepEqual(
       readiness.map((entry: any) => entry.status),
-      ['waiting', 'waiting', 'waiting', 'ready'],
+      ['ready'],
     );
-    assert.ok(readiness.at(-1).elapsedMs >= 5_000, 'early equality is insufficient');
+    assert.equal(readiness[0].stage, 'conditional-baseline');
     assert.ok(!JSON.stringify(manifests).includes('synthetic-google-token'));
     assert.deepEqual(await fixture.cleanup(), { failures: [], unknownMutations: [] });
   });
 });
 
-test('conditional readiness waits for settled native versions and captures metadata after media', async () => {
+test('conditional baseline samples once after media without assuming future version stability', async () => {
   await withSyntheticDrive({ versions: ['1', '2', '3', '3'] }, async ({ calls, manifests }) => {
     const fixture = await prepareDriveFixture({
       accessToken: 'synthetic-google-token',
@@ -472,16 +571,16 @@ test('conditional readiness waits for settled native versions and captures metad
         manifests.push(structuredClone(manifest));
       },
     });
-    assert.equal(fixture.expected.version, '3');
+    assert.equal(fixture.expected.version, '1');
     const readiness = manifests.at(-1).readiness;
     assert.deepEqual(
       readiness.map((entry: any) => entry.version),
-      ['1', '2', '3', '3'],
+      ['1'],
     );
     assert.equal(readiness.at(-1).status, 'ready');
     assert.ok(readiness.every((entry: any) => entry.preserved && entry.complete));
     const reads = calls.filter((call) => call.path === '/drive/v3/files/synthetic-owned-1');
-    assert.equal(reads.length, 8);
+    assert.equal(reads.length, 2);
     for (let index = 0; index < reads.length; index += 2) {
       assert.equal(reads[index].media, true);
       assert.equal(reads[index + 1].media, false);
@@ -490,14 +589,12 @@ test('conditional readiness waits for settled native versions and captures metad
   });
 });
 
-test('conditional readiness fails closed before returning an actor fixture and cleans the owned file', async () => {
+test('conditional baseline refuses incomplete or corrupt state and cleans the owned file', async () => {
   const failures = [
-    { changingVersions: true },
     { versions: [undefined] },
     { versions: [''] },
     { versions: ['not-a-version'] },
-    { deadlineDuringRead: true },
-    { contentDriftAt: 2 },
+    { contentDriftAt: 1 },
     ...['id', 'name', 'description', 'mimeType', 'trashed', 'parents'].map((metadataDrift) => ({
       metadataDrift,
     })),
@@ -513,12 +610,12 @@ test('conditional readiness fails closed before returning an actor fixture and c
             manifests.push(structuredClone(manifest));
           },
         }),
-        /version readiness unavailable; no actor started/,
+        /conditional baseline unavailable; no actor started/,
         JSON.stringify(options),
       );
       const final = manifests.at(-1);
       assert.equal(final.readiness.at(-1).status, 'failed');
-      assert.ok(final.readiness.length <= 12);
+      assert.equal(final.readiness.length, 1);
       assert.deepEqual(final.cleanup, { failures: [], unknownMutations: [] });
       assert.deepEqual(
         calls.filter((call) => call.method === 'DELETE').map((call) => call.path),
@@ -602,10 +699,8 @@ async function withSyntheticDrive(
     failDelete?: string;
     expireReadiness?: boolean;
     versions?: (string | undefined)[];
-    changingVersions?: boolean;
     metadataDrift?: string;
     contentDriftAt?: number;
-    deadlineDuringRead?: boolean;
   },
   exercise: (fixture: {
     calls: { path: string; method: string; fields: string | null; media: boolean }[];
@@ -680,22 +775,19 @@ async function withSyntheticDrive(
       );
     }
     metadataReads++;
-    if (options.deadlineDuringRead) now += 30_001;
     const metadata: Record<string, unknown> = {
       ...file.metadata,
       id,
       trashed: false,
       parents: ['root'],
-      version: options.changingVersions
-        ? String(metadataReads)
-        : options.versions
-          ? options.versions[Math.min(metadataReads - 1, options.versions.length - 1)]
-          : '7',
+      version: options.versions
+        ? options.versions[Math.min(metadataReads - 1, options.versions.length - 1)]
+        : '7',
     };
-    if (options.metadataDrift && metadataReads >= 2)
+    if (options.metadataDrift && metadataReads >= 1)
       metadata[options.metadataDrift] =
         options.metadataDrift === 'parents'
-          ? ['moved']
+          ? null
           : options.metadataDrift === 'trashed'
             ? true
             : 'changed';

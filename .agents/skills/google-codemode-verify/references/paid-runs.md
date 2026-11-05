@@ -87,9 +87,15 @@ For every attempted pair, inspect `trial-N/result.json`, `actor-result.json`,
 independent `observation.json` and fixture/cleanup evidence. Verify task criteria,
 causal root/method discovery, actual skill retrieval, requested/served model,
 successful terminal execution, known mutation outcomes and complete owned-fixture
-cleanup. Grading version 3 may require an unused method description before the
+cleanup. Grading version 4 may require an unused method description before the
 first execution. Missing evidence remains unknown; narrative success cannot fill
-it. Resource retrieval does not establish Claude, ChatGPT or OpenClaw activation.
+it. Conditional Drive case 3 needs the trial's complete `product-outbound.json`,
+including `workerDisposed: true`, recognized read routes and an acknowledged owned
+read. A fresh Worker owns each trial; fixture setup/readback/cleanup bypass this
+recorder. Incomplete coverage or uncertain writes stops later actors. Version and
+timestamps are diagnostic. Historical conditional evidence has no recorder and
+remains unknown under this criterion; original grades stay intact. Hosted
+conditional runs currently stop before inference. Resource retrieval does not establish Claude, ChatGPT or OpenClaw activation.
 
 Use `just eval-regrade SAVED_TRIAL NEW_OUTPUT` for a grading question. It makes no
 Google/model/cleanup calls, preserves original errors and grades, and records the

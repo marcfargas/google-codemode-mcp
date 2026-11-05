@@ -60,9 +60,10 @@ function gradeTask(
   observation: GmailObservation | DriveObservation | null,
   files: Record<string, string>,
   audit: McpEvent[],
+  outbound?: unknown,
 ) {
   return 'fileId' in expected
-    ? gradeDrive(expected, observation as DriveObservation | null, files, audit)
+    ? gradeDrive(expected, observation as DriveObservation | null, files, audit, outbound)
     : gradeGmail(expected, observation as GmailObservation | null, files, audit);
 }
 
@@ -121,6 +122,12 @@ export async function runCell(configuration?: {
             (nativeProbe ? 'read-search' : 'combined'),
         )
       : getDriveCase(configuration?.caseId ?? process.env.EVAL_CASE ?? 'read-file');
+  const captureOutbound =
+    profile === 'drive' && selectedCase.id === 'conditional-update-unsupported';
+  if (captureOutbound && process.env.EVAL_BACKEND === 'hosted')
+    throw new Error(
+      'Hosted conditional evaluation lacks independent outbound recording; no actor started',
+    );
   if (process.getuid?.() !== 0)
     throw new Error(
       'Run via just eval/act; separate actor OS identity requires the workflow root runner',
@@ -158,7 +165,8 @@ export async function runCell(configuration?: {
       'Test OAuth grant unavailable or missing selected service scope; no agent started',
     );
   }
-  const backend = await createEvaluationBackend(output);
+  await mkdir(join(output, 'trial-1'), { mode: 0o700 });
+  let backend = await createEvaluationBackend(join(output, 'trial-1'), { captureOutbound });
   const results: any[] = [];
   try {
     const identity = {
@@ -169,6 +177,8 @@ export async function runCell(configuration?: {
           [
             'tests/eval/run.ts',
             'tests/eval/backend.ts',
+            'tests/eval/outbound.ts',
+            'tests/support/worker-client.ts',
             'tests/eval/campaign.ts',
             'tests/eval/catalog.ts',
             'tests/eval/server.ts',
@@ -213,7 +223,14 @@ export async function runCell(configuration?: {
     await json(join(output, 'source.json'), identity);
     for (let repetition = 1; repetition <= repeats; repetition++) {
       const trial = join(output, `trial-${repetition}`);
-      await mkdir(trial, { mode: 0o700 });
+      if (repetition > 1) {
+        await mkdir(trial, { mode: 0o700 });
+        backend = await createEvaluationBackend(trial, { captureOutbound });
+        if (JSON.stringify(backend.identity) !== JSON.stringify(identity.backend)) {
+          await backend.close();
+          throw new Error('Backend identity changed between trials; no actor started');
+        }
+      }
       const result: any = {
         repetition,
         gradingVersion: GRADING_VERSION,
@@ -227,6 +244,7 @@ export async function runCell(configuration?: {
       let fixture: GmailFixture | Awaited<ReturnType<typeof prepareDriveFixture>> | undefined;
       let relay: Awaited<ReturnType<typeof startEvalServer>> | undefined;
       let observed = false;
+      let outbound: unknown;
       try {
         const fixtureOptions = {
           accessToken,
@@ -261,18 +279,27 @@ export async function runCell(configuration?: {
         });
         await json(join(trial, 'actor-result.json'), actor);
         await relay.close();
+        outbound = await backend.finishObservation();
+        if (
+          captureOutbound &&
+          (!(outbound as any)?.complete || !(outbound as any)?.workerDisposed)
+        ) {
+          result.outboundError = true;
+          result.infrastructureAbort = true;
+          throw new Error('Independent outbound coverage incomplete; no later actor may start');
+        }
         const observation = await fixture.observe();
         await json(join(trial, 'observation.json'), observation);
         observed = true;
         await json(join(trial, 'files.json'), actor.files);
         result.criteria = [
-          ...gradeTask(fixture.expected, observation, actor.files, relay.audit),
+          ...gradeTask(fixture.expected, observation, actor.files, relay.audit, outbound),
           ...gradeMechanisms(relay.audit, selectedCase.policy),
           gradeModel(model, relay.llm),
           {
             id: 'mutation_certainty',
-            status: relay.hasUnknownMutation ? 'fail' : 'pass',
-            evidence: `Outer and inner execution certainty: unknown=${relay.hasUnknownMutation}`,
+            status: relay.hasUnknownMutation || backend.hasUnknownMutation ? 'fail' : 'pass',
+            evidence: `Execution or independently observed write uncertainty: unknown=${relay.hasUnknownMutation || backend.hasUnknownMutation}`,
           },
           {
             id: 'native_execution',
@@ -286,6 +313,7 @@ export async function runCell(configuration?: {
           observation,
           actor.files,
           relay.audit,
+          outbound,
         ).every((criterion) => criterion.status === 'pass');
         result.status = result.criteria.every((criterion: any) => criterion.status === 'pass')
           ? 'pass'
@@ -306,7 +334,7 @@ export async function runCell(configuration?: {
         result.runner = runner;
         result.runnerVersion = actor.cliVersion;
         result.llmReceipts = relay.llm;
-        result.hasUnknownMutation = relay.hasUnknownMutation;
+        result.hasUnknownMutation = relay.hasUnknownMutation || backend.hasUnknownMutation;
       } catch (error) {
         result.error = error instanceof Error ? error.message : 'Evaluation failed';
       } finally {
@@ -318,9 +346,26 @@ export async function runCell(configuration?: {
             result.relayCloseError = true;
             result.status = 'error';
           }
-          result.hasUnknownMutation = relay.hasUnknownMutation;
+          result.hasUnknownMutation =
+            result.hasUnknownMutation === true ||
+            relay.hasUnknownMutation ||
+            backend.hasUnknownMutation;
           result.llmReceipts = relay.llm;
         }
+        try {
+          outbound ??= await backend.finishObservation();
+          if (
+            captureOutbound &&
+            (!(outbound as any)?.complete || !(outbound as any)?.workerDisposed)
+          )
+            throw new Error('Incomplete outbound observation');
+        } catch {
+          result.outboundError = true;
+          result.infrastructureAbort = true;
+          result.status = 'error';
+        }
+        result.hasUnknownMutation =
+          result.hasUnknownMutation === true || backend.hasUnknownMutation;
         if (fixture) {
           if (!observed) {
             try {
