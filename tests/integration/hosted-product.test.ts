@@ -260,12 +260,14 @@ test('hosted preparation binds optional private artifact storage and identifies 
     const output = join(directory, 'prepared');
     const manifest = await prepareHosted(output, 'product', {
       artifactBucket: 'synthetic-private-artifacts',
+      downloadOrigin: 'https://files.test',
     });
     const config = JSON.parse(await readFile(join(output, 'wrangler.json'), 'utf8'));
     assert.deepEqual(config.r2_buckets, [
       { binding: 'ARTIFACTS', bucket_name: 'synthetic-private-artifacts' },
     ]);
     assert.equal(manifest.artifactBucket, 'synthetic-private-artifacts');
+    assert.equal(config.vars.ARTIFACT_DOWNLOAD_ORIGIN, 'https://files.test');
     assert.equal(
       manifest.sourceDigest,
       createHash('sha256')
@@ -274,6 +276,7 @@ test('hosted preparation binds optional private artifact storage and identifies 
             mode: 'product',
             sourceFiles: manifest.sourceFiles,
             artifactBucket: manifest.artifactBucket,
+            downloadOrigin: manifest.downloadOrigin,
           }),
         )
         .digest('hex'),

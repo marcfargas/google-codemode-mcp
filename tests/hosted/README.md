@@ -339,3 +339,34 @@ with that supplied reduced credential. Token-policy introspection and a new
 direct-R2 inventory were not performed; the earlier full storage controls retain
 their own identities and independent cleanup evidence. Temporary R2 administration
 is no longer needed for this deployment path.
+
+## Standalone artifact downloads (2026-11-05)
+
+The product Worker now owns optional read-only HTTPS downloads from its private
+R2 binding. Set `ARTIFACT_DOWNLOAD_ORIGIN` during product preparation or deployment;
+it is included in the prepared candidate identity and runtime variables. Existing
+`/mcp*` routes cover `/mcp/artifacts/v1/...`. The configured origin must reach this
+Worker. Its ingress policy still applies; enabling downloads does not bypass Access.
+
+Two no-model hosted controls passed directly against the Worker: 600012-byte UTF-8
+JSON and 131072-byte all-value binary. GET returned exact bytes, MIME type, length
+and SHA-256; HEAD returned the matching length without a body. Missing Access
+credentials received 403, an invalid read capability received 404, and HTTP DELETE
+received 405. Explicit artifact deletion succeeded and subsequent downloads returned 404. No gateway, model calls, new OAuth consent or R2 administrative rights were
+used. These checks do not repeat independent R2 inventory or physical lifecycle
+verification.
+
+The tested product bundle SHA-256 is
+`709ed278c64716771ddf2936ac94c0bf6263000d28b16c6852b270776d2f3925`,
+prepared source digest
+`0714fb88145d76c4eeead2c6389f8fa5c5f15d5bdbfc018e797e5099a634d809`,
+and deployed version `a2f2a8ff-96c1-4e34-99c5-2ab7f64ada2c`.
+An earlier hosted attempt returned exact JSON bytes but failed its length-header
+assertion. The corrected response uses `Cache-Control: private, no-store,
+no-transform`, preserving the declared length through the edge. The earlier test
+object was deleted; the failed attempt remains retained separately.
+
+Local workerd integration also verifies a Gmail attachment stored in R2, then read
+and uploaded to Drive in a later execution without returning file bytes to the
+model. This is direct server composition, not a hosted agent or host UI trial.
+Native Claude, ChatGPT and OpenClaw file presentation remains unqualified.

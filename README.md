@@ -23,14 +23,15 @@ building, real Worker tests, and formatting. `just verify` executes those same
 workflow checks directly on the host. `just build` prepares a Wrangler deployment without
 publishing it.
 
-The service expects the authenticated gateway/caller to supply short-lived Google
-OAuth credentials through the `accessToken` tool argument. The CFA gateway's
-separate `google-codemode` adapter hides this input from agents and injects the
-caller's Google grant for execution. Its source and synthetic integration tests
-are implemented in `bgbl-mcp-gateway`; hosted binding and caller acceptance remain
-unverified. The deployed MCP service does not acquire,
-refresh, or retain credentials. Request arguments are visible to the submitting
-host; keep credential injection in the trusted caller.
+Connect directly with a compatible MCP client. The trusted caller supplies a
+short-lived Google OAuth token through the `accessToken` tool argument. The server
+owns Google execution, private artifact storage, artifact reads and byte movement
+between Google services. A gateway can adapt caller authentication and inject the
+token as a consumer of this interface.
+
+The deployed MCP service does not acquire, refresh or retain Google credentials.
+Request arguments are visible to the submitting host; keep credential injection
+in the trusted caller. Deployment ingress controls who can reach the Worker.
 
 ## Deploy to Cloudflare
 
@@ -44,14 +45,15 @@ artifact storage adds a private R2 bucket.
 The deployment command below uses environment variables without editing
 `wrangler.jsonc` or application source:
 
-| Variable                | Purpose                                                                                            |
-| ----------------------- | -------------------------------------------------------------------------------------------------- |
-| `CLOUDFLARE_ACCOUNT_ID` | Target account; supply for unattended CLI/CI deployment.                                           |
-| `CLOUDFLARE_API_TOKEN`  | Wrangler deployment credential; store as a CI secret. Local Wrangler login also works.             |
-| `WORKER_NAME`           | Optional Worker name; defaults to `google-codemode-mcp`, or the Worker selected by Workers Builds. |
-| `WORKER_DOMAIN`         | Optional custom hostname, e.g. `mcp.example.com`; no scheme or path.                               |
-| `ARTIFACTS_BUCKET`      | Optional existing private R2 bucket; enables bounded artifact storage.                             |
-| `WORKER_ROUTE`          | Optional route pattern, e.g. `example.com/mcp*`; use instead of `WORKER_DOMAIN`.                   |
+| Variable                   | Purpose                                                                                               |
+| -------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_ACCOUNT_ID`    | Target account; supply for unattended CLI/CI deployment.                                              |
+| `CLOUDFLARE_API_TOKEN`     | Wrangler deployment credential; store as a CI secret. Local Wrangler login also works.                |
+| `WORKER_NAME`              | Optional Worker name; defaults to `google-codemode-mcp`, or the Worker selected by Workers Builds.    |
+| `WORKER_DOMAIN`            | Optional custom hostname, e.g. `mcp.example.com`; no scheme or path.                                  |
+| `ARTIFACTS_BUCKET`         | Optional existing private R2 bucket; enables bounded artifact storage.                                |
+| `ARTIFACT_DOWNLOAD_ORIGIN` | Optional HTTPS origin; enables read-only whole-file URLs from this Worker. Requires artifact storage. |
+| `WORKER_ROUTE`             | Optional route pattern, e.g. `example.com/mcp*`; use instead of `WORKER_DOMAIN`.                      |
 
 Use a token scoped to the target account with Workers Scripts edit permission
 (the **Edit Cloudflare Workers** template). Custom domains/routes also need the
@@ -70,7 +72,7 @@ just deploy                          # Publish and configure the domain/route
 The equivalent command without `just` is `node deploy.mjs`, optionally
 with `--dry-run`. The helper maps settings to pinned Wrangler flags and keeps
 Cloudflare credentials in the deployment process. `ARTIFACTS_BUCKET` generates a temporary Wrangler configuration with the R2 binding;
-the other variables are not Worker runtime bindings. Export them in the shell or configure them in CI build settings;
+`ARTIFACT_DOWNLOAD_ORIGIN` becomes a Worker runtime variable. The other variables are deployment settings. Export them in the shell or configure them in CI build settings;
 the helper does not load dotenv files.
 
 With no domain or route, Wrangler enables
@@ -98,6 +100,34 @@ bucket, Google secret or persistent MCP session is needed. This does not create 
 bucket or configure billing/lifecycle; provision those separately. Keep authenticated
 ingress in place: a valid Google call before storage is an admission check, not a
 per-person quota or caller identity.
+
+Enable standalone whole-file downloads:
+
+```sh
+export ARTIFACTS_BUCKET=my-private-artifacts
+export ARTIFACT_DOWNLOAD_ORIGIN=https://mcp.example.com
+just deploy
+```
+
+References and manifests then include a `downloadUrl` served by this Worker at
+`/mcp/artifacts/v1/...`. GET or HEAD returns the complete file after size and SHA-256
+verification. The URL grants read-only access until the artifact expires or is
+deleted; it cannot authorize MCP reads or deletion. Keep URLs private. Leaving the
+origin unset disables HTTP downloads while preserving MCP storage and reads.
+The origin must be HTTPS with no credentials, path, query or fragment. It comes
+from configuration, never the request Host header. The existing `/mcp*` route
+covers downloads; route the configured origin to this Worker.
+
+Cloudflare Access and other ingress policies still apply before the Worker. A
+protected deployment requires its normal ingress credentials for downloads.
+Operators choose ingress policy; this option does not create a public bypass.
+The endpoint supplies a whole file independently of any gateway; native file
+presentation in Claude, ChatGPT or OpenClaw remains host-specific and unqualified.
+Range requests return the whole file; HTTP upload, delete, listing and resumable
+transport are unavailable. Two direct hosted controls verified exact JSON/binary
+downloads, HEAD, protected ingress, capability rejection and deletion. See the
+[standalone download evidence](tests/hosted/README.md#standalone-artifact-downloads-2026-11-05)
+for the tested candidate and limits.
 
 Use `describe({path:'pagination'})` and its
 [reference](skills/google-workspace/references/pagination.md) to collect bounded

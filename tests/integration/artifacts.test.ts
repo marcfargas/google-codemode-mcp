@@ -386,3 +386,108 @@ test('large native JSON routes explicitly through artifacts while the native res
     await client.close();
   }
 });
+
+test('standalone HTTP downloads deliver verified files with read-only capabilities', async () => {
+  const origin = 'https://files.example.test';
+  const client = await openBuiltWorker({
+    artifacts: true,
+    outbound,
+    bindings: { ARTIFACT_DOWNLOAD_ORIGIN: { type: 'text', value: origin } },
+  });
+  try {
+    const described = await client.tool<{ downloads: { enabled: boolean } }>('describe', {
+      path: 'artifacts',
+    });
+    assert.equal(described.downloads.enabled, true);
+    for (const [name, bytes, json] of [
+      ['résumé "🌍.bin', Buffer.from(Array.from({ length: 131072 }, (_, i) => i % 256)), false],
+      ['empty.bin', Buffer.alloc(0), false],
+      ['page.json', Buffer.from(JSON.stringify({ value: 'é'.repeat(150000) })), true],
+    ] as const) {
+      const result = await client.tool<Receipt>('execute', {
+        accessToken: token,
+        inputs: { size: bytes.length, name },
+        code:
+          read +
+          (json
+            ? `return artifacts.putJson({value:'é'.repeat(150000)},{name:inputs.name});`
+            : `return artifacts.putBytes({encoding:'base64',data:btoa(Array.from({length:inputs.size},(_,i)=>String.fromCharCode(i%256)).join('')),mimeType:'application/octet-stream'},{name:inputs.name});`),
+      });
+      assert.equal(result.status, 'completed', JSON.stringify(result));
+      const ref = result.artifacts.references[0];
+      assert.ok(ref.downloadUrl);
+      assert.ok(ref.downloadUrl.startsWith(origin + '/mcp/artifacts/v1/'));
+      assert.equal(ref.downloadUrl.includes(ref.uri.split('/').at(-1)!), false);
+      const manifest = JSON.parse(
+        ((await client.resource(ref.uri)).contents[0] as { text: string }).text,
+      );
+      assert.equal(manifest.downloadUrl, ref.downloadUrl);
+      const response = await client.fetch(ref.downloadUrl, {
+        headers: { host: 'attacker.test', range: 'bytes=0-1' },
+      });
+      assert.equal(response.status, 200);
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), bytes);
+      assert.equal(response.headers.get('content-length'), String(bytes.length));
+      assert.equal(response.headers.get('content-type'), ref.mimeType);
+      assert.equal(response.headers.get('etag'), '"' + hash(bytes) + '"');
+      assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+      assert.match(response.headers.get('content-disposition')!, /^attachment;/);
+      assert.match(response.headers.get('cache-control')!, /no-store/);
+      assert.match(response.headers.get('cache-control')!, /no-transform/);
+      const head = await client.fetch(ref.downloadUrl, { method: 'HEAD' });
+      assert.equal(head.status, 200);
+      assert.equal((await head.arrayBuffer()).byteLength, 0);
+      assert.equal(head.headers.get('content-length'), String(bytes.length));
+      for (const method of ['POST', 'PUT', 'DELETE'])
+        assert.equal((await client.fetch(ref.downloadUrl, { method })).status, 405);
+      for (const url of [
+        ref.downloadUrl + '/',
+        ref.downloadUrl + '?x=1',
+        ref.downloadUrl.slice(0, -1),
+        ref.downloadUrl.replace(/.$/, ref.downloadUrl.endsWith('0') ? '1' : '0'),
+      ])
+        assert.equal((await client.fetch(url)).status, 404);
+      const secret = ref.downloadUrl.split('/').at(-1)!;
+      for (const operation of ['readBytes', 'delete']) {
+        const denied = await client.tool<Receipt>('execute', {
+          accessToken: token,
+          inputs: { uri: 'artifact://google-codemode-mcp/v1/' + secret },
+          code: `return artifacts.${operation}(inputs.uri);`,
+        });
+        assert.equal(denied.status, 'error');
+      }
+      await client.tool('execute', {
+        accessToken: token,
+        inputs: { uri: ref.uri },
+        code: 'return artifacts.delete(inputs.uri);',
+      });
+      assert.equal((await client.fetch(ref.downloadUrl)).status, 404);
+    }
+  } finally {
+    await client.close();
+  }
+  for (const options of [
+    { artifacts: true },
+    { bindings: { ARTIFACT_DOWNLOAD_ORIGIN: { type: 'text' as const, value: origin } } },
+    {
+      artifacts: true,
+      bindings: {
+        ARTIFACT_DOWNLOAD_ORIGIN: { type: 'text' as const, value: 'https://files.test/path' },
+      },
+    },
+  ]) {
+    const disabled = await openBuiltWorker(options);
+    try {
+      assert.equal(
+        (
+          await disabled.fetch(
+            origin + '/mcp/artifacts/v1/' + 'a'.repeat(64) + '/' + 'b'.repeat(64),
+          )
+        ).status,
+        404,
+      );
+    } finally {
+      await disabled.close();
+    }
+  }
+});

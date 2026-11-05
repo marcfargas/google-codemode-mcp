@@ -170,6 +170,7 @@ console.log(JSON.stringify({args,path,config:JSON.parse(fs.readFileSync(path,'ut
     const env = {
       PATH: process.env.PATH,
       ARTIFACTS_BUCKET: 'private-test-artifacts',
+      ARTIFACT_DOWNLOAD_ORIGIN: 'https://files.example.invalid/',
       WRANGLER_SEND_METRICS: 'false',
     };
     const result = spawnSync(process.execPath, [helper, '--dry-run'], {
@@ -182,12 +183,38 @@ console.log(JSON.stringify({args,path,config:JSON.parse(fs.readFileSync(path,'ut
     assert.deepEqual(saved.config.r2_buckets, [
       { binding: 'ARTIFACTS', bucket_name: 'private-test-artifacts' },
     ]);
+    assert.equal(saved.config.vars.ARTIFACT_DOWNLOAD_ORIGIN, 'https://files.example.invalid');
     assert.deepEqual(saved.config.worker_loaders, [{ binding: 'LOADER' }]);
     assert.equal(saved.config.compatibility_date, '2026-07-28');
     assert.deepEqual(saved.config.observability, { enabled: false });
     assert.equal(saved.config.main, join(directory, 'src', 'worker.ts'));
     assert.equal(await readFile(join(directory, 'wrangler.jsonc'), 'utf8'), base);
     await assert.rejects(readFile(saved.path), { code: 'ENOENT' });
+    for (const origin of [
+      '',
+      'http://files.test',
+      'https://user@files.test',
+      'https://files.test/path',
+      'https://files.test/foo/..',
+      'https://files.test?',
+      'https://files.test#',
+      'https://files.test/?q=x',
+    ]) {
+      const invalid = spawnSync(process.execPath, [helper], {
+        cwd: directory,
+        encoding: 'utf8',
+        env: { ...env, ARTIFACT_DOWNLOAD_ORIGIN: origin },
+      });
+      assert.notEqual(invalid.status, 0);
+      assert.equal(invalid.stdout, '');
+    }
+    const unbound = spawnSync(process.execPath, [helper], {
+      cwd: directory,
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, ARTIFACT_DOWNLOAD_ORIGIN: 'https://files.test' },
+    });
+    assert.notEqual(unbound.status, 0);
+    assert.equal(unbound.stdout, '');
     for (const bucket of ['', 'BadBucket', '../bucket', 'ab', 'a'.repeat(64), 'https://bucket']) {
       const invalid = spawnSync(process.execPath, [helper], {
         cwd: directory,

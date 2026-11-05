@@ -5,6 +5,7 @@ interface Environment {
   CANDIDATE_DIGEST: string;
   WORKER_VERSION: { id: string };
   ARTIFACTS?: R2Bucket;
+  ARTIFACT_DOWNLOAD_ORIGIN?: string;
 }
 
 /** Test-deployment identity only; all MCP behavior comes from the product. */

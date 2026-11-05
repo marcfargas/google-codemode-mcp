@@ -20,6 +20,7 @@ export const ARTIFACTS_CAPABILITIES = {
 export type ArtifactBucket = Pick<R2Bucket, 'get' | 'put' | 'delete'>;
 export interface ArtifactReference {
   uri: string;
+  downloadUrl?: string;
   kind: 'json' | 'bytes';
   mimeType: string;
   name?: string;
@@ -54,6 +55,8 @@ const encoder = new TextEncoder();
 const limits = ARTIFACTS_CAPABILITIES.limits;
 const prefix = 'artifact://google-codemode-mcp/v1/';
 const canonicalSecret = /^[A-Za-z0-9_-]{43}$/;
+const downloadPath = '/mcp/artifacts/v1/';
+type ArtifactMetadata = Omit<ArtifactReference, 'uri' | 'downloadUrl'>;
 const encode = (bytes: Uint8Array) => {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -63,6 +66,28 @@ const digest = async (bytes: Uint8Array) =>
   Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (byte) =>
     byte.toString(16).padStart(2, '0'),
   ).join('');
+
+/** Downloads are opt-in and never derive their origin from caller-controlled headers. */
+export function artifactDownloadOrigin(value: unknown): string | undefined {
+  if (typeof value !== 'string') return;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol === 'https:' &&
+      !url.username &&
+      !url.password &&
+      !url.search &&
+      !url.hash &&
+      (value === url.origin || value === url.origin + '/')
+    )
+      return url.origin;
+  } catch {
+    /* Invalid configuration leaves HTTP downloads disabled. */
+  }
+}
+
+const downloadToken = (secret: string) =>
+  digest(encoder.encode('google-codemode-mcp/download/v1/' + secret));
 
 function inputObject(value: unknown, keys: readonly string[]): Record<string, unknown> {
   if (typeof value === 'string') {
@@ -162,46 +187,75 @@ async function collect(object: R2ObjectBody, expected: number): Promise<Uint8Arr
   }
 }
 
-export function createArtifactStore(bucket?: ArtifactBucket, options: { now?: () => number } = {}) {
+export function createArtifactStore(
+  bucket?: ArtifactBucket,
+  options: { now?: () => number; downloadOrigin?: string } = {},
+) {
   const now = options.now ?? Date.now;
+  const origin = artifactDownloadOrigin(options.downloadOrigin);
+  const downloadsEnabled = !!(bucket && origin);
+  const downloadUrl = (key: string, token: string) =>
+    `${origin}${downloadPath}${key.slice('artifacts/v1/'.length)}/${token}`;
 
-  async function load(uri: unknown, chunk = false) {
+  async function loadStored(key: string) {
     if (!bucket) fail('ARTIFACTS_UNAVAILABLE');
-    const parsed = await capability(uri);
-    if (!chunk && parsed.offset !== undefined) fail('ARTIFACT_UNAVAILABLE');
     let stored: R2ObjectBody | null;
     try {
-      stored = await bucket.get(parsed.key);
+      stored = await bucket.get(key);
     } catch {
       fail('ARTIFACT_UNAVAILABLE');
     }
     if (!stored) fail('ARTIFACT_UNAVAILABLE');
-    let reference: ArtifactReference;
+    let metadata: ArtifactMetadata;
     try {
-      const metadata = JSON.parse(
+      const parsed = JSON.parse(
         stored.customMetadata?.artifact ?? 'null',
-      ) as ArtifactReference | null;
+      ) as ArtifactMetadata | null;
       if (
-        !metadata ||
-        (metadata.kind !== 'json' && metadata.kind !== 'bytes') ||
-        !validMimeType(metadata.mimeType) ||
-        metadata.complete !== true ||
-        !Number.isSafeInteger(metadata.size) ||
-        metadata.size < 0 ||
-        metadata.size > (metadata.kind === 'json' ? limits.jsonBytes : limits.bytes) ||
-        metadata.size !== stored.size ||
-        !/^[a-f0-9]{64}$/.test(metadata.sha256) ||
-        !Number.isSafeInteger(metadata.createdAt) ||
-        !Number.isSafeInteger(metadata.expiresAt) ||
-        metadata.expiresAt - metadata.createdAt !== 3_600_000 ||
-        metadata.expiresAt <= now() ||
-        (metadata.kind === 'json' && metadata.mimeType !== 'application/json')
+        !parsed ||
+        (parsed.kind !== 'json' && parsed.kind !== 'bytes') ||
+        !validMimeType(parsed.mimeType) ||
+        parsed.complete !== true ||
+        !Number.isSafeInteger(parsed.size) ||
+        parsed.size < 0 ||
+        parsed.size > (parsed.kind === 'json' ? limits.jsonBytes : limits.bytes) ||
+        parsed.size !== stored.size ||
+        !/^[a-f0-9]{64}$/.test(parsed.sha256) ||
+        !Number.isSafeInteger(parsed.createdAt) ||
+        !Number.isSafeInteger(parsed.expiresAt) ||
+        parsed.expiresAt - parsed.createdAt !== 3_600_000 ||
+        parsed.expiresAt <= now() ||
+        (parsed.kind === 'json' && parsed.mimeType !== 'application/json')
       )
         fail('ARTIFACT_UNAVAILABLE');
-      reference = { ...metadata, uri: parsed.uri };
+      const name = displayName(parsed.name);
+      metadata = {
+        kind: parsed.kind,
+        mimeType: parsed.mimeType,
+        ...(name === undefined ? {} : { name }),
+        size: parsed.size,
+        sha256: parsed.sha256,
+        createdAt: parsed.createdAt,
+        expiresAt: parsed.expiresAt,
+        complete: true,
+      };
     } catch {
       await stored.body.cancel().catch(() => undefined);
       fail('ARTIFACT_UNAVAILABLE');
+    }
+    return { stored, metadata };
+  }
+
+  async function load(uri: unknown, chunk = false) {
+    const parsed = await capability(uri);
+    if (!chunk && parsed.offset !== undefined) fail('ARTIFACT_UNAVAILABLE');
+    const { stored, metadata } = await loadStored(parsed.key);
+    const reference: ArtifactReference = { ...metadata, uri: parsed.uri };
+    // Older objects without the attenuated capability remain MCP-readable.
+    if (downloadsEnabled && stored.customMetadata?.download) {
+      const token = await downloadToken(parsed.uri.slice(prefix.length));
+      if (stored.customMetadata.download === (await digest(encoder.encode(token))))
+        reference.downloadUrl = downloadUrl(parsed.key, token);
     }
     return { ...parsed, stored, reference };
   }
@@ -220,6 +274,57 @@ export function createArtifactStore(bucket?: ArtifactBucket, options: { now?: ()
   }
 
   return {
+    downloadsEnabled,
+    async download(request: Request): Promise<Response> {
+      const unavailable = () =>
+        new Response(request.method === 'HEAD' ? null : 'Not found', {
+          status: 404,
+          headers: { 'Cache-Control': 'private, no-store, no-transform' },
+        });
+      if (!downloadsEnabled) return unavailable();
+      const match = /^https?:\/\/[^/]+\/mcp\/artifacts\/v1\/([a-f0-9]{64})\/([a-f0-9]{64})$/.exec(
+        request.url,
+      );
+      if (!match) return unavailable();
+      if (request.method !== 'GET' && request.method !== 'HEAD')
+        return new Response('Method not allowed', {
+          status: 405,
+          headers: { Allow: 'GET, HEAD', 'Cache-Control': 'private, no-store, no-transform' },
+        });
+      try {
+        const { stored, metadata } = await loadStored('artifacts/v1/' + match[1]);
+        if (stored.customMetadata?.download !== (await digest(encoder.encode(match[2])))) {
+          await stored.body.cancel().catch(() => undefined);
+          return unavailable();
+        }
+        const bytes = await collect(stored, metadata.size);
+        if ((await digest(bytes)) !== metadata.sha256) return unavailable();
+        const name = (metadata.name || `artifact-${metadata.sha256.slice(0, 12)}`).replace(
+          /[\/\\]/g,
+          '_',
+        );
+        // Round-trip UTF-8 replaces lone surrogates before RFC5987 encoding.
+        const filename = encodeURIComponent(new TextDecoder().decode(encoder.encode(name))).replace(
+          /['()*]/g,
+          (character) => '%' + character.charCodeAt(0).toString(16).toUpperCase(),
+        );
+        return new Response(request.method === 'HEAD' ? null : bytes, {
+          headers: {
+            'Content-Type': metadata.mimeType,
+            'Content-Length': String(bytes.length),
+            'Content-Disposition': `attachment; filename*=UTF-8''${filename}`,
+            'Cache-Control': 'private, no-store, no-transform',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "sandbox; default-src 'none'",
+            'Referrer-Policy': 'no-referrer',
+            'X-Robots-Tag': 'noindex',
+            ETag: `"${metadata.sha256}"`,
+          },
+        });
+      } catch {
+        return unavailable();
+      }
+    },
     async readResource(uri: string): Promise<ReadResourceResult> {
       const loaded = await load(uri, true);
       const { reference, offset, length } = loaded;
@@ -380,6 +485,7 @@ export function createArtifactStore(bucket?: ArtifactBucket, options: { now?: ()
               .replace(/\//g, '_')
               .replace(/=+$/, '');
             const key = 'artifacts/v1/' + (await digest(encoder.encode(secret)));
+            const token = await downloadToken(secret);
             const createdAt = now();
             const reference: ArtifactReference = {
               uri: prefix + secret,
@@ -391,18 +497,22 @@ export function createArtifactStore(bucket?: ArtifactBucket, options: { now?: ()
               createdAt,
               expiresAt: createdAt + 3_600_000,
               complete: true,
+              ...(downloadsEnabled ? { downloadUrl: downloadUrl(key, token) } : {}),
             };
             gate();
             record.reference = reference;
             state.key = key;
             state.started = true;
             try {
-              const { uri: _uri, ...metadata } = reference;
+              const { uri: _uri, downloadUrl: _downloadUrl, ...metadata } = reference;
               const stored = await bucket.put(key, bytes, {
                 sha256: reference.sha256,
                 onlyIf: { etagDoesNotMatch: '*' },
                 httpMetadata: { contentType: mimeType },
-                customMetadata: { artifact: JSON.stringify(metadata) },
+                customMetadata: {
+                  artifact: JSON.stringify(metadata),
+                  download: await digest(encoder.encode(token)),
+                },
               });
               if (!stored) {
                 state.started = false;

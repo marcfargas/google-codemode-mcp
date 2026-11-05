@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { artifactDownloadOrigin } from '../../src/artifacts.ts';
 
 const checkout = fileURLToPath(new URL('../../', import.meta.url).href);
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
@@ -11,11 +12,20 @@ const hash = (value: string | Buffer) => createHash('sha256').update(value).dige
 export async function prepareHosted(
   output: string,
   mode: 'probes' | 'product' = 'probes',
-  options: { artifactBucket?: string } = { artifactBucket: process.env.ARTIFACTS_BUCKET },
+  options: { artifactBucket?: string; downloadOrigin?: string } = {
+    artifactBucket: process.env.ARTIFACTS_BUCKET,
+    downloadOrigin: process.env.ARTIFACT_DOWNLOAD_ORIGIN,
+  },
 ) {
   if (!['probes', 'product'].includes(mode))
     throw new Error('Select probes or product preparation');
   const artifactBucket = options.artifactBucket;
+  const downloadOrigin = artifactDownloadOrigin(options.downloadOrigin);
+  if (
+    options.downloadOrigin !== undefined &&
+    (!downloadOrigin || !artifactBucket || mode !== 'product')
+  )
+    throw new Error('Artifact downloads require product storage and a valid HTTPS origin');
   if (
     artifactBucket !== undefined &&
     (mode !== 'product' || !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(artifactBucket))
@@ -44,7 +54,10 @@ export async function prepareHosted(
   const sourceFiles: Record<string, string> = {};
   for (const path of sourcePaths.sort())
     sourceFiles[path] = hash(await readFile(join(checkout, path)));
-  const effectiveStorage = artifactBucket ? { artifactBucket } : {};
+  const effectiveStorage = {
+    ...(artifactBucket ? { artifactBucket } : {}),
+    ...(downloadOrigin ? { downloadOrigin } : {}),
+  };
   const sourceDigest = hash(JSON.stringify({ mode, sourceFiles, ...effectiveStorage }));
   const result = spawnSync(
     join(checkout, 'node_modules/.bin/wrangler'),
@@ -70,7 +83,10 @@ export async function prepareHosted(
     ...config,
     main: join(output, 'worker.js'),
     no_bundle: true,
-    vars: { CANDIDATE_DIGEST: sourceDigest },
+    vars: {
+      CANDIDATE_DIGEST: sourceDigest,
+      ...(downloadOrigin ? { ARTIFACT_DOWNLOAD_ORIGIN: downloadOrigin } : {}),
+    },
     ...(artifactBucket
       ? { r2_buckets: [{ binding: 'ARTIFACTS', bucket_name: artifactBucket }] }
       : {}),

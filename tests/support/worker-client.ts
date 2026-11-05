@@ -114,6 +114,9 @@ export async function openBuiltWorker(options: BuiltWorkerOptions = {}) {
     throw new Error('Built Worker MCP connection failed; remote diagnostics suppressed');
   }
   return {
+    fetch(url: string, init?: Parameters<typeof worker.dispatchFetch>[1]) {
+      return worker.dispatchFetch(url, init);
+    },
     async resource(uri: string) {
       return client.readResource({ uri });
     },
