@@ -21,10 +21,14 @@ export interface ExecutionReceipt<T = unknown> {
 /** Exercise the deployed bundle locally; parent Worker egress interception is opt-in. */
 export interface BuiltWorkerOptions {
   outbound?: (request: Request) => Promise<Response>;
+  artifacts?: boolean;
+  persistencePath?: string;
+  bundle?: string;
 }
 export async function createBuiltWorker(options: BuiltWorkerOptions = {}) {
-  const bundle = await readFile('dist/worker.js', 'utf8');
+  const bundle = options.bundle ?? (await readFile('dist/worker.js', 'utf8'));
   return new Miniflare({
+    ...(options.persistencePath ? { resourcePersistencePath: options.persistencePath } : {}),
     workers: [
       {
         config: {
@@ -36,7 +40,12 @@ export async function createBuiltWorker(options: BuiltWorkerOptions = {}) {
             modulesRoot: '/',
             modules: { 'worker.js': { type: 'esm', contents: bundle } },
           },
-          env: { LOADER: { type: 'worker-loader' } },
+          env: {
+            LOADER: { type: 'worker-loader' },
+            ...(options.artifacts
+              ? { ARTIFACTS: { type: 'r2' as const, name: 'test-artifacts' } }
+              : {}),
+          },
         },
         ...(options.outbound
           ? {
@@ -103,6 +112,15 @@ export async function openBuiltWorker(options: BuiltWorkerOptions = {}) {
   return {
     async resource(uri: string) {
       return client.readResource({ uri });
+    },
+    async resourceTemplates() {
+      return client.listResourceTemplates();
+    },
+    async resources() {
+      return client.listResources();
+    },
+    async toolResult(name: string, args: Record<string, unknown>) {
+      return client.callTool({ name, arguments: args });
     },
     async tool<T>(name: string, args: Record<string, unknown>): Promise<T> {
       try {

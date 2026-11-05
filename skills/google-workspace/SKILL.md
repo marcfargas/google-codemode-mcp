@@ -17,7 +17,7 @@ Use `execute` to submit JavaScript. The trusted caller supplies a short-lived
 OAuth `accessToken` as a request argument. When a gateway hides this argument,
 omit it: the gateway injects its current caller grant. Never invent or supply a
 token in code. The program receives `google`, `inputs`,
-and deployment-provided `snippets`; it does not receive the token. Keep user data
+deployment-provided `snippets`, and optional `artifacts`; it does not receive the token. Keep user data
 in `inputs` instead of interpolating it into code.
 
 The following illustrates the native client shape after method discovery. It is
@@ -66,13 +66,22 @@ bytes directly. Media `.data` is `{encoding: 'base64', data, size, mimeType, sha
 `data` contains standard base64. Decode it in the host when saving a file and verify
 its byte length/hash. Downloads are limited to 131072 raw bytes. Bounded Drive files.create multipart
 uploads accept native media:{mimeType,body:<byte envelope>}; other upload modes,
-transport overrides and durable artifacts remain unavailable. Before composing
+transport overrides remain unavailable. Before composing
 Gmail/Drive transfers, read [media transfers](skill://google-codemode-mcp/google-workspace/references/media-transfers.md)
 through MCP Resources for encoding, composeMime, scopes, examples and limits. Google acknowledgement of a send does not establish recipient delivery.
 
 Drive v3 `files.update` has no conditional-update parameter in Discovery revision 20261102. `File.version` is output-only, not a compare-and-swap input. Conditional
 headers such as `If-Match` and second-argument SDK options are refused before
 dispatch. A read followed by a write does not prevent concurrent lost updates.
+
+Artifact storage is optional. Check `describe({path: 'artifacts'})` and read
+[artifact storage](skill://google-codemode-mcp/google-workspace/references/artifacts.md)
+through MCP Resources before using `artifacts.putJson` or `artifacts.putBytes`.
+Explicit storage relieves the inline output channel without raising native limits.
+A complete random artifact URI grants its holder read/delete access until expiry;
+it is not a stable Google-user identity. Helpers are unavailable inside snippets.
+Inspect the separate trusted storage ledger after errors; storage does not undo
+Google writes. Physical R2 lifecycle and host file presentation need separate proof.
 
 References:
 

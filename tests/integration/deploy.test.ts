@@ -151,3 +151,53 @@ test('README wire examples work against the pinned MCP handler', async () => {
   assert.equal(((await called.json()) as any).result.structuredContent.status, 'completed');
   assert.deepEqual(execution, JSON.parse(callBody).params.arguments);
 });
+
+test('optional artifact bucket generates a disposable config without changing the checkout', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codemode-artifact-deploy-'));
+  const helper = resolve('deploy.mjs');
+  const base = await readFile('wrangler.jsonc', 'utf8');
+  try {
+    await mkdir(join(directory, 'node_modules', '.bin'), { recursive: true });
+    await writeFile(join(directory, 'wrangler.jsonc'), base);
+    await writeFile(
+      join(directory, 'node_modules', '.bin', 'wrangler'),
+      `#!/usr/bin/env node
+const fs=require('node:fs');const args=process.argv.slice(2);const path=args[args.indexOf('--config')+1];
+console.log(JSON.stringify({args,path,config:JSON.parse(fs.readFileSync(path,'utf8'))}));
+`,
+      { mode: 0o700 },
+    );
+    const env = {
+      PATH: process.env.PATH,
+      ARTIFACTS_BUCKET: 'private-test-artifacts',
+      WRANGLER_SEND_METRICS: 'false',
+    };
+    const result = spawnSync(process.execPath, [helper, '--dry-run'], {
+      cwd: directory,
+      encoding: 'utf8',
+      env,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const saved = JSON.parse(result.stdout);
+    assert.deepEqual(saved.config.r2_buckets, [
+      { binding: 'ARTIFACTS', bucket_name: 'private-test-artifacts' },
+    ]);
+    assert.deepEqual(saved.config.worker_loaders, [{ binding: 'LOADER' }]);
+    assert.equal(saved.config.compatibility_date, '2026-07-28');
+    assert.deepEqual(saved.config.observability, { enabled: false });
+    assert.equal(saved.config.main, join(directory, 'src', 'worker.ts'));
+    assert.equal(await readFile(join(directory, 'wrangler.jsonc'), 'utf8'), base);
+    await assert.rejects(readFile(saved.path), { code: 'ENOENT' });
+    for (const bucket of ['', 'BadBucket', '../bucket', 'ab', 'a'.repeat(64), 'https://bucket']) {
+      const invalid = spawnSync(process.execPath, [helper], {
+        cwd: directory,
+        encoding: 'utf8',
+        env: { ...env, ARTIFACTS_BUCKET: bucket },
+      });
+      assert.notEqual(invalid.status, 0);
+      assert.equal(invalid.stdout, '', 'invalid bucket fails before Wrangler');
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

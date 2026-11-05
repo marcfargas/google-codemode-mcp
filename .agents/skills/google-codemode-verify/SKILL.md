@@ -138,3 +138,22 @@ and answer.json IDs never authorize deletion. Inspect folder-child inventory and
 unreconciled writes before folder deletion; retained folders or unknown effects
 fail cleanup. Live controls cover native export; the paid reverse case uses a blob.
 Neither establishes durable artifacts or hosted media qualification.
+
+Optional artifact storage uses `ARTIFACTS_BUCKET` only during deploy/preparation;
+absence leaves storage disabled. `just check` includes actual workerd + private
+Miniflare R2 proof under `tests/integration/artifacts.test.ts`, with cross-request
+and new-Worker reads, large native JSON and cap refusal, binary/chunks/hash, strict JSON, scoped snippet
+refusal and preserved native write receipts. Core tests exercise expiry, quotas,
+wrong capabilities, deletion and late-put cleanup. For deployment changes also
+exercise `ARTIFACTS_BUCKET=synthetic-private-artifacts just deploy --dry-run`;
+this validates binding configuration without provisioning or publishing.
+
+A stored artifact URI is a bearer capability, not stable user identity. Inspect
+separate trusted artifact outcomes/references after program/output errors. A
+pending write retains an unknown outcome and tentative URI; completion-aware
+cleanup is best effort. Request-context cleanup and access expiry do not establish
+physical R2 retention. Bucket lifecycle, hosted storage, real-agent artifact use
+and native host downloadable-file presentation stay unqualified until separately
+exercised. The four passing media cells qualify cf98b51; they do not silently
+qualify later artifact code or an R2-enabled hosted deployment. Avoid new paid
+runs merely to report these existing metrics.

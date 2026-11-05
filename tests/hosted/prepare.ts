@@ -8,9 +8,21 @@ const checkout = fileURLToPath(new URL('../../', import.meta.url).href);
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 
 /** Prepare exact retained deploy bytes without authenticating or publishing. */
-export async function prepareHosted(output: string, mode: 'probes' | 'product' = 'probes') {
+export async function prepareHosted(
+  output: string,
+  mode: 'probes' | 'product' = 'probes',
+  options: { artifactBucket?: string } = { artifactBucket: process.env.ARTIFACTS_BUCKET },
+) {
   if (!['probes', 'product'].includes(mode))
     throw new Error('Select probes or product preparation');
+  const artifactBucket = options.artifactBucket;
+  if (
+    artifactBucket !== undefined &&
+    (mode !== 'product' || !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(artifactBucket))
+  )
+    throw new Error(
+      'Artifact storage requires product preparation and a valid private bucket name',
+    );
   const relativeOutput = relative(checkout, output);
   if (!isAbsolute(output) || !(relativeOutput === '..' || relativeOutput.startsWith('../')))
     throw new Error('Use a new absolute evidence directory outside the checkout');
@@ -21,6 +33,8 @@ export async function prepareHosted(output: string, mode: 'probes' | 'product' =
     'snippets.config.ts',
     'wrangler.jsonc',
     'skills/google-workspace/SKILL.md',
+    'skills/google-workspace/references/media-transfers.md',
+    'skills/google-workspace/references/artifacts.md',
     'tests/hosted/wrangler.json',
   ];
   for (const directory of ['src', 'tests/hosted'])
@@ -29,7 +43,8 @@ export async function prepareHosted(output: string, mode: 'probes' | 'product' =
   const sourceFiles: Record<string, string> = {};
   for (const path of sourcePaths.sort())
     sourceFiles[path] = hash(await readFile(join(checkout, path)));
-  const sourceDigest = hash(JSON.stringify({ mode, sourceFiles }));
+  const effectiveStorage = artifactBucket ? { artifactBucket } : {};
+  const sourceDigest = hash(JSON.stringify({ mode, sourceFiles, ...effectiveStorage }));
   const result = spawnSync(
     join(checkout, 'node_modules/.bin/wrangler'),
     [
@@ -55,6 +70,9 @@ export async function prepareHosted(output: string, mode: 'probes' | 'product' =
     main: join(output, 'worker.js'),
     no_bundle: true,
     vars: { CANDIDATE_DIGEST: sourceDigest },
+    ...(artifactBucket
+      ? { r2_buckets: [{ binding: 'ARTIFACTS', bucket_name: artifactBucket }] }
+      : {}),
   };
   const revision = spawnSync('git', ['rev-parse', 'HEAD'], {
     cwd: checkout,
@@ -69,6 +87,7 @@ export async function prepareHosted(output: string, mode: 'probes' | 'product' =
     revision,
     preparedAt: new Date().toISOString(),
     hostedExecution: false,
+    ...effectiveStorage,
   };
   await writeFile(join(output, 'wrangler.json'), JSON.stringify(deployment, null, 2) + '\n', {
     mode: 0o600,

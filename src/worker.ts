@@ -4,20 +4,45 @@ import type { ExecutionArguments, SnippetArguments } from './runtime.ts';
 import { validateSnippets } from './snippets.ts';
 import { handleMcp } from './protocol.ts';
 import definitions from '../snippets.config.ts';
+import { createArtifactStore, ARTIFACTS_CAPABILITIES } from './artifacts.ts';
 
 const snippets = validateSnippets(definitions);
 const catalog = new DiscoveryCatalog();
 export default {
-  async fetch(request: Request, env: { LOADER: WorkerLoader }) {
+  async fetch(
+    request: Request,
+    env: { LOADER: WorkerLoader; ARTIFACTS?: R2Bucket },
+    ctx?: Pick<ExecutionContext, 'waitUntil'>,
+  ) {
     if (new URL(request.url).pathname !== '/mcp') return new Response('Not found', { status: 404 });
+    const artifactStore = createArtifactStore(env.ARTIFACTS);
+    const executionOptions = { artifactStore, waitUntil: ctx?.waitUntil.bind(ctx) };
     return handleMcp(request, {
       snippets,
+      readResource: artifactStore.readResource,
       describe: async (args: { path?: string }) => {
         if (args.path === 'snippets') return { snippets };
+        if (args.path === 'artifacts')
+          return { ...ARTIFACTS_CAPABILITIES, enabled: !!env.ARTIFACTS };
+        if (!args.path)
+          return {
+            ...(await catalog.describe()),
+            artifacts: {
+              path: 'artifacts',
+              enabled: !!env.ARTIFACTS,
+              skill: 'skill://google-codemode-mcp/google-workspace/references/artifacts.md',
+            },
+          };
         return catalog.describe(args.path);
       },
       execute: (args: ExecutionArguments) =>
-        executeProgram({ args, catalog, snippets, executor: createExecutor(env.LOADER) }),
+        executeProgram({
+          args,
+          catalog,
+          snippets,
+          executor: createExecutor(env.LOADER),
+          ...executionOptions,
+        }),
       runSnippet: async (name: string, args: SnippetArguments) => {
         const snippet = snippets.find((s) => s.name === name);
         if (!snippet) throw new Error('Unknown snippet');
@@ -27,6 +52,7 @@ export default {
           snippets,
           executor: createExecutor(env.LOADER),
           snippetName: name,
+          ...executionOptions,
         });
       },
     });

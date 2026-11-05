@@ -1,8 +1,11 @@
-import { MEDIA_TRANSFERS_GUIDE } from './knowledge.ts';
+import { ARTIFACTS_GUIDE, MEDIA_TRANSFERS_GUIDE } from './knowledge.ts';
+import { executionArtifactReferences } from './artifact-references.ts';
 import {
   createMcpHandler,
   fromJsonSchema,
   McpServer,
+  ResourceTemplate,
+  type ReadResourceResult,
   type CallToolResult,
   type JsonSchemaType,
 } from '@modelcontextprotocol/server';
@@ -31,7 +34,7 @@ Use \`execute\` to submit JavaScript. The trusted caller supplies a short-lived
 OAuth \`accessToken\` as a request argument. When a gateway hides this argument,
 omit it: the gateway injects its current caller grant. Never invent or supply a
 token in code. The program receives \`google\`, \`inputs\`,
-and deployment-provided \`snippets\`; it does not receive the token. Keep user data
+deployment-provided \`snippets\`, and optional \`artifacts\`; it does not receive the token. Keep user data
 in \`inputs\` instead of interpolating it into code.
 
 The following illustrates the native client shape after method discovery. It is
@@ -80,13 +83,22 @@ bytes directly. Media \`.data\` is \`{encoding: 'base64', data, size, mimeType, 
 \`data\` contains standard base64. Decode it in the host when saving a file and verify
 its byte length/hash. Downloads are limited to 131072 raw bytes. Bounded Drive files.create multipart
 uploads accept native media:{mimeType,body:<byte envelope>}; other upload modes,
-transport overrides and durable artifacts remain unavailable. Before composing
+transport overrides remain unavailable. Before composing
 Gmail/Drive transfers, read [media transfers](skill://google-codemode-mcp/google-workspace/references/media-transfers.md)
 through MCP Resources for encoding, composeMime, scopes, examples and limits. Google acknowledgement of a send does not establish recipient delivery.
 
 Drive v3 \`files.update\` has no conditional-update parameter in Discovery revision 20261102. \`File.version\` is output-only, not a compare-and-swap input. Conditional
 headers such as \`If-Match\` and second-argument SDK options are refused before
 dispatch. A read followed by a write does not prevent concurrent lost updates.
+
+Artifact storage is optional. Check \`describe({path: 'artifacts'})\` and read
+[artifact storage](skill://google-codemode-mcp/google-workspace/references/artifacts.md)
+through MCP Resources before using \`artifacts.putJson\` or \`artifacts.putBytes\`.
+Explicit storage relieves the inline output channel without raising native limits.
+A complete random artifact URI grants its holder read/delete access until expiry;
+it is not a stable Google-user identity. Helpers are unavailable inside snippets.
+Inspect the separate trusted storage ledger after errors; storage does not undo
+Google writes. Physical R2 lifecycle and host file presentation need separate proof.
 
 References:
 
@@ -125,6 +137,7 @@ export interface ProtocolApp {
   execute(args: ExecuteArguments): Promise<unknown>;
   snippets: readonly ProtocolSnippet[];
   runSnippet(name: string, args: SnippetArguments): Promise<unknown>;
+  readResource?(uri: string): Promise<ReadResourceResult>;
 }
 
 const executionProperties = {
@@ -147,7 +160,15 @@ function toolResult(value: unknown): CallToolResult {
       ? (value as Record<string, unknown>)
       : { result: value ?? null };
   return {
-    content: [{ type: 'text', text: JSON.stringify(structuredContent) }],
+    content: [
+      { type: 'text', text: JSON.stringify(structuredContent) },
+      ...executionArtifactReferences(value).map((reference) => ({
+        type: 'resource_link' as const,
+        uri: reference.uri,
+        name: reference.name ?? `artifact-${reference.sha256.slice(0, 12)}`,
+        mimeType: 'application/json',
+      })),
+    ],
     structuredContent,
   };
 }
@@ -158,11 +179,26 @@ export async function handleMcp(request: Request, app: ProtocolApp): Promise<Res
     return new Response('Method not allowed.', { status: 405, headers: { Allow: 'POST' } });
   }
 
+  // The SDK normalizes resource URIs through URL before template callbacks. Keep
+  // the original bytes for capability validation; read only after its bounded
+  // request parser and protocol checks have admitted a resources/read call.
+  const rawResourceRequest = app.readResource ? request.clone() : undefined;
+  async function readArtifactResource() {
+    const message = (await rawResourceRequest!.json()) as {
+      method?: string;
+      params?: { uri?: unknown };
+    };
+    if (message.method !== 'resources/read' || typeof message.params?.uri !== 'string')
+      throw new Error('Artifact unavailable');
+    return app.readResource!(message.params.uri);
+  }
+
   const validator = new CfWorkerJsonSchemaValidator();
   const skills = await SkillsExtension.load(
     memorySkillFiles({
       'google-workspace/SKILL.md': WORKSPACE_SKILL,
       'google-workspace/references/media-transfers.md': MEDIA_TRANSFERS_GUIDE,
+      'google-workspace/references/artifacts.md': ARTIFACTS_GUIDE,
     }),
     { prefix: 'google-codemode-mcp', strict: true },
   );
@@ -177,6 +213,23 @@ export async function handleMcp(request: Request, app: ProtocolApp): Promise<Res
             'Start with describe({}) to discover available services. Read the returned Workspace skill URI through MCP Resources. Follow returned paths and describe each method you need before calling it in execute; do not assume a familiar Google method is supported.',
         },
       );
+      if (app.readResource) {
+        for (const [name, template, mimeType] of [
+          ['artifact-manifest', 'artifact://google-codemode-mcp/v1/{secret}', 'application/json'],
+          [
+            'artifact-chunk',
+            'artifact://google-codemode-mcp/v1/{secret}/chunk/{offset}/{length}',
+            'application/octet-stream',
+          ],
+        ]) {
+          server.registerResource(
+            name,
+            new ResourceTemplate(template, { list: undefined }),
+            { mimeType },
+            async () => readArtifactResource(),
+          );
+        }
+      }
       server.registerTool(
         'describe',
         {
@@ -268,5 +321,7 @@ export async function handleMcp(request: Request, app: ProtocolApp): Promise<Res
     });
   } finally {
     await handler.close();
+    // Cancellation of a tee branch must not await the other branch's lifetime.
+    void rawResourceRequest?.body?.cancel().catch(() => undefined);
   }
 }

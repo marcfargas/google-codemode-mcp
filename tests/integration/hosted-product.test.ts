@@ -271,3 +271,42 @@ test('every later hosted response must remain the expected finite sessionless JS
     }
   }
 });
+
+test('hosted preparation binds optional private artifact storage and identifies its selection', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'hosted-artifact-config-'));
+  try {
+    const output = join(directory, 'prepared');
+    const manifest = await prepareHosted(output, 'product', {
+      artifactBucket: 'synthetic-private-artifacts',
+    });
+    const config = JSON.parse(await readFile(join(output, 'wrangler.json'), 'utf8'));
+    assert.deepEqual(config.r2_buckets, [
+      { binding: 'ARTIFACTS', bucket_name: 'synthetic-private-artifacts' },
+    ]);
+    assert.equal(manifest.artifactBucket, 'synthetic-private-artifacts');
+    assert.equal(
+      manifest.sourceDigest,
+      createHash('sha256')
+        .update(
+          JSON.stringify({
+            mode: 'product',
+            sourceFiles: manifest.sourceFiles,
+            artifactBucket: manifest.artifactBucket,
+          }),
+        )
+        .digest('hex'),
+    );
+    assert.ok(manifest.sourceFiles['skills/google-workspace/references/artifacts.md']);
+    assert.equal(config.workers_dev, false);
+    assert.equal(config.preview_urls, false);
+    assert.equal(config.observability.enabled, false);
+    await assert.rejects(
+      prepareHosted(join(directory, 'invalid'), 'probes', {
+        artifactBucket: 'synthetic-private-artifacts',
+      }),
+      /requires product/,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

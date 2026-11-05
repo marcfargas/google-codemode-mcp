@@ -231,3 +231,22 @@ cleanup, with no unknown mutations. Tokens were injected directly by the trusted
 relay. This qualifies these cases on this deployed product; the earlier synthetic
 CPU/termination receipts retain their original version. Other Gmail cases,
 services, target-host journeys and native Skills activation remain separate.
+
+## Optional private artifact storage
+
+For product-mode preparation, `ARTIFACTS_BUCKET=existing-private-bucket` adds the
+optional ARTIFACTS R2 binding to the retained deployment config and includes that
+selection in candidate identity. Probe mode refuses that setting. The product
+adapter forwards request context for bounded best-effort completion cleanup.
+Preparation creates no bucket and changes no billing, policy or lifecycle.
+The ordinary deployment entrypoint accepts the same environment variable and
+uses a disposable generated config while preserving the base configuration.
+
+Local workerd/Miniflare R2 tests are separate from a hosted storage qualification.
+The existing Workers Editor token has not been proven to provision R2 or change
+lifecycle; bootstrap those through the bucket custodian with appropriate R2
+administration rights if needed. Configure a private bucket and a physical
+lifecycle backstop separately. The one-hour application expiry denies artifact
+access, but does not physically delete bytes. Do not equate it with a one-hour
+retention guarantee. Hosted artifact access, bucket lifecycle and native host
+file presentation remain unqualified by the existing hosted media/Gmail records.

@@ -5,6 +5,10 @@ import { createDispatcher } from './dispatcher.ts';
 import { validateSnippetInput } from './snippets.ts';
 import type { SnippetDefinition } from './snippets.ts';
 import { SERVICES } from './services.ts';
+import { createArtifactStore } from './artifacts.ts';
+import { registerExecutionArtifactReferences } from './artifact-references.ts';
+
+type ArtifactStore = ReturnType<typeof createArtifactStore>;
 
 export interface ExecutionArguments {
   accessToken: string;
@@ -71,6 +75,54 @@ const snippets = Object.freeze({run: async (name, input = {}) => {
   if (!outcome.ok) throw new Error(outcome.error);
   return outcome.value;
 }});
+const __artifactStringify = JSON.stringify;
+const __artifactOwnKeys = Reflect.ownKeys;
+const __artifactDescriptors = Object.getOwnPropertyDescriptors;
+const __artifactGetDescriptor = Object.getOwnPropertyDescriptor;
+const __artifactPrototype = Object.getPrototypeOf;
+const __artifactArray = Array.isArray;
+const __artifactFinite = Number.isFinite;
+const __artifactIs = Object.is;
+const __artifactNumber = Number;
+const __artifactPlainPrototype = Object.prototype;
+const __artifactArrayPrototype = Array.prototype;
+function __artifactJson(value, seen = new Set()) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
+  if (typeof value === 'number' && __artifactFinite(value) && !__artifactIs(value, -0)) return;
+  if (typeof value !== 'object' || seen.has(value)) throw new Error('Artifacts require lossless plain JSON values');
+  const array = __artifactArray(value);
+  if (array ? __artifactPrototype(value) !== __artifactArrayPrototype : __artifactPrototype(value) !== __artifactPlainPrototype && __artifactPrototype(value) !== null)
+    throw new Error('Artifacts require plain JSON');
+  for (let cursor = value; cursor !== null; cursor = __artifactPrototype(cursor)) {
+    const descriptor = __artifactGetDescriptor(cursor, 'toJSON');
+    if (!descriptor) continue;
+    if (!('value' in descriptor) || typeof descriptor.value === 'function')
+      throw new Error('Artifacts reject executable toJSON');
+    break;
+  }
+  const descriptors = __artifactDescriptors(value);
+  const keys = __artifactOwnKeys(descriptors);
+  if (array && keys.length !== value.length + 1) throw new Error('Artifacts reject sparse or extended arrays');
+  seen.add(value);
+  for (const key of keys) {
+    if (array && key === 'length') continue;
+    const descriptor = descriptors[key];
+    if (typeof key !== 'string' || !descriptor.enumerable || !('value' in descriptor) ||
+      (array && (String(__artifactNumber(key)) !== key || __artifactNumber(key) >= value.length || __artifactNumber(key) < 0)))
+      throw new Error('Artifacts reject accessors, symbols and lossy properties');
+    __artifactJson(descriptor.value, seen);
+  }
+  seen.delete(value);
+}
+const artifacts = Object.freeze(Object.fromEntries(['putJson','putBytes','readJson','readBytes','delete'].map(op => [op, async (value, options = {}) => {
+  __artifactJson(options);
+  __artifactJson(value);
+  const input = op === 'putJson' ? {...options,json:__artifactStringify(value)} : op === 'putBytes' ? {...options,body:value} : {uri:value};
+  __artifactJson(input);
+  const outcome = await hostBridge.artifact(op, __artifactStringify(input));
+  if (!outcome.ok) throw Object.assign(new Error(outcome.error.message), outcome.error);
+  return outcome.value;
+}])));
 `;
 
 export async function executeProgram(options: {
@@ -80,6 +132,8 @@ export async function executeProgram(options: {
   executor: Executor;
   transport?: typeof fetch;
   snippetName?: string;
+  artifactStore?: ArtifactStore;
+  waitUntil?: (promise: Promise<unknown>) => void;
 }) {
   const { args, catalog, snippets, executor } = options;
   if (!args.accessToken || args.accessToken.length > 16_384 || /[\r\n]/.test(args.accessToken)) {
@@ -97,6 +151,11 @@ export async function executeProgram(options: {
     requestId,
     transport: options.transport,
   });
+  const artifactExecution = (options.artifactStore ?? createArtifactStore()).createExecution({
+    token: args.accessToken,
+    canWrite: () => dispatcher.outcomes.some((outcome) => outcome.outcome === 'acknowledged'),
+    waitUntil: options.waitUntil,
+  });
   let snippetCalls = 0;
   const registry = new Map(snippets.map((s) => [s.name, s]));
   const topSnippet = options.snippetName ? registry.get(options.snippetName) : undefined;
@@ -107,6 +166,22 @@ export async function executeProgram(options: {
       {
         name: 'hostBridge',
         fns: {
+          artifact: async (op, serialized) => {
+            if (depth !== 0 || topSnippet)
+              return {
+                ok: false,
+                error: {
+                  code: 'ARTIFACT_SCOPE',
+                  message: 'Artifacts are available only in top-level execute',
+                },
+              };
+            if (typeof op !== 'string' || typeof serialized !== 'string')
+              return {
+                ok: false,
+                error: { code: 'ARTIFACT_INPUT', message: 'Invalid artifact input' },
+              };
+            return artifactExecution.invoke(op, serialized);
+          },
           call: async (path, params) => {
             if (typeof path !== 'string')
               return { ok: false, error: { message: 'Invalid method path' } };
@@ -155,6 +230,7 @@ export async function executeProgram(options: {
   } finally {
     // Includes unawaited and in-flight calls, even when the program returns normally.
     dispatcher.close('Execution ended');
+    artifactExecution.close();
   }
   const output = {
     requestId,
@@ -173,6 +249,7 @@ export async function executeProgram(options: {
     discovery: catalog.provenance,
     scopeAvailability: 'unknown',
     deduplication: 'none',
+    artifacts: artifactExecution.snapshot(),
   };
   // The credential never enters the sandbox. Redaction also covers hostile upstream echoes.
   const redact = (value: unknown) =>
@@ -198,5 +275,7 @@ export async function executeProgram(options: {
       error: 'Execution output exceeds 256000 characters',
     });
   }
-  return JSON.parse(serialized) as Record<string, unknown>;
+  const parsed = JSON.parse(serialized) as Record<string, unknown>;
+  registerExecutionArtifactReferences(parsed, artifactExecution.snapshot().references);
+  return parsed;
 }

@@ -38,7 +38,8 @@ Deployment requires Node 24 and a **Workers Paid plan** for the
 [Dynamic Workers](https://developers.cloudflare.com/dynamic-workers/pricing/)
 used by Code Mode. Executions incur Dynamic Worker creation, request, and CPU
 usage. The checked-in configuration includes the `LOADER` binding; there are no
-databases, persistent sessions, or Google OAuth secrets to provision on the Worker.
+persistent sessions or Google OAuth secrets to provision on the Worker. Optional
+artifact storage adds a private R2 bucket.
 
 The deployment command below uses environment variables without editing
 `wrangler.jsonc` or application source:
@@ -49,6 +50,7 @@ The deployment command below uses environment variables without editing
 | `CLOUDFLARE_API_TOKEN`  | Wrangler deployment credential; store as a CI secret. Local Wrangler login also works.             |
 | `WORKER_NAME`           | Optional Worker name; defaults to `google-codemode-mcp`, or the Worker selected by Workers Builds. |
 | `WORKER_DOMAIN`         | Optional custom hostname, e.g. `mcp.example.com`; no scheme or path.                               |
+| `ARTIFACTS_BUCKET`      | Optional existing private R2 bucket; enables bounded artifact storage.                             |
 | `WORKER_ROUTE`          | Optional route pattern, e.g. `example.com/mcp*`; use instead of `WORKER_DOMAIN`.                   |
 
 Use a token scoped to the target account with Workers Scripts edit permission
@@ -67,8 +69,8 @@ just deploy                          # Publish and configure the domain/route
 
 The equivalent command without `just` is `node deploy.mjs`, optionally
 with `--dry-run`. The helper maps settings to pinned Wrangler flags and keeps
-Cloudflare credentials in the deployment process. These variables are not Worker
-runtime bindings. Export them in the shell or configure them in CI build settings;
+Cloudflare credentials in the deployment process. `ARTIFACTS_BUCKET` generates a temporary Wrangler configuration with the R2 binding;
+the other variables are not Worker runtime bindings. Export them in the shell or configure them in CI build settings;
 the helper does not load dotenv files.
 
 With no domain or route, Wrangler enables
@@ -86,6 +88,41 @@ Put the endpoint behind the authenticated gateway or Cloudflare Access, and
 protect any workers.dev or preview URLs that you enable. Choosing a custom domain
 does not itself add authentication. The Google token remains the `accessToken`
 tool argument; an Authorization header does not populate that argument.
+
+### Optional artifact storage
+
+Set `ARTIFACTS_BUCKET` to an existing **private** R2 bucket to enable explicit
+storage. The deploy helper preserves the checked-in configuration, adds the binding
+in a temporary config, and removes that config afterward. No source edit, public
+bucket, Google secret or persistent MCP session is needed. This does not create a
+bucket or configure billing/lifecycle; provision those separately. Keep authenticated
+ingress in place: a valid Google call before storage is an admission check, not a
+per-person quota or caller identity.
+
+Use `describe({path:'artifacts'})` and read
+`skill://google-codemode-mcp/google-workspace/references/artifacts.md`. After an
+acknowledged native Google call, top-level code can explicitly store JSON or a byte
+envelope with `artifacts.putJson(value,{name})` or
+`artifacts.putBytes(envelope,{name})` and return its small reference. Later code can
+read or delete using the complete URI. Snippets cannot access storage helpers.
+Google's per-call limits and the inline output limit remain hard.
+
+Artifact URIs are random bearer capabilities: possession grants access and sharing
+delegates it. They are not bound to a stable user or Google token. Base URIs read as
+small manifests, with bounded byte-chunk resource URIs for exact reassembly/hash
+verification. Trusted stored references appear as MCP resource links. Keep full
+URIs private; host retrieval does not prove a downloadable host file.
+
+Access expires after one hour; physical R2 deletion requires a separately configured
+bucket lifecycle. Explicit delete, logical expiry and eventual physical cleanup are
+different operations. Separate storage receipts retain partial/unknown effects
+without changing acknowledged Google outcomes. Actual workerd/Miniflare R2 proof covers large native JSON beyond the inline output
+limit, cross-request/new-Worker reads, all byte values at the 128 KiB bound, exact
+chunk reassembly/hash, deletion, strict JSON and retained Google acknowledgements
+after storage failure. Core fault controls cover quotas, expiry, wrong capabilities
+and late writes. These are deterministic local tests; real-agent artifact use,
+hosted storage, physical retention and host downloadable-file presentation remain
+unqualified.
 
 ### Git-connected Workers Builds
 
@@ -113,7 +150,8 @@ only during the build/deploy process; putting `WORKER_DOMAIN` in runtime Variabl
 The helper follows the dashboard's selected Worker name. An explicit `WORKER_NAME`
 must match it. Wrangler's injected account/Worker identity checks are preserved;
 the helper passes the selected name so a name mismatch does not trigger Wrangler's
-config-name correction warning. No generated Wrangler configuration is needed.
+config-name correction warning. A generated configuration is used only when
+ARTIFACTS_BUCKET selects optional storage, then removed after deployment.
 
 This supports deployment without source edits. Cloudflare's separate
 [Deploy to Cloudflare button](https://developers.cloudflare.com/workers/platform/deploy-buttons/)
@@ -246,7 +284,7 @@ parameters at its boundary. Credential arguments, SDK transport options, arbitra
 headers/URLs, callbacks, streams, and unsupported media overrides are rejected.
 Sandbox networking is denied by workerd. JSON requests/responses include Gmail
 base64url message/attachment fields. Drive media reads use the bounded channel
-below. Bounded Drive create uploads are described below; durable artifacts remain unavailable. Scope availability for opaque tokens is
+below. Bounded Drive create uploads and optional artifact storage are described below. Scope availability for opaque tokens is
 `unknown`; Discovery scopes describe alternatives and do not grant access.
 
 ### Drive metadata and bounded files
@@ -277,8 +315,8 @@ limit. `files.get({fileId: inputs.id, alt: 'media'})` returns `.data` as
 `files.export` uses this envelope directly, with a discovered export MIME type.
 Downloads are limited to **131072 raw bytes** and the execution's overall output
 limit still applies. Metadata reads retain Google's normal JSON `.data` shape.
-The host decodes the bytes when saving a file; this Worker has no durable artifact
-store. Gmail attachments continue to use Google's native base64url JSON fields.
+The host decodes the bytes when saving a file; optional R2 artifacts provide a
+separate bounded persistence channel. Gmail attachments continue to use Google's native base64url JSON fields.
 
 ### Compose Gmail and Drive attachments
 
@@ -462,7 +500,9 @@ Gmail/Drive media composition now passes all four local Sonnet/Sol cells, with
 also pass, including native-document export. Agents retrieved the advanced skill
 resource and discovered every used method before execution. See the
 [media results and token/cache/cost metrics](tests/eval/README.md#media-composition-results-2026-11-05).
-Durable artifacts remain next; hosted media and target-host activation remain unqualified.
+Optional artifact storage now has deterministic local R2/workerd proof. The
+passing media campaign qualifies its retained media candidate; real-agent artifact
+use, hosted media/storage and target-host activation remain unqualified.
 Subsequent APIs are Sheets, Docs, and
 Calendar, in that order. Tasks and replay are deferred.
 
