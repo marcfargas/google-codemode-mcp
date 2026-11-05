@@ -202,7 +202,18 @@ The base URI \`artifact://google-codemode-mcp/v1/<capability>\` reads as a small
 manifest with a reference and first-chunk URI. Trusted acknowledged stored
 references also appear as MCP resource links. Manifest links have MIME type
 \`application/json\`, even when the original object is a PDF or binary file.
-The server does not enumerate artifact capabilities.
+The server does not enumerate artifact capabilities. Use resource-link and chunk
+URIs for host resource reads; a gateway may prefix these navigation URIs. Keep the
+manifest's raw \`uri\` for sandbox \`artifacts.readJson\`, \`readBytes\` and \`delete\`.
+
+Some hosts save blob resources to local files but omit chunk metadata. Start with
+\`firstChunkUri\` from the manifest, decode or save each chunk, and advance its
+\`/chunk/<offset>/<length>\` suffix by the actual decoded byte count. Preserve any
+URI prefix and request \`min(previousLength, size - nextOffset)\` bytes until the
+manifest's \`size\` is reached. Reject empty or oversized chunks before completion.
+Concatenate in offset order and verify the manifest's \`sha256\` before using the
+file. This requires a host with binary file handling; a text preview is insufficient.
+An empty artifact has a null first-chunk URI and needs no chunk reads.
 
 Read \`/chunk/<offset>/<length>\` with a raw byte offset and length from 1 to 65536.
 Chunks are base64 blobs with MIME \`application/octet-stream\`; metadata identifies
