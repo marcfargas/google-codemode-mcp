@@ -1,3 +1,4 @@
+import { getArtifactCase, selectArtifactCases } from './artifacts.ts';
 import { getDriveCase, selectDriveCases } from './drive.ts';
 import { getMediaCase, selectMediaCases } from './media.ts';
 import type { MechanismPolicy } from './mechanisms.ts';
@@ -72,6 +73,8 @@ export function getCase(profile: string, id?: string) {
       return getGmailCase(id);
     case 'drive':
       return getDriveCase(id);
+    case 'artifacts':
+      return getArtifactCase(id);
     case 'media':
       return getMediaCase(id);
     default:
@@ -84,6 +87,8 @@ export function selectCases(profile: string, selection = 'all') {
       return selectGmailCases(selection);
     case 'drive':
       return selectDriveCases(selection);
+    case 'artifacts':
+      return selectArtifactCases(selection);
     case 'media':
       return selectMediaCases(selection);
     default:

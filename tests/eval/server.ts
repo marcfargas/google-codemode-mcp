@@ -27,6 +27,7 @@ export async function startEvalServer(options: {
   output: string;
   runner?: 'claude' | 'responses' | 'codex';
   redactSecrets?: readonly string[];
+  requireArtifactLedger?: boolean;
 }) {
   const audit: McpEvent[] = [];
   const llm: any[] = [];
@@ -145,6 +146,15 @@ export async function startEvalServer(options: {
           receipt?.outcomes?.some(
             (outcome: any) => outcome.mutation && outcome.outcome === 'unknown',
           )
+        )
+          unknownMutation = true;
+        if (
+          execution &&
+          options.requireArtifactLedger &&
+          (receipt?.artifacts?.outcomesComplete !== true ||
+            receipt.artifacts.hasUnknownOutcome !== false ||
+            !Array.isArray(receipt.artifacts.outcomes) ||
+            receipt.artifacts.outcomes.some((item: any) => item?.outcome === 'unknown'))
         )
           unknownMutation = true;
         Object.assign(pendingMcp, { status: result.status, response: parsed });

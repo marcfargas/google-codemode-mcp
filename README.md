@@ -596,6 +596,11 @@ conservatively, and a $1 estimate per cell (native CLI for Claude, recorded publ
 token rates for GPT). Estimates are separate from actual proxy billing. There are no performer retries or automatic model fallbacks.
 
 Gmail, Drive and their two-case media-composition profile are implemented.
+`just eval-artifacts PROXY_URL NEW_OUTPUT all required` exercises large native JSON
+and binary attachment storage through local Miniflare R2: two cases × Sonnet/Sol,
+up to four $1 estimates. It checks full content before actor deletion, later reads,
+unchanged sources and cleanup; hosted retention and native host file delivery
+remain separate qualifications.
 Sheets, Docs, and Calendar remain pending
 coverage targets; selecting them fails before model spending. This is a synthetic
 feasibility check, not acceptance of every host or service. See the

@@ -13,7 +13,7 @@ model task alone does not pass the mechanism or cleanup criteria.
    [the launcher](../../../../tests/eval/act.mjs) when those inputs changed.
    Defaults are Sonnet 5.5 (`sonnet`) and GPT 6.1 Sol (`sol`), one fresh attempt
    per case/model. Gmail has six cases, at most twelve $1 estimates; Drive has
-   four cases, at most eight $1 estimates. Media has two cases, at most four $1 estimates, and requires ordered advanced-media resource retrieval. Use explicit case/model selections
+   four cases, at most eight $1 estimates. Artifacts has two cases through local Miniflare R2, at most four $1 estimates. Media has two cases, at most four $1 estimates, and requires ordered advanced-media resource retrieval. Use explicit case/model selections
    for a bounded subset. A subset does not qualify missing required cells.
 2. Identify the candidate: actual Git revision, dirty/untracked source,
    `candidate-source.json` and retained source bytes; then each cell's
@@ -40,6 +40,7 @@ model task alone does not pass the mechanism or cleanup criteria.
    checkout. For example:
 
    ```sh
+   just eval-artifacts PROXY_URL NEW_OUTPUT all required
    just eval-media PROXY_URL NEW_OUTPUT all required
    just eval-drive PROXY_URL NEW_OUTPUT all required
    just eval-gmail PROXY_URL NEW_OUTPUT attachment,pagination required

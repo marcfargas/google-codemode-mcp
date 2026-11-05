@@ -1,8 +1,17 @@
+import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createBuiltWorker } from '../support/worker-client.ts';
 import { responseText } from '../support/io.ts';
+import type { ArtifactReference } from '../../src/artifacts.ts';
+
+export interface ArtifactObservation {
+  complete: boolean;
+  errors: string[];
+  residualObjects: number;
+  snapshots: { reference: ArtifactReference; base64: string; unavailableAfter: boolean }[];
+}
 import { createOutboundRecorder, type OutboundEvidence } from './outbound.ts';
 
 const MCP_VERSION = '2026-07-28';
@@ -189,6 +198,7 @@ export async function createHostedBackend(
     dispatch,
     secrets: Object.values(configuration.accessHeaders),
     hasUnknownMutation: false,
+    artifacts: undefined,
     async finishObservation() {
       return null;
     },
@@ -198,10 +208,13 @@ export async function createHostedBackend(
 
 export async function createEvaluationBackend(
   output: string,
-  options: { captureOutbound?: boolean } = {},
+  options: { captureOutbound?: boolean; artifacts?: boolean } = {},
 ) {
   const backend = process.env.EVAL_BACKEND || 'local';
-  if (backend === 'hosted') return createHostedBackend(hostedConfiguration(), { output });
+  if (backend === 'hosted') {
+    if (options.artifacts) throw new Error('Hosted artifact evaluation is not qualified');
+    return createHostedBackend(hostedConfiguration(), { output });
+  }
   if (backend !== 'local') throw new Error('Select local or hosted evaluation backend');
   const bundleSha256 = createHash('sha256')
     .update(await readFile('dist/worker.js'))
@@ -213,12 +226,112 @@ export async function createEvaluationBackend(
   const recorder = options.captureOutbound
     ? createOutboundRecorder({ onEvent: retain })
     : undefined;
-  const worker = await createBuiltWorker(recorder ? { outbound: recorder.handler } : undefined);
+  const worker = await createBuiltWorker({
+    outbound: recorder?.handler,
+    artifacts: options.artifacts,
+  });
+  const send = async (rpc: unknown) => {
+    const response = await worker.dispatchFetch('http://localhost/mcp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'MCP-Protocol-Version': MCP_VERSION,
+        'MCP-Method': (rpc as any).method,
+        'MCP-Name': (rpc as any).params.uri,
+      },
+      body: JSON.stringify({
+        ...(rpc as object),
+        params: {
+          ...(rpc as any).params,
+          _meta: {
+            'io.modelcontextprotocol/protocolVersion': MCP_VERSION,
+            'io.modelcontextprotocol/clientCapabilities': {},
+          },
+        },
+      }),
+    });
+    return response.json();
+  };
+  const bucket = options.artifacts ? await worker.getR2Bucket('ARTIFACTS') : undefined;
+  const artifacts: ArtifactObservation | undefined = bucket
+    ? { complete: false, errors: [], residualObjects: 0, snapshots: [] }
+    : undefined;
+  async function snapshot(reply: any) {
+    const ledger = reply.result?.structuredContent?.artifacts;
+    if (
+      !ledger ||
+      ledger.outcomesComplete !== true ||
+      ledger.hasUnknownOutcome !== false ||
+      !Array.isArray(ledger.outcomes) ||
+      !Array.isArray(ledger.references)
+    ) {
+      artifacts!.errors.push('artifact_ledger_invalid');
+      return;
+    }
+    for (const outcome of ledger.outcomes) {
+      if (outcome?.outcome !== 'stored') continue;
+      const ref = outcome.reference;
+      try {
+        if (!/^artifact:\/\/google-codemode-mcp\/v1\/[A-Za-z0-9_-]{43}$/.test(ref?.uri))
+          throw new Error();
+        if (artifacts!.snapshots.some((item) => item.reference.uri === ref.uri)) throw new Error();
+        const key =
+          'artifacts/v1/' + createHash('sha256').update(ref.uri.split('/').at(-1)!).digest('hex');
+        const object = await bucket!.get(key);
+        if (!object || object.size > 1000000) throw new Error();
+        const reference = {
+          uri: ref.uri,
+          ...JSON.parse(object.customMetadata?.artifact ?? 'null'),
+        };
+        const bytes = Buffer.from(await object.arrayBuffer());
+        if (
+          !isDeepStrictEqual(reference, ref) ||
+          bytes.length !== ref.size ||
+          createHash('sha256').update(bytes).digest('hex') !== ref.sha256
+        )
+          throw new Error();
+        artifacts!.snapshots.push({
+          reference,
+          base64: bytes.toString('base64'),
+          unavailableAfter: false,
+        });
+      } catch {
+        artifacts!.errors.push('artifact_snapshot_failed');
+      }
+    }
+  }
   let finishing: Promise<(OutboundEvidence & { workerDisposed: true }) | null> | undefined;
   const finishObservation = () =>
     (finishing ??= (async () => {
       try {
         await recorder?.seal();
+        if (artifacts) {
+          for (const snapshot of artifacts.snapshots) {
+            try {
+              const reply = (await send({
+                jsonrpc: '2.0',
+                id: 100000,
+                method: 'resources/read',
+                params: { uri: snapshot.reference.uri },
+              })) as any;
+              snapshot.unavailableAfter =
+                reply.error?.code === -32603 && reply.error?.message === 'Artifact unavailable';
+              if (reply.error && !snapshot.unavailableAfter)
+                artifacts.errors.push('artifact_deletion_read_failed');
+            } catch {
+              artifacts.errors.push('artifact_deletion_read_failed');
+            }
+          }
+          const inventory = await bucket!.list({ prefix: 'artifacts/v1/', limit: 100 });
+          artifacts.residualObjects = inventory.objects.length;
+          if (inventory.truncated) artifacts.errors.push('artifact_inventory_truncated');
+          artifacts.complete = artifacts.errors.length === 0;
+          await writeFile(
+            join(output, 'artifact-storage.json'),
+            JSON.stringify(artifacts, null, 2) + '\n',
+            { mode: 0o600 },
+          );
+        }
       } finally {
         await worker.dispose();
       }
@@ -229,24 +342,39 @@ export async function createEvaluationBackend(
       return completed;
     })());
   return {
-    identity: { kind: 'local', bundleSha256, ...(recorder ? { outboundRecorderVersion: 1 } : {}) },
+    identity: {
+      kind: 'local',
+      bundleSha256,
+      ...(bucket ? { artifactStorage: 'miniflare-r2', artifactObserverVersion: 1 } : {}),
+      ...(recorder ? { outboundRecorderVersion: 1 } : {}),
+    },
     secrets: [] as string[],
     get hasUnknownMutation() {
       return recorder?.hasUnknownMutation ?? false;
     },
+    get artifacts() {
+      return artifacts;
+    },
     finishObservation,
     async dispatch(request: Request) {
       if (finishing) throw new Error('Evaluation backend admission closed');
+      const body = await request.text();
       const response = await worker.dispatchFetch(request.url, {
         method: request.method,
         headers: Object.fromEntries(request.headers),
-        body: await request.text(),
+        body,
       });
       if (
         response.headers.has('mcp-session-id') ||
         !response.headers.get('content-type')?.includes('application/json')
       )
         throw new Error('Expected finite sessionless JSON');
+      if (bucket) {
+        const rpc = (await response.clone().json()) as any;
+        const requestRpc = JSON.parse(body);
+        if (requestRpc.method === 'tools/call' && requestRpc.params?.name === 'execute')
+          await snapshot(rpc);
+      }
       return response as unknown as Response;
     },
     async close() {

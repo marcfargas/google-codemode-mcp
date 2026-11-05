@@ -77,6 +77,8 @@ is not needed to recover recorded metrics. Authoring this skill does not authori
 an additional paid attempt. Use `mafe-si:build-eval` when substantially changing
 cases/grading, rather than weakening expectations to turn a run green.
 
+`just eval-artifacts PROXY_URL NEW_OUTPUT all required` runs two local artifact cases × Sonnet/Sol under four $1 estimates. The trusted harness snapshots R2 content before actor deletion; later helper/resource reads, deletion, no residual objects, unchanged Gmail sources and cleanup are required. It does not qualify hosted retention or host file presentation.
+
 ## Observe, retain, and clean up
 
 Inspect the exit status **and** meaningful results: test failures/skips, runner

@@ -821,3 +821,49 @@ source trial. Earlier Drive failures remain unchanged. This is bounded local
 one-attempt feasibility; durable artifacts, hosted media and Claude/ChatGPT/OpenClaw
 host activation are still unqualified. Issue #11 remains open for its artifact
 lifecycle and host-facing delivery work.
+
+### Artifact acceptance cases
+
+The local artifact gate reuses the isolated Sonnet/Sol runners, a dedicated
+Gmail fixture and Miniflare's private R2 emulation. Two independent tasks cover a
+large native JSON result and a binary Gmail attachment. Each actor must discover
+the artifact contract, read its served reference, store the complete native
+content, inspect it in a later execution and through MCP Resources, then delete
+it. Google source state must remain unchanged.
+
+The trusted verifier checks full stored content before deletion and confirms
+unavailability afterward. Actors inspect small resource chunks and return compact
+answers; bulk bytes stay out of model history. Storage uncertainty and missing
+proof fail the gate. Existing native byte, inline-output, time and spend limits
+remain in force. Run `just eval-artifacts PROXY_URL NEW_OUTPUT all required` for four fresh attempts, each under the existing $1 estimate/300-second caps. This gate does not qualify hosted R2,
+physical retention or a downloadable file in a target host.
+
+### Artifact agent acceptance (2026-11-05)
+
+All four fresh local cells passed: `large-json` and `binary-attachment` with
+Sonnet 5.5 and GPT 6.1 Sol. Each passed all 17 criteria, including ordered
+discovery/reference retrieval, later helper and 64-byte resource reads, exact
+full R2 content, explicit deletion, empty final bucket, unchanged Google source
+and known-fixture cleanup. No retries or unknown effects. The captured candidate
+was based on `235a8e8` with the retained artifact-harness diff; production bundle
+SHA-256 was `6da4a51959bef5ab8339cafea5b8dab57c266d42dc815f4ea67a75adcb10b77b`.
+The pre-trial act check passed 307 tests (304 passed, 3 expected skips), and both
+isolated runner preflights passed. Two no-model real Gmail controls passed first.
+
+| Case              | Model  | Requests |  Input | Output | Cache read | Cache creation |            Estimate USD |
+| ----------------- | ------ | -------: | -----: | -----: | ---------: | -------------: | ----------------------: |
+| large-json        | Sonnet |        8 |     16 |   2454 |     100123 |          22956 |    0.1264083 native CLI |
+| large-json        | Sol    |       14 | 121971 |    923 |      77440 |        unknown | 0.106036 published-rate |
+| binary-attachment | Sonnet |        8 |     16 |   2745 |     108673 |          23194 |    0.1311253 native CLI |
+| binary-attachment | Sol    |       14 | 126829 |    989 |      95360 |        unknown | 0.082364 published-rate |
+
+Sonnet ordinary input/cache counters are separate; Sol input includes cache reads.
+Instruction/tool prefixes were stable in all cells. Sol conservative commitments
+totaled $0.51672, distinct from its $0.1884 cache-aware usage estimate. Sonnet's
+native estimates totaled $0.2575336. Actual billing is unknown. Private retained
+evidence includes candidate-source manifests, full audit/readback/storage and
+cleanup records and the workflow-generated report. The report-only `readback`
+allowlist omission was corrected afterward and a separate offline report retained;
+original results and original workflow report remain intact. These one-attempt
+results qualify this local artifact candidate, not hosted retention, target-host
+download UI, or later runtime changes.

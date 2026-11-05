@@ -12,7 +12,7 @@ on:
         type: choice
         options: [local, hosted]
       profile:
-        description: Profile (gmail, drive, or media composition; other services are pending)
+        description: Profile (gmail, drive, media, or artifacts; other services are pending)
         required: true
         default: gmail
         type: string

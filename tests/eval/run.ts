@@ -1,3 +1,10 @@
+import {
+  prepareArtifactFixture,
+  gradeArtifacts,
+  type ArtifactFixture,
+  type ArtifactExpected,
+  type ArtifactTaskObservation,
+} from './artifacts.ts';
 import { createHash } from 'node:crypto';
 import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
@@ -47,6 +54,10 @@ const profiles = {
     status: 'implemented',
     task: 'Find and read a run-owned fixture file; save its bytes locally.',
   },
+  artifacts: {
+    status: 'implemented',
+    task: 'Store, inspect and delete large native JSON and binary attachments through R2 artifacts.',
+  },
   media: {
     status: 'implemented',
     task: 'Compose Gmail attachments and Drive files with exact bytes and an unsent Gmail draft.',
@@ -66,12 +77,15 @@ const profiles = {
 };
 
 export function gradeTask(
-  expected: GmailExpected | DriveExpected | MediaExpected,
-  observation: GmailObservation | DriveObservation | MediaObservation | null,
+  expected: GmailExpected | DriveExpected | MediaExpected | ArtifactExpected,
+  observation:
+    GmailObservation | DriveObservation | MediaObservation | ArtifactTaskObservation | null,
   files: Record<string, string>,
   audit: McpEvent[],
   outbound?: unknown,
 ) {
+  if ('profile' in expected && expected.profile === 'artifacts')
+    return gradeArtifacts(expected, observation as ArtifactTaskObservation | null, files, audit);
   return 'profile' in expected && expected.profile === 'media'
     ? gradeMedia(expected, observation as MediaObservation | null, files, audit)
     : 'fileId' in expected
@@ -124,7 +138,7 @@ export async function runCell(configuration?: {
   await mkdir(output, { recursive: true, mode: 0o700 });
   await chmod(output, 0o700);
   await json(join(output, 'coverage.json'), profiles);
-  if (!['gmail', 'drive', 'media'].includes(profile))
+  if (!['gmail', 'drive', 'media', 'artifacts'].includes(profile))
     throw new Error(`Coverage unavailable for ${profile}; no model call made`);
   const selectedCase = getCase(
     profile,
@@ -165,7 +179,7 @@ export async function runCell(configuration?: {
     if (
       (profile === 'media'
         ? ['gmail.modify', 'drive.file']
-        : [profile === 'gmail' ? 'gmail.modify' : 'drive.file']
+        : [['gmail', 'artifacts'].includes(profile) ? 'gmail.modify' : 'drive.file']
       ).some((scope) => !info.scopes.includes('https://www.googleapis.com/auth/' + scope))
     )
       throw new Error();
@@ -175,7 +189,10 @@ export async function runCell(configuration?: {
     );
   }
   await mkdir(join(output, 'trial-1'), { mode: 0o700 });
-  let backend = await createEvaluationBackend(join(output, 'trial-1'), { captureOutbound });
+  let backend = await createEvaluationBackend(join(output, 'trial-1'), {
+    captureOutbound,
+    artifacts: profile === 'artifacts',
+  });
   const results: any[] = [];
   try {
     const identity = {
@@ -202,6 +219,8 @@ export async function runCell(configuration?: {
             'tests/eval/cases.ts',
             'tests/eval/drive.ts',
             'tests/eval/media.ts',
+            'tests/eval/artifacts.ts',
+            'skills/google-workspace/references/artifacts.md',
             'skills/google-workspace/references/media-transfers.md',
             'skills/google-workspace/SKILL.md',
             'package-lock.json',
@@ -237,7 +256,10 @@ export async function runCell(configuration?: {
       const trial = join(output, `trial-${repetition}`);
       if (repetition > 1) {
         await mkdir(trial, { mode: 0o700 });
-        backend = await createEvaluationBackend(trial, { captureOutbound });
+        backend = await createEvaluationBackend(trial, {
+          captureOutbound,
+          artifacts: profile === 'artifacts',
+        });
         if (JSON.stringify(backend.identity) !== JSON.stringify(identity.backend)) {
           await backend.close();
           throw new Error('Backend identity changed between trials; no actor started');
@@ -254,7 +276,11 @@ export async function runCell(configuration?: {
       };
       results.push(result);
       let fixture:
-        GmailFixture | Awaited<ReturnType<typeof prepareDriveFixture>> | MediaFixture | undefined;
+        | GmailFixture
+        | Awaited<ReturnType<typeof prepareDriveFixture>>
+        | MediaFixture
+        | ArtifactFixture
+        | undefined;
       let relay: Awaited<ReturnType<typeof startEvalServer>> | undefined;
       let observed = false;
       let outbound: unknown;
@@ -265,14 +291,16 @@ export async function runCell(configuration?: {
           onEvent: (manifest: unknown) => json(join(trial, 'fixture-manifest.json'), manifest),
         };
         fixture =
-          profile === 'gmail'
-            ? await prepareGmailFixture({
-                ...fixtureOptions,
-                caseId: getGmailCase(selectedCase.id).id,
-              })
-            : profile === 'media'
-              ? await prepareMediaFixture({ ...fixtureOptions, caseId: selectedCase.id })
-              : await prepareDriveFixture({ ...fixtureOptions, caseId: selectedCase.id });
+          profile === 'artifacts'
+            ? await prepareArtifactFixture({ ...fixtureOptions, caseId: selectedCase.id })
+            : profile === 'gmail'
+              ? await prepareGmailFixture({
+                  ...fixtureOptions,
+                  caseId: getGmailCase(selectedCase.id).id,
+                })
+              : profile === 'media'
+                ? await prepareMediaFixture({ ...fixtureOptions, caseId: selectedCase.id })
+                : await prepareDriveFixture({ ...fixtureOptions, caseId: selectedCase.id });
         await json(join(trial, 'expected.json'), fixture.expected);
         relay = await startEvalServer({
           accessToken,
@@ -283,6 +311,7 @@ export async function runCell(configuration?: {
           output: trial,
           redactSecrets: backend.secrets,
           dispatch: backend.dispatch,
+          requireArtifactLedger: profile === 'artifacts',
         });
         const actor = await runActor({
           prompt: fixture.prompt,
@@ -304,9 +333,11 @@ export async function runCell(configuration?: {
           throw new Error('Independent outbound coverage incomplete; no later actor may start');
         }
         const observation =
-          profile === 'media'
-            ? await (fixture as MediaFixture).observe(actor.files, relay.audit)
-            : await fixture.observe();
+          profile === 'artifacts'
+            ? await (fixture as ArtifactFixture).observe(backend.artifacts!)
+            : profile === 'media'
+              ? await (fixture as MediaFixture).observe(actor.files, relay.audit)
+              : await (fixture as GmailFixture).observe();
         await json(join(trial, 'observation.json'), observation);
         observed = true;
         await json(join(trial, 'files.json'), actor.files);
@@ -384,9 +415,11 @@ export async function runCell(configuration?: {
             try {
               await json(
                 join(trial, 'observation.json'),
-                profile === 'media'
-                  ? await (fixture as MediaFixture).observe(undefined, relay?.audit)
-                  : await fixture.observe(),
+                profile === 'artifacts'
+                  ? await (fixture as ArtifactFixture).observe(backend.artifacts!)
+                  : profile === 'media'
+                    ? await (fixture as MediaFixture).observe(undefined, relay?.audit)
+                    : await (fixture as GmailFixture).observe(),
               );
             } catch {
               result.observationError = true;

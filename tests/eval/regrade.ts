@@ -1,3 +1,4 @@
+import type { ArtifactExpected, ArtifactTaskObservation } from './artifacts.ts';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
@@ -18,8 +19,9 @@ const json = (file: string, value: unknown) =>
   writeFile(file, JSON.stringify(value, null, 2) + '\n', { mode: 0o600 });
 
 export function gradeSavedEvidence(evidence: {
-  expected: GmailExpected | DriveExpected | MediaExpected | null;
-  observation: GmailObservation | DriveObservation | MediaObservation | null;
+  expected: GmailExpected | DriveExpected | MediaExpected | ArtifactExpected | null;
+  observation:
+    GmailObservation | DriveObservation | MediaObservation | ArtifactTaskObservation | null;
   files: Record<string, string> | null;
   actor: RecordValue | null;
   audit: McpEvent[];
@@ -32,7 +34,9 @@ export function gradeSavedEvidence(evidence: {
 }) {
   const { expected, observation, files, actor, audit, receipts, source, original } = evidence;
   const retainedProfile =
-    source?.profile === 'media' || source?.profile === 'drive' ? source.profile : 'gmail';
+    source?.profile === 'media' || source?.profile === 'drive' || source?.profile === 'artifacts'
+      ? source.profile
+      : 'gmail';
   let currentCaseVersion: number | null = null;
   try {
     currentCaseVersion = getCase(retainedProfile, expected?.caseId).version;
@@ -269,6 +273,7 @@ export async function regradeTrial(saved: string, output: string) {
     'gmail.ts',
     'drive.ts',
     'media.ts',
+    'artifacts.ts',
     'cases.ts',
     'run.ts',
     'actor.ts',

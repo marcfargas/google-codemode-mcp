@@ -134,7 +134,7 @@ async function main() {
     selectCases(profile, cases);
     if (!selection) throw new Error('Case suites require a model selection');
   }
-  if (!['gmail', 'drive', 'media'].includes(profile))
+  if (!['gmail', 'drive', 'media', 'artifacts'].includes(profile))
     throw new Error(
       'Coverage unavailable: Gmail, Drive and media composition implemented; Sheets, Docs, Calendar remain pending',
     );

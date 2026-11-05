@@ -600,6 +600,7 @@ export async function prepareGmailFixture(options: {
   accessToken: string;
   expectedUser: string;
   caseId?: GmailCaseId;
+  attachment?: { bytes: Buffer; mimeType: string };
   onEvent?: (manifest: GmailManifest) => void | Promise<void>;
 }): Promise<GmailFixture> {
   const selected = getGmailCase(options.caseId);
@@ -745,10 +746,9 @@ export async function prepareGmailFixture(options: {
     if (!label.id) throw new Error('Gmail seed label ID missing');
     const code = randomBytes(9).toString('hex');
     const filename = `review-${randomBytes(5).toString('hex')}.txt`;
-    const attachmentBytes = Buffer.from(
-      `Review attachment\n${randomBytes(24).toString('hex')}\nCafé — 東京 ✓\n`,
-      'utf8',
-    );
+    const attachmentBytes =
+      options.attachment?.bytes ??
+      Buffer.from(`Review attachment\n${randomBytes(24).toString('hex')}\nCafé — 東京 ✓\n`, 'utf8');
     const boundary = `fixture-${randomUUID()}`;
     const mime = [
       `From: ${options.expectedUser}`,
@@ -765,7 +765,7 @@ export async function prepareGmailFixture(options: {
       '',
       Buffer.from(`Please confirm this code: ${code}\n`, 'utf8').toString('base64'),
       `--${boundary}`,
-      `Content-Type: text/plain; charset=UTF-8; name="${filename}"`,
+      `Content-Type: ${options.attachment?.mimeType ?? 'text/plain; charset=UTF-8'}; name="${filename}"`,
       `Content-Disposition: attachment; filename="${filename}"`,
       'Content-Transfer-Encoding: base64',
       '',

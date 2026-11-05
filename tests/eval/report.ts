@@ -1,3 +1,4 @@
+import { ARTIFACT_CASES } from './artifacts.ts';
 import { appendFile, lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -37,11 +38,19 @@ const caseIds = [
   'combined',
   ...GMAIL_CASES.map((item) => item.id),
   ...DRIVE_CASES.map((item) => item.id),
+  ...ARTIFACT_CASES.map((item) => item.id),
   ...MEDIA_CASES.map((item) => item.id),
 ];
 const models = MATRIX.map((cell) => cell.model);
 const cellIds = [...MATRIX.map((cell) => cell.id), 'sol-native-codex'];
 const criteria = new Set([
+  'readback',
+  'artifact_ledger',
+  'artifact_lifecycle',
+  'artifact_content',
+  'artifact_deleted',
+  'artifact_source_preserved',
+  'artifact_answer',
   'attachment_file',
   'only_requested_file',
   'original_label',
@@ -267,7 +276,7 @@ function cell(value: unknown) {
 }
 function declarationSource(declaration: ReportDeclaration) {
   try {
-    const profile = oneOf(declaration.profile, ['gmail', 'drive', 'media']);
+    const profile = oneOf(declaration.profile, ['gmail', 'drive', 'media', 'artifacts']);
     const nativeProbe = declaration.runner === 'codex';
     if (
       !profile ||

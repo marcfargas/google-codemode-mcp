@@ -25,7 +25,7 @@ async function runMatrix(
   const cells = selectCells(process.env.EVAL_SELECTION);
   if (process.env.EVAL_MODEL) throw new Error('Select a matrix or one model, not both');
   const profile = process.env.EVAL_PROFILE;
-  if (!['gmail', 'drive', 'media'].includes(profile!))
+  if (!['gmail', 'drive', 'media', 'artifacts'].includes(profile!))
     throw new Error('Selected service has no implemented coverage');
   if ((process.env.EVAL_REPEATS ?? '1') !== '1')
     throw new Error('Matrix uses one declared attempt per cell');
