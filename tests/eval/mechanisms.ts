@@ -1,10 +1,11 @@
 import type { McpEvent } from './server.ts';
 
-export const GRADING_VERSION = 2;
+export const GRADING_VERSION = 3;
 
 export interface MechanismPolicy {
   expectedSends: number;
   allowedMutations: readonly string[];
+  requiredDescriptionsBeforeExecution?: readonly string[];
 }
 
 const combinedPolicy: MechanismPolicy = {
@@ -53,7 +54,10 @@ export function gradeMechanisms(
     !Number.isSafeInteger(policy.expectedSends) ||
     policy.expectedSends < 0 ||
     !Array.isArray(policy.allowedMutations) ||
-    !policy.allowedMutations.every(canonical)
+    !policy.allowedMutations.every(canonical) ||
+    (policy.requiredDescriptionsBeforeExecution !== undefined &&
+      (!Array.isArray(policy.requiredDescriptionsBeforeExecution) ||
+        !policy.requiredDescriptionsBeforeExecution.every(canonical)))
   )
     throw new Error('Invalid mechanism policy');
 
@@ -172,6 +176,23 @@ export function gradeMechanisms(
   const causal = (condition: boolean): Status =>
     !ordered ? 'unknown' : !executions.length ? 'fail' : condition ? 'pass' : 'fail';
   return [
+    ...(policy.requiredDescriptionsBeforeExecution?.length
+      ? [
+          {
+            id: 'required_method_discovery',
+            status: causal(
+              policy.requiredDescriptionsBeforeExecution.every((path) =>
+                descriptions.some(
+                  (entry) =>
+                    entry.response.result.structuredContent.path === path && beforeExecution(entry),
+                ),
+              ),
+            ),
+            evidence:
+              'Case-required method descriptions must complete before the first execution, including methods that must not be called',
+          },
+        ]
+      : []),
     {
       id: 'root_discovery',
       status: causal(root),

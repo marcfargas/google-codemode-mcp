@@ -290,15 +290,17 @@ just eval-drive http://127.0.0.1:8317 /absolute/new/drive-evidence
 ```
 
 Gmail selects six independent cases and the required Sonnet/Sol pair (12 attempts,
-maximum $12 in per-attempt estimates). Drive selects download and rename (four
-attempts, maximum $4 in estimates). Each attempt retains the five-minute wall,
+maximum $12 in per-attempt estimates). Drive selects download, pagination, rename and
+conditional-update limitation (eight attempts, maximum $8 in estimates). Each attempt retains the five-minute wall,
 request/output and $1 estimate limits. Provider billing remains separate. These
 commands are on demand; ordinary checks make no model or Google requests.
 
-Grading version 2 requires every ledger method, including snippet calls and
+Grading version 3 retains the requirement for every ledger method, including snippet calls and
 failed calls, to have a successful matching description completed before that
 execution starts. Root discovery and the actual Workspace resource read must
-complete before the first execution. Trusted relay ordinals establish ordering;
+complete before the first execution. Cases may also require discovery of methods
+that must not be called; the conditional Drive case requires `files.update`.
+Trusted relay ordinals establish ordering;
 missing/truncated evidence stays unknown. Old trial results remain unchanged,
 and offline regrades write separate evidence without new Google or model calls.
 
@@ -329,6 +331,13 @@ Google calls also have a 15s deadline. Defaults allow 100 Google call attempts,
 and inputs, 256,000 characters for the output, and 16 nested snippet invocations
 with depth at most four. Oversized/non-JSON program results return an error while
 preserving recorded outcomes. Logs are capped to 100 entries of 4,096 characters.
+
+Drive `files.list` outcomes can include bounded native pagination evidence:
+requested/next tokens, query, page size, field selection, ordering/search options,
+returned file IDs and `incompleteSearch` when present. These annotations come from
+validated calls and Google responses, independently of program output. An unsafe
+or oversized value omits the whole annotation; missing evidence does not establish
+that a page was terminal or a search complete.
 
 The dynamic Worker requests a 1,000 ms CPU budget. **Local workerd did not enforce
 that cap in a finite overbudget-loop probe**. The hosted synthetic verification

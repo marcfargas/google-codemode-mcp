@@ -82,7 +82,7 @@ test('offline command copies original source/result, records current grader and 
     assert.ok(result.gradingIdentity.files['regrade.ts']);
     assert.ok(result.gradingIdentity.files['mechanisms.ts']);
     assert.ok(result.gradingIdentity.files['cases.ts']);
-    assert.equal(result.gradingVersion, 2);
+    assert.equal(result.gradingVersion, GRADING_VERSION);
     const completeness = result.criteria.find(
       (criterion) => criterion.id === 'evidence_completeness',
     );
@@ -180,7 +180,7 @@ test('offline grading uses the maintained case policy and preserves old results 
   const historical = regrade(legacy);
   assert.equal(criterion(historical, 'method_discovery'), 'unknown');
   assert.equal(historical.originalResult?.status, 'pass');
-  assert.equal(historical.gradingVersion, 2);
+  assert.equal(historical.gradingVersion, GRADING_VERSION);
 
   audit[3].response.result.structuredContent.outcomes.push({
     path: 'gmail/v1/users.messages.send',
@@ -222,4 +222,136 @@ test('offline grading retains abandoned attempts and rejects inconsistent attemp
     mutate(entries);
     assert.equal(criterion(regrade(audit, entries), 'method_discovery'), 'unknown');
   }
+});
+
+test('offline Drive limitation grading applies maintained discovery policy and cannot widen mutations', () => {
+  const expected = {
+    caseId: 'conditional-update-unsupported' as const,
+    fileId: 'owned-id',
+    name: 'owned.txt',
+    renamed: 'renamed.txt',
+    filename: 'owned.txt',
+    sha256: 'independent-hash',
+    bytes: 17,
+    mimeType: 'text/plain',
+    marker: 'owned-marker',
+    parents: ['root'],
+    version: '7',
+  };
+  const observation = {
+    complete: true,
+    file: {
+      id: expected.fileId,
+      name: expected.name,
+      mimeType: expected.mimeType,
+      trashed: false,
+      description: expected.marker,
+      parents: expected.parents,
+      version: '7',
+    },
+    sha256: expected.sha256,
+    bytes: expected.bytes,
+  };
+  const files = {
+    'status.json': Buffer.from(
+      JSON.stringify({
+        fileId: expected.fileId,
+        renamed: false,
+        reason: 'conditional-update-unsupported',
+      }),
+    ).toString('base64'),
+  };
+  const uri = 'skill://google-codemode-mcp/google-workspace/SKILL.md';
+  const describe = (path: string) => ({
+    method: 'tools/call',
+    params: { name: 'describe', arguments: { path } },
+    response: { result: { structuredContent: { path, signature: 'method(params)' } } },
+  });
+  const events = [
+    {
+      method: 'tools/call',
+      params: { name: 'describe', arguments: {} },
+      response: { result: { structuredContent: { services: [] } } },
+    },
+    {
+      method: 'resources/read',
+      params: { uri },
+      response: { result: { contents: [{ uri, text: '# Google Workspace Code Mode' }] } },
+    },
+    describe('drive/v3/files.update'),
+    describe('drive/v3/files.get'),
+    {
+      method: 'tools/call',
+      params: { name: 'execute' },
+      response: {
+        result: {
+          structuredContent: {
+            status: 'completed',
+            outcomesComplete: true,
+            hasUnknownOutcome: false,
+            outcomes: [
+              {
+                path: 'drive/v3/files.get',
+                mutation: false,
+                outcome: 'acknowledged',
+                resourceId: expected.fileId,
+              },
+            ],
+          },
+        },
+      },
+    },
+  ].map((e, i) => ({
+    ...e,
+    status: 200,
+    startedOrdinal: i * 2 + 1,
+    completedOrdinal: i * 2 + 2,
+  })) as McpEvent[];
+  const grade = (audit: McpEvent[], attempts: McpEvent[] | null = attemptRecords(audit)) =>
+    gradeSavedEvidence({
+      expected,
+      observation,
+      files,
+      actor: { ...actor, files },
+      audit,
+      attempts,
+      receipts: [
+        { requestedModel: 'selected-model', servedModels: ['selected-model'], complete: true },
+      ],
+      source: {
+        ...source,
+        profile: 'drive',
+        mechanismPolicy: { allowedMutations: ['drive/v3/files.update'] },
+      },
+      original: {
+        status: 'pass',
+        hasUnknownMutation: false,
+        cleanup: { failures: [], unknownMutations: [] },
+      },
+      evidenceErrors: [],
+    });
+  assert.equal(grade(events).status, 'pass');
+  assert.equal(grade(events).gradingVersion, 3);
+  const noUpdate = structuredClone(events);
+  noUpdate[2].params.arguments.path = 'drive/v3/files.list';
+  noUpdate[2].response.result.structuredContent.path = 'drive/v3/files.list';
+  assert.equal(
+    grade(noUpdate).criteria.find((c) => c.id === 'required_method_discovery')?.status,
+    'fail',
+  );
+  const mutation = structuredClone(events);
+  mutation.at(-1)!.response.result.structuredContent.outcomes.push({
+    path: 'drive/v3/files.update',
+    mutation: true,
+    outcome: 'not_dispatched',
+  });
+  assert.equal(
+    grade(mutation).criteria.find((c) => c.id === 'actor_mutation_surface')?.status,
+    'fail',
+  );
+  assert.equal(grade(mutation).taskSuccess, false);
+  assert.equal(
+    grade(events, null).criteria.find((c) => c.id === 'required_method_discovery')?.status,
+    'unknown',
+  );
 });

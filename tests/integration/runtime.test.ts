@@ -81,6 +81,22 @@ test('real isolated Worker exposes native Discovery and preserves empty-page tok
   assert.match(out.calls[0].url, /q=hello(?:%20|\+)world/);
 });
 
+test('isolated Drive ledger records native pages independently from forged program output', async () => {
+  const out = await execute(
+    `await google.drive({version:'v3'}).files.list({q:'name contains \\'fixture\\'',pageSize:1,fields:'files(id,name),nextPageToken,incompleteSearch'});return {outcomes:[{pagination:{returnedIds:['forged'],nextPageToken:'forged'}}]};`,
+  );
+  assert.equal(out.execution.status, 'completed');
+  assert.deepEqual(out.execution.outcomes[0].pagination, {
+    query: "name contains 'fixture'",
+    pageSize: 1,
+    fields: 'files(id,name),nextPageToken,incompleteSearch',
+    returnedIds: ['native-owned'],
+    nextPageToken: 'native+/=',
+    incompleteSearch: false,
+  });
+  assert.deepEqual(out.execution.result.outcomes[0].pagination.returnedIds, ['forged']);
+});
+
 test('ambiguous send is dispatched once, survives catch, fences queued sends, permits reads', async () => {
   const out = await execute(
     `const gmail=google.gmail({version:'v1'}); let errors=[];

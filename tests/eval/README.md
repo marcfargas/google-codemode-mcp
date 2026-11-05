@@ -1,13 +1,15 @@
 # Agent feasibility gate
 
-## Independent cases and grading version 2
+## Independent cases and grading version 3
 
-Grading version 2 requires each native method in the trusted execution
+Grading version 3 retains the requirement for each native method in the trusted execution
 ledger to have a matching successful description completed before execution
 starts. Root discovery and the actual Workspace resource read must also finish
 before the first execution. This includes Google calls inside snippets. Older
 traces without causal ordering remain unqualified under the new criterion; their
-original grades stay unchanged.
+original grades stay unchanged. Version 3 also supports explicit case-required
+method descriptions before the first execution, including methods that must not
+be called. Existing cases retain their version-2 criteria when this policy is absent.
 
 Independent cases cover read/search, reply, attachment, labels, pagination,
 and safe failure handling. Each has fresh fixtures and an actor workspace, exact
@@ -23,15 +25,30 @@ larger selections. `just eval-matrix gmail ...` retains the legacy combined case
 Hosted Cloudflare and actual host/gateway acceptance remain separate from local
 runner results.
 
-Drive has two independent cases: `read-file` and `rename-file`. Run
+Drive defines four cases: `read-file`, `list-pages`, `rename-file`, and
+`conditional-update-unsupported`. Run
 `just eval-drive PROXY_URL NEW_OUTPUT` after `just oauth --drive` and enabling
-Drive API. The default required pair permits four attempts, each under its $1
-estimate/five-minute caps. Fixtures are app-created files under `drive.file`,
-with independent content/metadata/parents checks and known-ID cleanup. The agent
-file case uses UTF-8 content because runner Write tools accept text; synthetic
+Drive API. The default required pair permits eight fresh attempts, each under its
+existing $1 estimate/five-minute caps, at most $8 in estimates. No automatic retries.
+Fixtures are app-created files under `drive.file`, with independent metadata,
+content and parents checks and known-ID cleanup.
+
+The pagination task asks for one result per page and an exact `answer.json`
+inventory. Trusted native call annotations must establish a complete token chain,
+including projected continuation/completeness fields and exact returned IDs;
+agent-created page logs do not establish native pagination. The conditional task
+asks for an atomic conditional rename when supported, otherwise an unchanged file
+and `status.json`. It requires update-method discovery before execution and an
+owned-file read. This measures discovery and adherence to the documented limit,
+not independent API reasoning or successful conditional writes. Zero recorded
+mutation outcomes cannot prove no expression was rejected before the bridge.
+
+The file case uses UTF-8 content because runner Write tools accept text; synthetic
 native-SDK tests separately verify arbitrary binary and JSON-MIME downloads.
-The server media envelope is bounded to 131072 raw bytes; uploads/artifact storage
-remain deferred.
+The media envelope remains bounded to 131072 raw bytes; uploads/artifact storage
+remain deferred. Fresh four-case Sonnet/Sol qualification is pending; the earlier
+download/rename results do not qualify the expanded suite. Hosted Drive and
+actual target-host acceptance remain separate.
 
 Run the required pair, or explicitly select all six cells:
 
@@ -72,7 +89,10 @@ Requires Docker, `act`, `just`, Node 24, the existing test OAuth grant, and a ru
 CLIProxyAPI supporting Anthropic Messages and OpenAI Responses. The launcher reads
 `CPA_CLIENT_API_KEY` or `~/.config/cpa-manager-plus/client-key`; Google credentials
 use the same local configuration as `just live`. It mounts the new evidence
-directory into `act` and uses host networking to reach the local proxy. Exact
+directory into `act` and uses host networking to reach the local proxy. An explicit local `ACT_NODE_OPTIONS` is forwarded as container `NODE_OPTIONS` and
+retained in the container profile; host `NODE_OPTIONS` is not forwarded implicitly.
+For the observed marcdev token-endpoint timeout, use
+`ACT_NODE_OPTIONS=--no-network-family-autoselection just eval-drive ...`. Exact
 advertised model IDs are checked before OAuth or fixtures; metadata availability
 does not establish successful inference.
 

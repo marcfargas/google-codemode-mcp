@@ -703,3 +703,46 @@ test('unsafe or oversized Drive target/field annotations are absent rather than 
   assert.equal(dispatcher.outcomes.at(-1)?.resourceId, undefined);
   assert.ok(!JSON.stringify(dispatcher.outcomes).includes(token));
 });
+
+test('Drive page annotations derive native IDs and projection, omitting unsafe pages wholesale', async () => {
+  for (const [params, page, wanted] of [
+    [
+      {
+        q: "name contains 'fixture'",
+        pageSize: 1,
+        fields: 'nextPageToken,incompleteSearch,files(id,name)',
+      },
+      { files: [{ id: 'owned' }], nextPageToken: 't+/=', incompleteSearch: false },
+      {
+        query: "name contains 'fixture'",
+        pageSize: 1,
+        fields: 'nextPageToken,incompleteSearch,files(id,name)',
+        returnedIds: ['owned'],
+        nextPageToken: 't+/=',
+        incompleteSearch: false,
+      },
+    ],
+    [
+      { pageToken: 't+/=', fields: 'files(id)' },
+      { files: [] },
+      { requestedPageToken: 't+/=', fields: 'files(id)', returnedIds: [] },
+    ],
+    [{}, {}, {}],
+    [{}, { files: [{ id: 'owned' }], nextPageToken: token }, undefined],
+    [{}, { files: [{ id: token }] }, undefined],
+    [{}, { files: [{ name: 'no-id' }] }, undefined],
+    [{}, { files: [], incompleteSearch: 'false' }, undefined],
+    [{}, { files: [], nextPageToken: '' }, undefined],
+    [{}, { files: Array(1001).fill({ id: 'id' }) }, undefined],
+  ] as const) {
+    const dispatcher = createDispatcher({
+      catalog: catalog(),
+      accessToken: token,
+      requestId: 'annotations',
+      transport: async () => json(page),
+    });
+    const out = await dispatcher.call(list, params);
+    assert.equal(out.ok, true);
+    assert.deepEqual(dispatcher.outcomes[0].pagination, wanted);
+  }
+});

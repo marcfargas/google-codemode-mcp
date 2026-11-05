@@ -31,7 +31,7 @@ eval-matrix $profile $proxy_url $output $selection='required':
 eval-gmail $proxy_url $output $cases='all' $selection='required':
     profile=gmail node tests/eval/act.mjs
 
-# Two independent Drive cases after just oauth --drive.
+# Four independent Drive cases after just oauth --drive.
 eval-drive $proxy_url $output $cases='all' $selection='required':
     profile=drive node tests/eval/act.mjs
 

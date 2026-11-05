@@ -58,8 +58,8 @@ const basic = () => ordered(describe(), skill(), describe(get), execute());
 const statuses = (audit: McpEvent[], policy: MechanismPolicy = readOnly) =>
   Object.fromEntries(gradeMechanisms(audit, policy).map((c) => [c.id, c.status]));
 
-test('grading version 2 uses all ledger methods and supports exact per-case policies', () => {
-  assert.equal(GRADING_VERSION, 2);
+test('grading version 3 uses all ledger methods and supports exact per-case policies', () => {
+  assert.equal(GRADING_VERSION, 3);
   assert.ok(Object.values(statuses(basic())).every((status) => status === 'pass'));
   const combined = ordered(describe(), skill(), describe(send), execute([outcome(send, true)]));
   assert.ok(gradeMechanisms(combined).every((c) => c.status === 'pass'));
@@ -263,4 +263,59 @@ test('no executions fail while a complete no-call receipt has vacuous method cov
   const audit = ordered(describe(), skill(), execute([]));
   assert.equal(statuses(audit).method_discovery, 'pass');
   assert.equal(gradeMechanisms(audit).find((c) => c.id === 'send_ledger')?.status, 'fail');
+});
+
+test('case-required unused methods must be described successfully before first execution', () => {
+  const update = 'drive/v3/files.update';
+  const policy = { ...readOnly, requiredDescriptionsBeforeExecution: [update] };
+  assert.equal(statuses(basic(), policy).required_method_discovery, 'fail');
+  assert.equal(
+    statuses(ordered(describe(), skill(), describe(get), describe(update), execute()), policy)
+      .required_method_discovery,
+    'pass',
+  );
+  assert.equal(
+    statuses(ordered(describe(), skill(), describe(get), execute(), describe(update)), policy)
+      .required_method_discovery,
+    'fail',
+  );
+  for (const change of [
+    (e: McpEvent) => {
+      e.response.result.structuredContent.path = get;
+    },
+    (e: McpEvent) => {
+      e.response.result.structuredContent.signature = '';
+    },
+    (e: McpEvent) => {
+      e.status = 500;
+    },
+    (e: McpEvent) => {
+      e.response.result.isError = true;
+    },
+  ]) {
+    const e = describe(update);
+    change(e);
+    assert.equal(
+      statuses(ordered(describe(), skill(), describe(get), e, execute()), policy)
+        .required_method_discovery,
+      'fail',
+    );
+  }
+  const missing = ordered(describe(), skill(), describe(get), describe(update), execute());
+  delete (missing[3] as McpEvent).completedOrdinal;
+  assert.equal(statuses(missing, policy).required_method_discovery, 'unknown');
+  assert.throws(() =>
+    gradeMechanisms(basic(), { ...readOnly, requiredDescriptionsBeforeExecution: ['bad'] }),
+  );
+  // Legacy policies retain the exact same criteria; the extra contract is opt-in.
+  assert.deepEqual(
+    gradeMechanisms(basic()).map((c) => c.id),
+    [
+      'root_discovery',
+      'method_discovery',
+      'skill_resource',
+      'send_ledger',
+      'actor_mutation_surface',
+    ],
+  );
 });

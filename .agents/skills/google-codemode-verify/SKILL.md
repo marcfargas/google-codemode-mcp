@@ -37,7 +37,7 @@ readiness at the failed boundary and restart only trial-owned state when warrant
 | Real Drive behavior                                       | `just live-drive`                                                 | Manual credentialed Drive download/rename, conditional-option refusal and pagination through locally built Worker |
 | Agent feasibility                                         | `just eval-matrix gmail PROXY_URL /absolute/new/evidence`         | Manual paid Sonnet/Sol required pair, one fresh attempt each                                                      |
 | Independent Gmail cases                                   | `just eval-gmail PROXY_URL /absolute/new/evidence`                | Six cases, one fresh attempt per model/case, up to twelve $1 estimates                                            |
-| Independent Drive cases                                   | `just eval-drive PROXY_URL /absolute/new/evidence`                | Two cases after Drive consent, one fresh attempt per model/case, up to four $1 estimates                          |
+| Independent Drive cases                                   | `just eval-drive PROXY_URL /absolute/new/evidence`                | Four cases after Drive consent, one fresh attempt per model/case, up to eight $1 estimates                        |
 | Prepare private hosted probes                             | `just hosted-prepare /absolute/new/prepared`                      | Exact source/bundle identity and private dry-run; no deployment                                                   |
 | Hosted runtime limits                                     | `just hosted-verify /absolute/new/evidence`                       | Selected deployed version via protected ingress; requires documented `HOSTED_*` inputs                            |
 
@@ -75,10 +75,11 @@ changing cases/grading, rather than weakening expectations to turn a run green.
 Inspect the exit status **and** meaningful results: test failures/skips, runner
 isolation refusals and exact file bytes, task versus discovery/skill criteria,
 model identity, mutation outcomes, and cleanup. A retrieved `skill://` resource is
-not proof of host activation. Grading version 2 requires every trusted ledger
+not proof of host activation. Grading version 3 retains the requirement for every trusted ledger
 method to have a matching description completed before execution starts, including
 failed and snippet calls. Root discovery and actual skill retrieval must precede
-the first execution. Missing ordinals or incomplete ledgers stay unknown; offline
+the first execution. Case-required unused-method descriptions must also precede
+the first execution when configured. Missing ordinals or incomplete ledgers stay unknown; offline
 regrades preserve original results. Gmail feasibility does not qualify Drive,
 Sheets, Docs, Calendar, target hosts, binary artifacts, or hosted Cloudflare CPU
 enforcement. Pending profiles fail before spending; don't silently substitute Gmail.

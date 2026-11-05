@@ -80,12 +80,23 @@ const driveDocument: DiscoveryDocument = {
   revision: 'fixture-drive-20261102',
   rootUrl: 'https://www.googleapis.com/',
   servicePath: 'drive/v3/',
+  parameters: { fields: { type: 'string', location: 'query' } },
   schemas: {
     File: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' } } },
   },
   resources: {
     files: {
       methods: {
+        list: {
+          path: 'files',
+          httpMethod: 'GET',
+          parameters: {
+            q: { type: 'string', location: 'query' },
+            pageSize: { type: 'integer', location: 'query' },
+            pageToken: { type: 'string', location: 'query' },
+          },
+          response: { type: 'object' },
+        },
         get: {
           path: 'files/{fileId}',
           httpMethod: 'GET',
@@ -122,6 +133,12 @@ export default {
           { error: { message: 'bad TOKEN_CANARY_77881', errors: [{ reason: 'forbidden' }] } },
           { status: 403 },
         );
+      if (new URL(target).pathname === '/drive/v3/files')
+        return Response.json({
+          files: [{ id: 'native-owned' }],
+          nextPageToken: 'native+/=',
+          incompleteSearch: false,
+        });
       return init?.method === 'DELETE'
         ? new Response(null, { status: 204 })
         : Response.json(

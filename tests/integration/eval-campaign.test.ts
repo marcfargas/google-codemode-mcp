@@ -158,3 +158,61 @@ test('hosted runner cannot start paid evaluation or create fixture evidence', as
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('Drive suite declares four cases and eight bounded required attempts without retries', async () => {
+  const original = { ...process.env };
+  const root = await mkdtemp(join(tmpdir(), 'drive-suite-'));
+  try {
+    Object.assign(process.env, {
+      EVAL_CASES: 'all',
+      EVAL_SELECTION: 'required',
+      EVAL_MODEL: '',
+      EVAL_PROFILE: 'drive',
+      EVAL_REPEATS: '1',
+      EVAL_OUTPUT: root,
+      EVAL_PROXY_URL: 'http://unused',
+      CPA_CLIENT_API_KEY: 'synthetic',
+    });
+    const attempted: string[] = [];
+    assert.equal(
+      await runCampaign({
+        verifyModels: async () => ({ checkedAt: 'synthetic', models: [], evidence: 'synthetic' }),
+        runCell: async (options) => {
+          attempted.push(`${options!.caseId}/${options!.model}`);
+          return {
+            passed: true,
+            profile: 'drive',
+            model: options!.model,
+            output: options!.output,
+            identity: {} as never,
+            results: [
+              {
+                status: 'pass',
+                taskSuccess: true,
+                hasUnknownMutation: false,
+                cleanup: { failures: [], unknownMutations: [] },
+              },
+            ],
+          };
+        },
+      }),
+      true,
+    );
+    assert.deepEqual(
+      attempted,
+      ['read-file', 'list-pages', 'rename-file', 'conditional-update-unsupported'].flatMap((id) => [
+        `${id}/claude-sonnet-5-5`,
+        `${id}/gpt-6.1-sol`,
+      ]),
+    );
+    const source = JSON.parse(await readFile(join(root, 'suite-source.json'), 'utf8'));
+    assert.equal(source.estimatedUsdCeilingTotal, 8);
+    assert.equal(source.attemptsPerCaseModel, 1);
+    const results = JSON.parse(await readFile(join(root, 'suite-results.json'), 'utf8'));
+    assert.equal(results.requiredPairStatus, 'pass');
+    assert.deepEqual(results.unattempted, []);
+  } finally {
+    process.env = original;
+    await rm(root, { recursive: true, force: true });
+  }
+});

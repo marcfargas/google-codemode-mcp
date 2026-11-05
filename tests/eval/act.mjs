@@ -219,6 +219,7 @@ async function main() {
           securityOpt: runner === 'codex' ? ['seccomp=unconfined'] : [],
           privileged: false,
           addedCapabilities: [],
+          nodeOptions: process.env.ACT_NODE_OPTIONS ?? null,
         },
         null,
         2,
@@ -249,6 +250,9 @@ async function main() {
         `EVAL_OWNER_UID=${process.getuid()}`,
         '--env',
         `EVAL_OWNER_GID=${process.getgid()}`,
+        ...(process.env.ACT_NODE_OPTIONS === undefined
+          ? []
+          : ['--env', `NODE_OPTIONS=${process.env.ACT_NODE_OPTIONS}`]),
         '--input',
         `backend=${backend}`,
         ...Object.entries(hosted)

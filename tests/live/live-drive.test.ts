@@ -453,6 +453,25 @@ test(
             assert.equal(receipt.outcomes[0].outcome, 'acknowledged');
             assert.equal(receipt.result.status, 200);
             const data = receipt.result.data;
+            assert.deepEqual(receipt.outcomes[0].pagination, {
+              query: q,
+              orderBy: common.orderBy,
+              fields: common.fields,
+              pageSize: 1,
+              ...(pageToken === undefined ? {} : { requestedPageToken: pageToken }),
+              ...(data.nextPageToken === undefined ? {} : { nextPageToken: data.nextPageToken }),
+              ...(data.incompleteSearch === undefined
+                ? {}
+                : { incompleteSearch: data.incompleteSearch }),
+              ...(data.files === undefined
+                ? {}
+                : { returnedIds: data.files.map((file) => file.id) }),
+            });
+            assert.equal(
+              data.incompleteSearch,
+              false,
+              'Explicit completeness evidence is required',
+            );
             assert.notEqual(
               data.incompleteSearch,
               true,

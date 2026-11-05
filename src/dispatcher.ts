@@ -24,6 +24,16 @@ export interface CallOutcome {
     nextPageToken?: string;
     maxResults?: number;
     query?: string;
+    pageSize?: number;
+    fields?: string;
+    orderBy?: string;
+    corpora?: string;
+    driveId?: string;
+    spaces?: string;
+    includeItemsFromAllDrives?: boolean;
+    supportsAllDrives?: boolean;
+    returnedIds?: string[];
+    incompleteSearch?: boolean;
   };
 }
 export interface SafeGoogleError {
@@ -165,7 +175,7 @@ export function createDispatcher(options: DispatcherOptions) {
     !/[\u0000-\u001f\u007f]/.test(value) &&
     (!accessToken || !value.includes(accessToken));
 
-  function pagination(params: unknown, data: unknown): CallOutcome['pagination'] {
+  function pagination(params: unknown, data: unknown, drive = false): CallOutcome['pagination'] {
     if (!data || typeof data !== 'object' || Array.isArray(data)) return undefined;
     const request = params as Record<string, unknown>;
     const response = data as Record<string, unknown>;
@@ -183,6 +193,37 @@ export function createDispatcher(options: DispatcherOptions) {
     if (Object.hasOwn(request, 'maxResults')) {
       if (!Number.isInteger(request.maxResults)) return undefined;
       result.maxResults = request.maxResults as number;
+    }
+    if (drive) {
+      for (const name of ['fields', 'orderBy', 'corpora', 'driveId', 'spaces'] as const) {
+        if (!Object.hasOwn(request, name)) continue;
+        if (!safeAnnotation(request[name], 4096)) return undefined;
+        result[name] = request[name];
+      }
+      if (Object.hasOwn(request, 'pageSize')) {
+        if (!Number.isInteger(request.pageSize)) return undefined;
+        result.pageSize = request.pageSize as number;
+      }
+      for (const name of ['includeItemsFromAllDrives', 'supportsAllDrives'] as const) {
+        if (!Object.hasOwn(request, name)) continue;
+        if (typeof request[name] !== 'boolean') return undefined;
+        result[name] = request[name];
+      }
+      if (Object.hasOwn(response, 'incompleteSearch')) {
+        if (typeof response.incompleteSearch !== 'boolean') return undefined;
+        result.incompleteSearch = response.incompleteSearch;
+      }
+      // Absence may mean a projected-out field. Do not manufacture an empty page.
+      if (Object.hasOwn(response, 'files')) {
+        if (!Array.isArray(response.files) || response.files.length > 1000) return undefined;
+        const ids: string[] = [];
+        for (const file of response.files) {
+          if (!file || typeof file !== 'object' || !safeAnnotation(file.id, 256) || !file.id)
+            return undefined;
+          ids.push(file.id);
+        }
+        result.returnedIds = ids;
+      }
     }
     return result;
   }
@@ -392,8 +433,8 @@ export function createDispatcher(options: DispatcherOptions) {
       const data = accessToken
         ? JSON.parse(serialized.split(escapedToken).join('[REDACTED]'))
         : JSON.parse(serialized);
-      if (method.path === 'gmail/v1/users.messages.list') {
-        const observed = pagination(params, response.data);
+      if (['gmail/v1/users.messages.list', 'drive/v3/files.list'].includes(method.path)) {
+        const observed = pagination(params, response.data, method.path === 'drive/v3/files.list');
         if (observed) record.pagination = observed;
       }
       return {
