@@ -169,7 +169,7 @@ plus framing and output allowance against a $1 published-rate estimate ceiling;
 accounting version 2 settles both input and output reservations only after a
 unique completed response passes model identity and usage validation. Budget
 settlement uses the uncached input rate, even when cache reads are reported.
-Missing or uncertain usage retains both reservations. The default Gmail suite allows twelve $1 estimates and Drive four; a legacy
+Missing or uncertain usage retains both reservations. The default Gmail suite allows twelve $1 estimates and Drive eight; a legacy
 six-model single-case matrix allows six. None has a $1 campaign-wide budget. These limits are not proxy billing guarantees.
 
 Requested and response-reported identities, input/output/cache tokens, estimates,

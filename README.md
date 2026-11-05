@@ -521,18 +521,33 @@ retain the remaining Sonnet discovery failures and the corrected pagination grad
 
 ### Initial test consent and CI secrets
 
-The supplied installed-app client defaults to
-`/tmp/google-codemode-mcp-oauth-client.json`. The ignored `.test.env` provides
+The installed-app client lives at
+`~/.config/google-codemode-mcp/test-oauth-client.json`, beside the retained refresh
+grant. If this durable client is absent, the helper imports the original
+`/tmp/google-codemode-mcp-oauth-client.json` once after validating the client and
+any existing grant's account/client binding. A missing client file does not mean
+that renewed consent is needed. The ignored `.test.env` provides
 `GOOGLE_TEST_USER`, `GOOGLE_TEST_PASSWORD`, and `GOOGLE_TEST_TOPT_KEY` (that spelling
 matches the supplied file). Password and authenticator seed remain local. The
 CLI uses PKCE, a random OAuth state, and a temporary localhost callback.
 
 ```sh
-just oauth                       # Complete interactive browser consent once
-just oauth --automate            # Optional local browser sign-in attempt
+just oauth                       # Refresh and verify the existing grant; consent if needed
+just oauth --drive               # Also require the Drive file scope
+just oauth --reauth              # Explicitly request fresh consent
+just oauth --automate            # Use Playwright only when consent is needed
 just github-secrets              # Install OAuth client, refresh grant, expected user
 just live
 ```
+
+`just oauth` first refreshes the saved grant and verifies the actual granted
+scopes and expected Gmail account. A valid grant requires no browser and is not
+rewritten. Consent starts only when no grant exists, Google explicitly reports
+`invalid_grant`, a requested scope is missing, or `--reauth` is supplied. Network,
+client authentication, malformed credential and account-verification failures
+stop without starting consent or replacing the existing grant.
+If the existing grant lacks the requested Gmail scope, account verification runs
+on the newly consented grant before replacing the old one.
 
 Automated consent uses Playwright; install its Chromium with
 `node_modules/.bin/playwright install chromium` or set `GOOGLE_CHROME_PATH` to an
@@ -545,10 +560,13 @@ through stdin for private file delivery. Use the URL from the same still-running
 consent attempt. Browser-copied addresses that omit the `http://` prefix are also
 accepted. Automatic localhost callbacks still work.
 
-Consent requests `gmail.modify`, verifies the expected Gmail profile, then saves
-only the refresh grant and binding metadata at
-`~/.config/google-codemode-mcp/test-oauth.json` with mode 0600. Override inputs with
-`GOOGLE_OAUTH_CLIENT_FILE` and `GOOGLE_TEST_TOKEN_FILE` when needed. No refresh
+Consent requests `gmail.modify` (plus `drive.file` with `--drive`), verifies the
+granted scopes and expected Gmail profile, then atomically saves the refresh
+grant and binding metadata at `~/.config/google-codemode-mcp/test-oauth.json`.
+The default credential directory is private (0700); installed client and grant
+files are private (0600). Override inputs with `GOOGLE_OAUTH_CLIENT_FILE` and
+`GOOGLE_TEST_TOKEN_FILE` when needed. Explicit overrides win; an invalid override
+never falls back to another client or grant. No refresh
 credential is stored in the repository. In Google's External/Testing mode, Gmail
 refresh grants expire after seven days; renew consent and reinstall the secret.
 

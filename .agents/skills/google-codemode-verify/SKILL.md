@@ -1,6 +1,6 @@
 ---
 name: google-codemode-verify
-description: Verify a Google Code Mode change with the maintained just and GitHub workflows; distinguish credential-free checks, synthetic runner proof, live Gmail/Drive, paid agent gates, and unverified hosts or Cloudflare deployment.
+description: Verify a Google Code Mode change with the maintained just and GitHub workflows; distinguish credential-free checks, synthetic runner proof, live Gmail/Drive, paid agent gates with token/cache/cost reporting, and unverified hosts or Cloudflare deployment.
 ---
 
 # Verify a candidate
@@ -53,22 +53,26 @@ self-send. Prerequisites are the matching installed-app client, test user, and
 refresh grant. Resolve through `tests/support/credentials.mjs` and README's local setup;
 `.test.env` is ignored and client/token overrides are `GOOGLE_OAUTH_CLIENT_FILE`
 and `GOOGLE_TEST_TOKEN_FILE`. Inspect existence/readability without printing contents.
-Missing consent is a prerequisite gap. OAuth, API enablement, GitHub secret
+The default client and grant live together in the private
+`~/.config/google-codemode-mcp/` directory. `just oauth --drive` refreshes and verifies
+the saved grant first; a valid account/scope grant needs no browser or replacement.
+A missing client file is not proof that the saved grant expired; inspect the
+configured credential locations and matching account/client before requesting
+consent again. Missing or revoked consent is a prerequisite gap. OAuth, API enablement, GitHub secret
 installation and scope changes need their task's existing authority. Drive needs
 the additional `drive.file` grant obtained through `just oauth --drive`; the live
 fixture creates/deletes only owned files. Serialize the shared account: all live
 GitHub workflows use one concurrency group and local live/eval launchers share a
 cross-checkout lock. Check remote holders before local credentialed trials.
 
-Agent trials additionally need the authorized proxy/model selection and credentials
-described in the gate docs. Its local launcher locks across checkouts. Follow its
-five-minute/$1-estimate/request/token caps and fail-stop behavior; no performer
-retries or fallback. Optional probe/reference scores never substitute for required
-cells. Record requested/served model, runner, case/source hashes, all usage/cache
-receipts, and cleanup; missing billing/cache counters stay unknown. A repeat for
-cache observation requires explicit scope. Prefer offline regrading for a grading
-question; never mutate saved evidence. Use `mafe-si:build-eval` when substantially
-changing cases/grading, rather than weakening expectations to turn a run green.
+Before executing or reporting paid agent trials, read the
+[paid-run procedure](references/paid-runs.md). It covers the actual local `act` +
+CLIProxyAPI entrypoints, campaign selection and caps, candidate-bound acceptance,
+and the required per-attempt and campaign token/cache/cost report. Use existing
+receipts or offline regrading for reporting/grading questions; a new model call
+is not needed to recover recorded metrics. Authoring this skill does not authorize
+an additional paid attempt. Use `mafe-si:build-eval` when substantially changing
+cases/grading, rather than weakening expectations to turn a run green.
 
 ## Observe, retain, and clean up
 
@@ -105,5 +109,7 @@ re-exercise affected behavior, and retain original failures. Preserve expected
 product behavior and capture distinct regressions through
 [google-codemode-capture](../google-codemode-capture/SKILL.md). Return observed
 candidate, commands/results, retained evidence, cleanup, and remaining acceptance.
-Updating this verifier follows changed-interface evidence; no full audit or live
-trial follows merely from authoring it.
+Updating this verifier follows changed-interface evidence. Recheck affected
+commands, receipt fields, budgets, models and links against source; preserve
+unrelated qualification limits. No full audit or paid/live trial follows merely
+from authoring it.
