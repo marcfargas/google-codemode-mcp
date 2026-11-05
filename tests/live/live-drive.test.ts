@@ -550,7 +550,7 @@ test(
           nextPageToken?: string;
           incompleteSearch?: boolean;
         };
-        const pages: { params: Record<string, unknown>; receipt: Receipt<Native<Page>> }[] = [];
+        const pages: Page[] = [];
         const readiness: { attempt: number; response: Page }[] = [];
         entry.qualification = { fixtures: fixtureEvidence, readiness, pages };
         try {
@@ -616,32 +616,39 @@ test(
             ready,
             'Fixture search readiness was not established; no product traversal qualified',
           );
-          const observed: { id: string; name: string }[] = [];
-          const tokens = new Set<string>();
+          const params = { ...common, pageSize: 1 };
+          const receipt = await worker!.tool<
+            Receipt<{
+              pages: Page[];
+              exhausted: boolean;
+              stoppedBy: string;
+              resumePageToken: string | null;
+              incompleteSearch: boolean | null;
+            }>
+          >('execute', {
+            accessToken,
+            inputs: params,
+            code: "return pagination.collect(google.drive({version:'v3'}).files.list,inputs,{maxPages:12,maxBytes:64000});",
+          });
+          entry.qualification.helperReceipt = receipt;
+          entry.outcomes.push(...receipt.outcomes);
+          await retain();
+          assert.equal(receipt.status, 'completed');
+          assert.equal(receipt.hasUnknownOutcome, false);
+          assert.equal(receipt.outcomesComplete, true);
+          const result = receipt.result;
+          assert.equal(result.exhausted, true);
+          assert.equal(result.stoppedBy, 'end');
+          assert.equal(result.resumePageToken, null);
+          assert.equal(result.incompleteSearch, false);
+          pages.push(...result.pages);
+          assert.equal(receipt.outcomes.length, pages.length);
           let pageToken: string | undefined;
-          for (let page = 0; page < 12; page++) {
-            const params = {
-              ...common,
-              pageSize: 1,
-              ...(pageToken === undefined ? {} : { pageToken }),
-            };
-            const receipt = await worker!.tool<Receipt<Native<Page>>>('execute', {
-              accessToken,
-              code: "return await google.drive({version:'v3'}).files.list(inputs);",
-              inputs: params,
-            });
-            pages.push({ params, receipt });
-            entry.outcomes.push(...receipt.outcomes);
-            await retain();
-            assert.equal(receipt.status, 'completed');
-            assert.equal(receipt.hasUnknownOutcome, false);
-            assert.equal(receipt.outcomesComplete, true);
-            assert.equal(receipt.outcomes.length, 1);
-            assert.equal(receipt.outcomes[0].path, 'drive/v3/files.list');
-            assert.equal(receipt.outcomes[0].outcome, 'acknowledged');
-            assert.equal(receipt.result.status, 200);
-            const data = receipt.result.data;
-            assert.deepEqual(receipt.outcomes[0].pagination, {
+          for (const [index, data] of pages.entries()) {
+            const outcome = receipt.outcomes[index];
+            assert.equal(outcome.path, 'drive/v3/files.list');
+            assert.equal(outcome.outcome, 'acknowledged');
+            assert.deepEqual(outcome.pagination, {
               query: q,
               orderBy: common.orderBy,
               fields: common.fields,
@@ -655,34 +662,13 @@ test(
                 ? {}
                 : { returnedIds: data.files.map((file) => file.id) }),
             });
-            assert.equal(
-              data.incompleteSearch,
-              false,
-              'Explicit completeness evidence is required',
-            );
-            assert.notEqual(
-              data.incompleteSearch,
-              true,
-              'Incomplete search cannot qualify completeness',
-            );
+            assert.equal(data.incompleteSearch, false);
             assert.ok((data.files ?? []).length <= 1);
-            observed.push(...(data.files ?? []));
-            const next = data.nextPageToken;
-            if (next === undefined) {
-              pageToken = undefined;
-              break;
-            }
-            assert.equal(typeof next, 'string');
-            assert.ok(next.length > 0 && !tokens.has(next));
-            tokens.add(next);
-            pageToken = next;
+            pageToken = data.nextPageToken;
           }
-          assert.equal(
-            pageToken,
-            undefined,
-            'Traversal must reach a terminal page within 12 requests',
-          );
+          assert.equal(pageToken, undefined);
           assert.ok(pages.length >= 3, 'Three files with pageSize 1 must cross page boundaries');
+          const observed = pages.flatMap((page) => page.files ?? []);
           assert.deepEqual(observed.map((file) => file.id).sort(), expectedIds);
           assert.deepEqual(
             observed,

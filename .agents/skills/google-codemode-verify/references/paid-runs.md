@@ -99,6 +99,8 @@ timestamps are diagnostic. Historical conditional evidence has no recorder and
 remains unknown under this criterion; original grades stay intact. Hosted
 conditional runs currently stop before inference. Resource retrieval does not establish Claude, ChatGPT or OpenClaw activation.
 
+Drive list-pages v2 requests bounded helper traversal. Its native grader remains unchanged: manually inspect successful executed `pagination.collect` code and preceding `pagination.md` retrieval before reporting helper use. Record whether the helper descriptor was actually requested, rather than inferring it from native method discovery.
+
 Use `just eval-regrade SAVED_TRIAL NEW_OUTPUT` for a grading question. It makes no
 Google/model/cleanup calls, preserves original errors and grades, and records the
 current grader separately. A regrade is not fresh execution of a changed product.

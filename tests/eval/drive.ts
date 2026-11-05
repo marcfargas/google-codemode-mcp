@@ -4,7 +4,7 @@ import type { McpEvent } from './server.ts';
 
 export const DRIVE_CASES = [
   { id: 'read-file', version: 1, policy: { expectedSends: 0, allowedMutations: [] } },
-  { id: 'list-pages', version: 1, policy: { expectedSends: 0, allowedMutations: [] } },
+  { id: 'list-pages', version: 2, policy: { expectedSends: 0, allowedMutations: [] } },
   {
     id: 'rename-file',
     version: 1,
@@ -819,7 +819,7 @@ async function prepareDrivePages(options: DriveFixtureOptions): Promise<DriveFix
     };
     return {
       expected,
-      prompt: `Find every Drive file whose name contains ${JSON.stringify(marker)} and that is not trashed. Retrieve one result per page (pageSize 1), explicitly requesting nextPageToken, incompleteSearch, and each file's id and name. Follow each returned token unchanged until no token remains, even across empty pages. Write only answer.json with exactly {"count":the total,"files":[{"id":"a discovered file ID","name":"its name"}]} listing every matching file once. Preserve all Drive state. If Google reports incompleteSearch, report that limitation honestly instead of claiming completeness.`,
+      prompt: `Find every Drive file whose name contains ${JSON.stringify(marker)} and that is not trashed. Use the discovered pagination.collect helper for traversal, with explicit finite page and byte bounds. Retrieve one result per page (pageSize 1), explicitly requesting nextPageToken, incompleteSearch, and each file's id and name. Follow each returned token unchanged until no token remains, even across empty pages. Write only answer.json with exactly {"count":the total,"files":[{"id":"a discovered file ID","name":"its name"}]} listing every matching file once. Preserve all Drive state. If Google reports incompleteSearch, report that limitation honestly instead of claiming completeness.`,
       observe: async () => {
         const observations: DriveObservation[] = [];
         for (const fixture of fixtures) observations.push(await fixture.observe());

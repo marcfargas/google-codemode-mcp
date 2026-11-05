@@ -250,3 +250,38 @@ lifecycle backstop separately. The one-hour application expiry denies artifact
 access, but does not physically delete bytes. Do not equate it with a one-hour
 retention guarantee. Hosted artifact access, bucket lifecycle and native host
 file presentation remain unqualified by the existing hosted media/Gmail records.
+
+## Artifact storage qualification (2026-11-05)
+
+Miniflare already emulates the R2 Worker object API. The maintained artifact suite
+passed 21 core/workerd checks, including persistent storage across Worker
+instances, capability refusal, expiry, exact binary/JSON content, bounded resource
+chunks and deletion. No new storage emulator or test service was added.
+
+After the pagination runtime change, two no-model controls through the final
+built Worker again passed with real Gmail fixtures: a 374834-byte native JSON
+artifact and a 96000-byte binary attachment. Trusted R2 snapshots verified the
+complete content before deletion; later helper/resource reads, unavailable reads
+after deletion, empty final buckets, unchanged Google sources and owned-fixture
+cleanup all passed. The local bundle matched the pagination agent trial's
+`fc13b0487cda73733d4792ecb28a1ceb37cfb0f870adb6e707ab73fba007fc11`.
+The earlier four artifact agent passes retain their own bundle/source identity.
+
+`ARTIFACTS_BUCKET=synthetic-private-artifacts just deploy --dry-run` also passed
+and produced the optional `ARTIFACTS` binding without publishing or provisioning.
+For a real deployment, supply an existing private bucket name through that
+variable. Keep public bucket access disabled and configure physical lifecycle
+separately; the one-hour capability expiry is an application access check.
+Miniflare object persistence does not emulate or prove the hosted lifecycle.
+
+The existing Worker-scoped Editor credential returned HTTP 403/error 10000 for
+the account R2 bucket listing. No bucket was provisioned and no hosted deployment
+changed. Hosted storage qualification therefore still needs an identified private
+test bucket and its bootstrap custodian/authority. Any temporary bucket/lifecycle
+administration is separate from steady Worker deployment; do not broaden the
+runner's Access service-token credential.
+
+Resource links, manifests and byte chunks are verified interfaces. Neither the
+Claude CLI nor the Sol Responses runner establishes a downloadable-file UI in
+Claude, ChatGPT or OpenClaw. Keep that host-facing presentation claim separate
+from correct storage and resource byte retrieval.

@@ -18,6 +18,7 @@ const document: DiscoveryDocument = {
   rootUrl: 'https://gmail.googleapis.com/',
   servicePath: '',
   baseUrl: 'https://gmail.googleapis.com/',
+  parameters: { fields: { type: 'string', location: 'query' } },
   schemas: {
     Message: { type: 'object', properties: { raw: { type: 'string' }, id: { type: 'string' } } },
     ListMessagesResponse: {
@@ -133,6 +134,13 @@ export default {
           { error: { message: 'bad TOKEN_CANARY_77881', errors: [{ reason: 'forbidden' }] } },
           { status: 403 },
         );
+      if (url.searchParams.has('pages')) {
+        const pages = JSON.parse(url.searchParams.get('pages')!) as any[];
+        const page = pages[calls.length - 1];
+        if (page?.fixtureError)
+          return Response.json({ error: { message: 'fixture rejected page' } }, { status: 403 });
+        return Response.json(page ?? {});
+      }
       if (new URL(target).pathname === '/drive/v3/files')
         return Response.json({
           files: [{ id: 'native-owned' }],

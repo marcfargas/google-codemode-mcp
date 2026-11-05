@@ -867,3 +867,36 @@ allowlist omission was corrected afterward and a separate offline report retaine
 original results and original workflow report remain intact. These one-attempt
 results qualify this local artifact candidate, not hosted retention, target-host
 download UI, or later runtime changes.
+
+### Pagination helper feasibility (2026-11-05)
+
+Drive `list-pages` version 2 requests `pagination.collect`; its native task grader
+is unchanged. One fresh Sonnet and one fresh Sol attempt passed all 17 criteria,
+with three acknowledged native pages per helper execution, exact file inventory,
+unchanged fixtures and complete owned cleanup. Both read `pagination.md` before
+execution and their retained executed programs directly called the collector.
+Sol also described `pagination`; Sonnet relied on root/skill discovery and the
+reference without calling that helper descriptor. The existing grader proves
+native behavior; these helper-use details come from separate trace inspection.
+No retries, unknown effects or unattempted cells.
+
+The captured source was based on `b2a8cf3` plus the retained pagination diff;
+the exact production bundle SHA-256 was
+`fc13b0487cda73733d4792ecb28a1ceb37cfb0f870adb6e707ab73fba007fc11`.
+The act check passed 312 tests (309 passes, 3 expected skips), both maintained
+Gmail/Drive live workflows passed with helper traversal, and independent runtime,
+protocol and preparation checks passed. The earlier artifact agent campaign keeps
+its separate source identity; it was not rerun or silently qualified for this
+runtime change.
+
+| Model       | Requests | Input | Output | Cache read | Cache creation |             Estimate USD |
+| ----------- | -------: | ----: | -----: | ---------: | -------------: | -----------------------: |
+| Sonnet 5.5  |        5 |    10 |   1516 |      29189 |          12985 |     0.0700389 native CLI |
+| GPT 6.1 Sol |        9 | 86617 |    575 |      49024 |        unknown | 0.0858384 published-rate |
+
+Sol input includes cached tokens; Sonnet's three input counters are separate.
+Both retained stable system/tool prefixes and complete model identity receipts.
+Sol's conservative commitment was $0.178984, distinct from its usage estimate.
+Actual billing is unknown. Full per-attempt metrics and private source/audit/
+readback/cleanup evidence remain in the workflow-generated report and retained
+campaign. This is bounded local feasibility, not reliability or hosted acceptance.

@@ -221,6 +221,7 @@ export async function runCell(configuration?: {
             'tests/eval/media.ts',
             'tests/eval/artifacts.ts',
             'skills/google-workspace/references/artifacts.md',
+            'skills/google-workspace/references/pagination.md',
             'skills/google-workspace/references/media-transfers.md',
             'skills/google-workspace/SKILL.md',
             'package-lock.json',

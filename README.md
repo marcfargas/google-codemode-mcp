@@ -99,6 +99,28 @@ bucket or configure billing/lifecycle; provision those separately. Keep authenti
 ingress in place: a valid Google call before storage is an admission check, not a
 per-person quota or caller identity.
 
+Use `describe({path:'pagination'})` and its
+[reference](skills/google-workspace/references/pagination.md) to collect bounded
+Gmail or Drive list pages:
+
+```js
+const drive = google.drive({ version: 'v3' });
+const result = await pagination.collect(
+  drive.files.list,
+  {
+    pageSize: 100,
+    fields: 'nextPageToken,incompleteSearch,files(id,name)',
+  },
+  { maxPages: 5, maxBytes: 200000 },
+);
+return { ...result, pages: result.pages.map((page) => ({ files: page.files })) };
+```
+
+Inspect `exhausted`, `stoppedBy`, `resumePageToken` and `incompleteSearch` before
+claiming completeness. A cap preserves a whole-page continuation; native errors
+retain `.partial` without retry. For large results, store the bounded result with
+`artifacts.putJson` when enabled. Existing native single-page calls are unchanged.
+
 Use `describe({path:'artifacts'})` and read
 `skill://google-codemode-mcp/google-workspace/references/artifacts.md`. After an
 acknowledged native Google call, top-level code can explicitly store JSON or a byte

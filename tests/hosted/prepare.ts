@@ -35,6 +35,7 @@ export async function prepareHosted(
     'skills/google-workspace/SKILL.md',
     'skills/google-workspace/references/media-transfers.md',
     'skills/google-workspace/references/artifacts.md',
+    'skills/google-workspace/references/pagination.md',
     'tests/hosted/wrangler.json',
   ];
   for (const directory of ['src', 'tests/hosted'])

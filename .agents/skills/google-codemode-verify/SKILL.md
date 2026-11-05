@@ -130,6 +130,8 @@ commands, receipt fields, budgets, models and links against source; preserve
 unrelated qualification limits. No full audit or paid/live trial follows merely
 from authoring it.
 
+For pagination changes, the maintained Gmail/Drive live workflows exercise `pagination.collect` through the built Worker. Drive list-pages v2 requests the helper while preserving its native page-chain grader. Before claiming helper adoption, inspect the retained executed code and ordered reference reads; native page outcomes alone cannot distinguish a helper from a handwritten loop. Older native pagination receipts do not qualify the new helper.
+
 For media changes, run the maintained workerd integration before live controls:
 Node stream behavior alone misses SDK multipart footer differences. In live and
 paid receipts verify exact bytes/hash, MIME, transformed name, source preservation,
@@ -154,8 +156,9 @@ A stored artifact URI is a bearer capability, not stable user identity. Inspect
 separate trusted artifact outcomes/references after program/output errors. A
 pending write retains an unknown outcome and tentative URI; completion-aware
 cleanup is best effort. Request-context cleanup and access expiry do not establish
-physical R2 retention. Bucket lifecycle, hosted storage, real-agent artifact use
-and native host downloadable-file presentation stay unqualified until separately
-exercised. The four passing media cells qualify cf98b51; they do not silently
+physical R2 retention. Bucket lifecycle, hosted storage and native host downloadable-file presentation
+stay unqualified until separately exercised. Four local artifact agent cells passed
+at the captured b2a8cf3 slice; the later pagination runtime has independent no-model
+artifact regression controls, not a repeated artifact actor campaign. The four passing media cells qualify cf98b51; they do not silently
 qualify later artifact code or an R2-enabled hosted deployment. Avoid new paid
 runs merely to report these existing metrics.

@@ -342,3 +342,159 @@ test('actual Wrangler build boots and executes through the production MCP route'
   assert.equal(outbound.length, 3);
   assert.equal(outbound.filter((u) => u.endsWith('/send')).length, 1);
 });
+
+const pageQuery = (pages: unknown[]) => '?pages=' + encodeURIComponent(JSON.stringify(pages));
+const collect = (params: unknown, limits: unknown, drive = false) =>
+  `return pagination.collect(google.${drive ? "drive({version:'v3'}).files" : "gmail({version:'v1'}).users.messages"}.list,${JSON.stringify(params)},${JSON.stringify(limits)});`;
+
+test('pagination follows opaque tokens across empty pages and retains native pages and receipts', async () => {
+  const pages = [
+    { messages: [{ id: 'a' }], nextPageToken: 'opaque+/= 東京' },
+    { nextPageToken: 'last' },
+    { messages: [{ id: 'b' }] },
+  ];
+  const out = await execute(
+    collect(
+      { userId: 'me', q: 'unchanged', maxResults: 1, labelIds: ['one'] },
+      { maxPages: 5, maxBytes: 5000 },
+    ),
+    pageQuery(pages),
+  );
+  assert.equal(out.execution.status, 'completed');
+  assert.deepEqual(out.execution.result, {
+    pages,
+    exhausted: true,
+    stoppedBy: 'end',
+    resumePageToken: null,
+    incompleteSearch: null,
+  });
+  assert.equal(out.execution.outcomes.length, 3);
+  assert.deepEqual(
+    out.calls.map((call: any) => new URL(call.url).searchParams.get('pageToken')),
+    [null, 'opaque+/= 東京', 'last'],
+  );
+  for (const call of out.calls) {
+    assert.equal(new URL(call.url).searchParams.get('q'), 'unchanged');
+    assert.equal(new URL(call.url).searchParams.get('labelIds'), 'one');
+  }
+});
+
+test('pagination page and UTF-8 byte bounds preserve exact resume positions without truncating pages', async () => {
+  const first = { messages: [{ id: 'é🌍' }], nextPageToken: 'second' };
+  const second = { messages: [{ id: 'large'.repeat(100) }] };
+  const limited = await execute(
+    collect({ userId: 'me', pageToken: 'initial' }, { maxPages: 1, maxBytes: 5000 }),
+    pageQuery([first, second]),
+  );
+  assert.equal(limited.calls.length, 1);
+  assert.equal(new URL(limited.calls[0].url).searchParams.get('pageToken'), 'initial');
+  assert.equal(limited.execution.result.stoppedBy, 'maxPages');
+  assert.equal(limited.execution.result.resumePageToken, 'second');
+  const cap = Buffer.byteLength(
+    JSON.stringify({
+      pages: [first],
+      exhausted: false,
+      stoppedBy: 'maxPages',
+      resumePageToken: 'second',
+      incompleteSearch: false,
+    }),
+  );
+  for (const [maxBytes, accepted, resume, calls] of [
+    [cap, [first], 'second', 2],
+    [cap - 1, [], null, 1],
+  ] as const) {
+    const out = await execute(
+      collect({ userId: 'me' }, { maxPages: 5, maxBytes }),
+      pageQuery([first, second]),
+    );
+    assert.equal(out.execution.status, 'completed');
+    assert.deepEqual(out.execution.result.pages, accepted);
+    assert.equal(out.execution.result.stoppedBy, 'maxBytes');
+    assert.equal(out.execution.result.resumePageToken, resume);
+    assert.equal(out.calls.length, calls);
+    assert.ok(Buffer.byteLength(JSON.stringify(out.execution.result)) <= maxBytes);
+  }
+});
+
+test('pagination rejects unsupported methods, unsafe params, masks and limits before dispatch', async () => {
+  for (const expression of [
+    "pagination.collect(google.gmail({version:'v1'}).users.messages.send,{userId:'me'},{maxPages:2,maxBytes:5000})",
+    'pagination.collect(()=>{}, {}, {maxPages:2,maxBytes:5000})',
+    "pagination.collect(google.gmail({version:'v1'}).users.messages.list,{get userId(){throw Error('getter ran')}},{maxPages:2,maxBytes:5000})",
+    ...[
+      [{ fields: 'files(id,nextPageToken,incompleteSearch)' }, { maxPages: 2, maxBytes: 5000 }],
+      [{ fields: 'files(id)),nextPageToken,incompleteSearch' }, { maxPages: 2, maxBytes: 5000 }],
+      [{ fields: 'files(id),nextPageToken' }, { maxPages: 2, maxBytes: 5000 }],
+      [{ pageToken: '' }, { maxPages: 2, maxBytes: 5000 }],
+      [{}, { maxPages: 51, maxBytes: 5000 }],
+      [{}, { maxPages: 2, maxBytes: 1 }],
+      [1, { maxPages: 2, maxBytes: 5000 }],
+    ].map(([params, limits]) =>
+      collect(params, limits, true)
+        .replace(/^return /, '')
+        .replace(/;$/, ''),
+    ),
+  ]) {
+    const out = await execute(
+      `try{await ${expression};return 'unexpected'}catch(e){return e.message}`,
+    );
+    assert.equal(out.calls.length, 0, expression);
+    assert.equal(out.execution.outcomes.length, 0);
+    assert.notEqual(out.execution.result, 'unexpected');
+    assert.notEqual(out.execution.result, 'getter ran');
+  }
+});
+
+test('pagination native errors, malformed metadata and cycles retain bounded partial pages', async () => {
+  const first = { messages: [], nextPageToken: 'second' };
+  for (const [bad, stoppedBy, code] of [
+    [{ fixtureError: true }, 'error', undefined],
+    [{ nextPageToken: 'second' }, 'cycle', 'PAGINATION_CYCLE'],
+    [{ nextPageToken: '' }, 'invalid', 'PAGINATION_INVALID'],
+    [{ nextPageToken: 4 }, 'invalid', 'PAGINATION_INVALID'],
+    [{ nextPageToken: null }, 'invalid', 'PAGINATION_INVALID'],
+    [[], 'invalid', 'PAGINATION_INVALID'],
+  ] as const) {
+    const out = await execute(
+      `try{${collect({ userId: 'me' }, { maxPages: 5, maxBytes: 5000 }).replace('return ', 'return await ')}}catch(e){return {code:e.code,status:e.httpStatus,partial:e.partial}}`,
+      pageQuery([first, bad]),
+    );
+    assert.equal(out.calls.length, 2);
+    assert.deepEqual(out.execution.result.partial, {
+      pages: [first],
+      exhausted: false,
+      stoppedBy,
+      resumePageToken: 'second',
+      incompleteSearch: null,
+    });
+    if (code) assert.equal(out.execution.result.code, code);
+    else assert.equal(out.execution.result.status, 403);
+  }
+});
+
+test('Drive exhaustion preserves sticky incompleteSearch and permits balanced native field masks', async () => {
+  for (const [values, expected] of [
+    [[false, false], false],
+    [[false, undefined], null],
+    [[undefined, false], null],
+    [[true, false], true],
+    [[false, true], true],
+  ] as const) {
+    const pages = values.map((value, i) => ({
+      files: [],
+      ...(value === undefined ? {} : { incompleteSearch: value }),
+      ...(i === 0 ? { nextPageToken: 'next' } : {}),
+    }));
+    const out = await execute(
+      collect(
+        { fields: 'files(id,name),nextPageToken,incompleteSearch' },
+        { maxPages: 3, maxBytes: 5000 },
+        true,
+      ),
+      pageQuery(pages),
+    );
+    assert.equal(out.execution.status, 'completed');
+    assert.equal(out.execution.result.exhausted, true);
+    assert.equal(out.execution.result.incompleteSearch, expected);
+  }
+});
