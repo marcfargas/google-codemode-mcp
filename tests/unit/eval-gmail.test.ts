@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import type { McpEvent } from '../eval/server.ts';
 import { toolEvent } from '../support/audit.ts';
-import { GMAIL_CASES, type GmailCaseId } from '../eval/cases.ts';
+import { GMAIL_CASES, selectGmailCases, type GmailCaseId } from '../eval/cases.ts';
 import {
   gradeGmail,
   prepareGmailFixture,
@@ -790,4 +790,151 @@ test('failure fixture preflights a well-formed missing ID and aborts on a differ
     },
     { missingStatus: 400 },
   );
+});
+
+test('explicit selective-labels fixture and oracle reject wrong selections and extra effects', async () => {
+  await withFixtureApi(async ({ seedCount }) => {
+    const fixture = await prepareGmailFixture({
+      accessToken: 'synthetic-token',
+      expectedUser: 'dummy@example.test',
+      caseId: 'selective-labels',
+    });
+    try {
+      assert.equal(seedCount(), 3);
+      assert.equal(selectGmailCases('selective-labels')[0].id, 'selective-labels');
+      assert.ok(!GMAIL_CASES.some((item) => item.id === fixture.expected.caseId));
+      const observed = await fixture.observe();
+      const sources = [observed.source!, ...observed.additionalSources!];
+      const facts = sources.map((source) => JSON.parse(source.plainText[0]).current);
+      assert.ok(facts.some((fact) => fact.state === 'closed' && fact.remaining > 0));
+      assert.ok(facts.some((fact) => fact.state === 'open' && fact.remaining === 0));
+      const ids = sources
+        .filter((source) => {
+          const body = JSON.parse(source.plainText[0]);
+          return body.current.state === 'open' && body.current.remaining > 0;
+        })
+        .map((source) => source.id);
+      assert.deepEqual(ids, fixture.expected.selectedIds);
+      for (const source of sources.filter((source) => ids.includes(source.id)))
+        source.labels.push(fixture.expected.labelId);
+      observed.history = sources
+        .filter((source) => ids.includes(source.id))
+        .map((source) => ({
+          kind: 'labelsAdded',
+          id: source.id,
+          threadId: source.threadId,
+          labels: [fixture.expected.labelId],
+        }));
+      const outcomes = [
+        ...sources.map((source) => ({
+          path: 'gmail/v1/users.messages.get',
+          mutation: false,
+          outcome: 'acknowledged',
+          resourceId: source.id,
+        })),
+        ...ids.map((id) => ({
+          path: 'gmail/v1/users.messages.modify',
+          mutation: true,
+          outcome: 'acknowledged',
+          resourceId: id,
+        })),
+      ];
+      const events = (values = outcomes) => [
+        toolEvent('execute', {
+          status: 'completed',
+          outcomesComplete: true,
+          hasUnknownOutcome: false,
+          outcomes: values,
+        }),
+      ];
+      const files = answerFile({ messageIds: ids });
+      const passes = (
+        value: GmailObservation | null,
+        output = files,
+        audit: McpEvent[] = events(),
+      ) =>
+        gradeGmail(fixture.expected, value, output, audit).every((item) => item.status === 'pass');
+      assert.equal(passes(observed), true);
+      assert.equal(
+        passes(
+          observed,
+          answerFile({
+            messageIds: [sources.find((source) => !ids.includes(source.id))!.id, ...ids.slice(1)],
+          }),
+        ),
+        false,
+      );
+      assert.equal(passes(observed, answerFile({ messageIds: ids, extra: true })), false);
+      assert.equal(passes(observed, files, events(outcomes.slice(0, 3))), false);
+      assert.equal(
+        passes(
+          observed,
+          files,
+          events([
+            ...outcomes.slice(0, 3),
+            {
+              path: 'gmail/v1/users.messages.batchModify',
+              mutation: true,
+              outcome: 'acknowledged',
+              resourceId: '',
+            },
+          ]),
+        ),
+        true,
+      );
+      assert.equal(
+        passes(
+          observed,
+          files,
+          events(
+            outcomes.map((item) =>
+              item.mutation
+                ? { ...item, path: 'gmail/v1/users.threads.modify', resourceId: '' }
+                : item,
+            ),
+          ),
+        ),
+        true,
+      );
+      assert.equal(
+        passes(
+          observed,
+          files,
+          events([...outcomes, { ...outcomes.at(-1)!, path: 'gmail/v1/users.messages.send' }]),
+        ),
+        false,
+      );
+      assert.equal(
+        passes(
+          observed,
+          files,
+          events(outcomes.map((item) => (item.mutation ? { ...item, outcome: 'unknown' } : item))),
+        ),
+        false,
+      );
+      assert.equal(passes(observed, files, events(outcomes.slice(1))), false);
+      assert.equal(passes(observed, files, []), false);
+      for (const change of [
+        (value: GmailObservation) =>
+          [value.source!, ...value.additionalSources!]
+            .find((source) => !ids.includes(source.id))!
+            .labels.push(fixture.expected.labelId),
+        (value: GmailObservation) => {
+          value.complete = false;
+        },
+        (value: GmailObservation) => value.newDraftIds.push('extra'),
+        (value: GmailObservation) => {
+          [value.source!, ...value.additionalSources!].find((source) =>
+            ids.includes(source.id),
+          )!.labels = ['INBOX', 'UNREAD'];
+        },
+      ]) {
+        const wrong = structuredClone(observed);
+        change(wrong);
+        assert.equal(passes(wrong), false);
+      }
+    } finally {
+      assert.deepEqual(await fixture.cleanup(), { failures: [], unknownMutations: [] });
+    }
+  });
 });

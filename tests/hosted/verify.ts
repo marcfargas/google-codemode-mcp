@@ -2,7 +2,13 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { HARNESS_VERSION, PROTOCOL_VERSION, SYNTHETIC_TOKEN, type Probe } from './contract.ts';
+import {
+  HARNESS_VERSION,
+  PROTOCOL_VERSION,
+  PROBE_NAMES,
+  SYNTHETIC_TOKEN,
+  type Probe,
+} from './contract.ts';
 
 type Status = 'pass' | 'fail' | 'unknown';
 export interface ProbeResult {
@@ -64,6 +70,7 @@ export function gradeProbe(probe: Probe, receipt: unknown, expected: Identity): 
   if (
     receipt.limits?.innerCpuMs !== 1000 ||
     receipt.limits?.innerSubRequests !== 1 ||
+    receipt.limits?.innerNetworkDenied !== true ||
     receipt.limits?.executorTimeoutMs !== 15000
   )
     return {
@@ -76,8 +83,10 @@ export function gradeProbe(probe: Probe, receipt: unknown, expected: Identity): 
     !object(execution) ||
     execution.outcomesComplete !== true ||
     !Array.isArray(execution.outcomes) ||
-    execution.hasUnknownOutcome !== false ||
+    typeof execution.hasUnknownOutcome !== 'boolean' ||
     !Array.isArray(dispatches) ||
+    !Number.isSafeInteger(receipt.syntheticEffects) ||
+    receipt.syntheticEffects < 0 ||
     !Number.isSafeInteger(receipt.dispatchesAtClose) ||
     !Number.isFinite(receipt.closedAtMs) ||
     !Number.isFinite(receipt.elapsedMs) ||
@@ -89,12 +98,17 @@ export function gradeProbe(probe: Probe, receipt: unknown, expected: Identity): 
       (entry, index) =>
         object(entry) &&
         entry.sequence === index + 1 &&
+        ['GET', 'POST'].includes(entry.method) &&
         typeof entry.afterClose === 'boolean' &&
         typeof entry.aborted === 'boolean' &&
         Number.isFinite(entry.atMs),
     )
   )
     return unknown('Malformed dispatch counter');
+  if (
+    JSON.stringify({ execution, executorSignal: receipt.executorSignal }).includes(SYNTHETIC_TOKEN)
+  )
+    return checked(false, 'Synthetic request credential escaped its trusted boundary');
   if (
     dispatches.some((entry) => entry.afterClose) ||
     dispatches.length !== receipt.dispatchesAtClose
@@ -103,6 +117,70 @@ export function gradeProbe(probe: Probe, receipt: unknown, expected: Identity): 
       status: 'fail',
       evidence: 'A synthetic Google dispatch occurred after execution closed',
     };
+  const outcomes = execution.outcomes;
+  const ledger = (expected: [boolean, string, string][]) =>
+    outcomes.length === expected.length &&
+    expected.every(
+      ([mutation, method, state], index) =>
+        outcomes[index]?.mutation === mutation &&
+        outcomes[index]?.path === `gmail/v1/users.messages.${method}` &&
+        outcomes[index]?.outcome === state,
+    );
+  if (probe === 'mutationUnknown')
+    return checked(
+      execution.status === 'completed' &&
+        execution.hasUnknownOutcome === true &&
+        receipt.syntheticEffects === 1 &&
+        JSON.stringify(dispatches.map((entry) => entry.method)) === '["POST","GET"]' &&
+        ledger([
+          [true, 'send', 'unknown'],
+          [true, 'send', 'not_dispatched'],
+          [true, 'send', 'not_dispatched'],
+          [false, 'list', 'acknowledged'],
+        ]) &&
+        execution.result?.dispatch === 2,
+      'One lost-response synthetic write effect, queued/subsequent writes fenced, and read acknowledged',
+    );
+  if (probe === 'mutationAcknowledged')
+    return checked(
+      execution.status === 'error' &&
+        execution.hasUnknownOutcome === false &&
+        String(execution.error).includes('Program failed after acknowledged write') &&
+        receipt.syntheticEffects === 1 &&
+        dispatches.length === 1 &&
+        dispatches[0].method === 'POST' &&
+        ledger([[true, 'send', 'acknowledged']]),
+      'Acknowledged synthetic effect survives a later program error',
+    );
+  if (probe === 'isolation')
+    return checked(
+      execution.status === 'completed' &&
+        execution.hasUnknownOutcome === false &&
+        receipt.syntheticEffects === 0 &&
+        dispatches.length === 1 &&
+        dispatches[0].method === 'GET' &&
+        ledger([
+          [false, 'list', 'not_dispatched'],
+          [false, 'list', 'not_dispatched'],
+          [false, 'list', 'not_dispatched'],
+          [false, 'list', 'acknowledged'],
+        ]) &&
+        execution.result?.networkBlocked === true &&
+        execution.result?.token === 'undefined' &&
+        execution.result?.environment === 'undefined' &&
+        JSON.stringify(execution.result?.errors) ===
+          '["INVALID_PARAMS","INVALID_PARAMS","INVALID_PARAMS","client","options"]' &&
+        execution.result?.read?.dispatch === 1 &&
+        execution.result?.echoRedactedBeforeReturn === true &&
+        execution.result?.read?.credentialEcho === '[REDACTED]',
+      'Loaded networking denied, transport overrides refused, credential hidden and upstream echo redacted before RPC',
+    );
+  if (
+    execution.hasUnknownOutcome !== false ||
+    receipt.syntheticEffects !== 0 ||
+    dispatches.some((entry) => entry.method !== 'GET')
+  )
+    return checked(false, 'Unexpected mutation or uncertainty in synthetic read-only probe');
   if (
     execution.outcomes.some(
       (outcome: any) =>
@@ -353,13 +431,13 @@ export async function verifyHosted(output: string) {
   }
   const identity = await attempt('identity');
   if (identity) {
-    for (const probe of ['cpu', 'asyncTimeout', 'delayed', 'unawaited', 'multiple'] as const) {
+    for (const probe of PROBE_NAMES.filter((probe) => !['identity', 'healthy'].includes(probe))) {
       await attempt(probe);
       // Planned liveness observation is a distinct request, never a retry of the probe.
       if (!(await attempt('healthy'))) break;
     }
   }
-  const complete = results.length === 11;
+  const complete = results.length === 1 + 2 * (PROBE_NAMES.length - 2);
   const report = {
     harnessVersion: HARNESS_VERSION,
     expected,

@@ -20,13 +20,22 @@ export const DRIVE_CASES = [
     },
   },
 ] as const;
-type DriveCaseId = (typeof DRIVE_CASES)[number]['id'];
+/** Explicit-only unused composition; excluded from validation `all`. */
+export const DRIVE_EVALUATION_CASES = [
+  {
+    id: 'select-rename',
+    version: 1,
+    policy: { expectedSends: 0, allowedMutations: ['drive/v3/files.update'] },
+  },
+] as const;
+type DriveCaseId =
+  (typeof DRIVE_CASES)[number]['id'] | (typeof DRIVE_EVALUATION_CASES)[number]['id'];
 export function getDriveCase(id = 'read-file'): {
   id: DriveCaseId;
   version: number;
   policy: MechanismPolicy;
 } {
-  const selected = DRIVE_CASES.find((entry) => entry.id === id);
+  const selected = [...DRIVE_CASES, ...DRIVE_EVALUATION_CASES].find((entry) => entry.id === id);
   if (!selected) throw new Error('Unknown Drive case');
   return selected;
 }
@@ -50,6 +59,7 @@ export interface DriveExpected {
   parents: string[];
   version?: string;
   pagination?: DriveExpected[];
+  selection?: { fileId: string; name: string };
 }
 export interface DriveObservation {
   complete: boolean;
@@ -319,6 +329,75 @@ export function gradeDrive(
   audit?: McpEvent[],
   outbound?: unknown,
 ) {
+  if (expected.caseId === 'select-rename') {
+    const targets = expected.pagination ?? [];
+    const selection = expected.selection;
+    const outcomes = trustedOutcomes(audit);
+    const writes = outcomes?.filter((item) => item.mutation);
+    const answer = artifact(files, 'answer.json');
+    const result = (id: string, ok: boolean | undefined) => ({
+      id,
+      status: ok === undefined ? ('unknown' as const) : ok ? ('pass' as const) : ('fail' as const),
+      evidence:
+        'Independent content-selected rename, complete native receipts and all owned file readbacks.',
+    });
+    const valid =
+      targets.length === 3 &&
+      new Set(targets.map((item) => item.fileId)).size === 3 &&
+      !!selection &&
+      targets.some((item) => item.fileId === selection.fileId);
+    const preservedAll =
+      valid &&
+      observation?.complete === true &&
+      observation.pagination?.length === targets.length &&
+      targets.every((target) =>
+        preserved(
+          { ...target, name: target.fileId === selection!.fileId ? selection!.name : target.name },
+          observation.pagination!.find((item) => item.file?.id === target.fileId),
+        ),
+      );
+    const rawWrites = audit
+      ?.flatMap((event) => event.response?.result?.structuredContent?.outcomes ?? [])
+      .filter((item: any) => item.mutation);
+    return [
+      result(
+        'drive_selection_answer',
+        valid &&
+          !!answer &&
+          JSON.stringify(Object.keys(answer).sort()) === JSON.stringify(['fileId', 'name']) &&
+          answer.fileId === selection!.fileId &&
+          answer.name === selection!.name &&
+          JSON.stringify(Object.keys(files)) === JSON.stringify(['answer.json']),
+      ),
+      result('drive_selection_preserved', observation ? preservedAll : undefined),
+      result(
+        'drive_selection_reads',
+        outcomes === null
+          ? undefined
+          : valid &&
+              targets.every((target) =>
+                outcomes.some(
+                  (item) =>
+                    !item.mutation &&
+                    item.path === 'drive/v3/files.get' &&
+                    item.resourceId === target.fileId &&
+                    item.outcome === 'acknowledged',
+                ),
+              ),
+      ),
+      result(
+        'drive_selection_write',
+        outcomes === null
+          ? undefined
+          : valid &&
+              writes?.length === 1 &&
+              writes[0].path === 'drive/v3/files.update' &&
+              writes[0].resourceId === selection!.fileId &&
+              writes[0].outcome === 'acknowledged' &&
+              JSON.stringify(rawWrites?.[0]?.mutationFields) === JSON.stringify(['name']),
+      ),
+    ];
+  }
   const criteria: { id: string; status: 'pass' | 'fail' | 'unknown'; evidence: string }[] = [];
   const add = (id: string, condition: boolean | undefined, evidence: string) =>
     criteria.push({
@@ -506,7 +585,7 @@ interface DriveFixture {
 /** Trusted fixtures use direct REST; the actor must discover the product surface. */
 export async function prepareDriveFixture(options: DriveFixtureOptions): Promise<DriveFixture> {
   const selected = getDriveCase(options.caseId);
-  return selected.id === 'list-pages'
+  return selected.id === 'list-pages' || selected.id === 'select-rename'
     ? prepareDrivePages(options)
     : prepareSingleDriveFixture(options, selected);
 }
@@ -514,11 +593,12 @@ async function prepareSingleDriveFixture(
   options: DriveFixtureOptions,
   selected: ReturnType<typeof getDriveCase>,
   sharedMarker?: string,
+  content?: string,
 ): Promise<DriveFixture> {
   const marker = sharedMarker ?? `codemode-drive-${randomUUID()}`;
   const name = sharedMarker ? `${marker}-${randomUUID()}.txt` : `${marker}.txt`;
   const bytes = Buffer.from(
-    `Independent Drive fixture ${randomBytes(16).toString('hex')}\nCafé — 東京 ✓\n`,
+    content ?? `Independent Drive fixture ${randomBytes(16).toString('hex')}\nCafé — 東京 ✓\n`,
   );
   const knownIds: string[] = [];
   const writes: DriveWrite[] = [];
@@ -722,6 +802,9 @@ async function prepareSingleDriveFixture(
 
 async function prepareDrivePages(options: DriveFixtureOptions): Promise<DriveFixture> {
   const marker = `codemode-drive-${randomUUID()}`;
+  const selective = options.caseId === 'select-rename';
+  const selectedIndex = randomBytes(1)[0] % 3;
+  const destination = `${randomUUID()}-ready.txt`;
   const fixtures: DriveFixture[] = [];
   const parts: {
     manifest?: { fileIds?: string[]; cleanup?: DriveCleanup };
@@ -765,6 +848,16 @@ async function prepareDrivePages(options: DriveFixtureOptions): Promise<DriveFix
           },
           getDriveCase('read-file'),
           marker,
+          selective
+            ? JSON.stringify({
+                previous: { approved: true, blocked: false },
+                current: {
+                  approved: index !== (selectedIndex + 2) % 3,
+                  blocked: index === (selectedIndex + 1) % 3,
+                },
+                destination,
+              }) + '\n'
+            : undefined,
         ),
       );
     }
@@ -814,12 +907,17 @@ async function prepareDrivePages(options: DriveFixtureOptions): Promise<DriveFix
       throw new Error('Drive pagination fixture search readiness unavailable; no actor started');
     const expected: DriveExpected = {
       ...fixtures[0].expected,
-      caseId: 'list-pages',
+      caseId: selective ? 'select-rename' : 'list-pages',
+      ...(selective
+        ? { selection: { fileId: fixtures[selectedIndex].expected.fileId, name: destination } }
+        : {}),
       pagination: fixtures.map((fixture) => fixture.expected),
     };
     return {
       expected,
-      prompt: `Find every Drive file whose name contains ${JSON.stringify(marker)} and that is not trashed. Use the discovered pagination.collect helper for traversal, with explicit finite page and byte bounds. Retrieve one result per page (pageSize 1), explicitly requesting nextPageToken, incompleteSearch, and each file's id and name. Follow each returned token unchanged until no token remains, even across empty pages. Write only answer.json with exactly {"count":the total,"files":[{"id":"a discovered file ID","name":"its name"}]} listing every matching file once. Preserve all Drive state. If Google reports incompleteSearch, report that limitation honestly instead of claiming completeness.`,
+      prompt: selective
+        ? `Find every non-trashed Drive file whose name contains ${JSON.stringify(marker)} and read its JSON content. Rename only the file where current.approved is true and current.blocked is false, using its destination value as the new name; ignore previous facts. Preserve all file bytes and other metadata, and leave every other file unchanged. Write only answer.json with exactly {"fileId":"the selected file ID","name":"its new name"}.`
+        : `Find every Drive file whose name contains ${JSON.stringify(marker)} and that is not trashed. Use the discovered pagination.collect helper for traversal, with explicit finite page and byte bounds. Retrieve one result per page (pageSize 1), explicitly requesting nextPageToken, incompleteSearch, and each file's id and name. Follow each returned token unchanged until no token remains, even across empty pages. Write only answer.json with exactly {"count":the total,"files":[{"id":"a discovered file ID","name":"its name"}]} listing every matching file once. Preserve all Drive state. If Google reports incompleteSearch, report that limitation honestly instead of claiming completeness.`,
       observe: async () => {
         const observations: DriveObservation[] = [];
         for (const fixture of fixtures) observations.push(await fixture.observe());

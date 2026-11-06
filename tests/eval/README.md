@@ -53,6 +53,10 @@ larger selections. `just eval-matrix gmail ...` retains the legacy combined case
 Hosted Cloudflare and actual host/gateway acceptance remain separate from local
 runner results.
 
+The local launcher supplies a main-branch workflow event so the guarded job also
+runs from a feature checkout. Retained source receipts identify the actual checkout
+HEAD and bytes. A successful `act` exit without its workflow report is refused.
+
 Drive defines four cases: `read-file`, `list-pages`, `rename-file`, and
 `conditional-update-unsupported`. Run
 `just eval-drive PROXY_URL NEW_OUTPUT` after `just oauth --drive` and enabling
@@ -60,6 +64,40 @@ Drive API. The default required pair permits eight fresh attempts, each under it
 existing $1 estimate/five-minute caps, at most $8 in estimates. No automatic retries.
 Fixtures are app-created files under `drive.file`, with independent metadata,
 content and parents checks and known-ID cleanup.
+
+### Unused evaluation compositions
+
+Two explicit evaluation cases extend the validation corpus: Gmail
+`selective-labels` chooses messages from their current body facts before applying
+an existing label; Drive `select-rename` chooses a file from its contents and
+derives the new name from those contents. Distractors contain previous facts that
+must not determine the action. Exact answers, complete native outcomes and
+independent state checks distinguish correct selection from changing every object
+or doing nothing. Both cases preserve unrelated state and use known-ID cleanup.
+They are excluded from the default `all` suites.
+
+Run these only as an explicitly selected assessment:
+
+```sh
+just eval-gmail PROXY_URL NEW_GMAIL_OUTPUT selective-labels required
+just eval-drive PROXY_URL NEW_DRIVE_OUTPUT select-rename required
+```
+
+One attempt per required model and case means four attempts, at most $4 in the
+existing estimates, with unchanged five-minute limits and no automatic retries.
+Before inference, retain a partition/protocol receipt with the case versions,
+candidate and grader hashes, selected models, caps and stop conditions. Calibrate
+the fixture/oracle paths without models first. Keep the stable shared prompt and
+tools; cache hits come from observed provider counters, without warmups or padding.
+Use each workflow-generated report for full gates and token/cache/cost metrics.
+
+These compositions were authored with implementation knowledge. Their first
+prospectively frozen assessment can establish unused-case feasibility, not strict
+blindness or reliability. Once results inform a change, the cases become
+validation for that tuning; repeating them cannot restore untouched status.
+Existing Gmail/Drive/media/artifact cases already used in development retain
+their historical validation results and failures. No assessment result is claimed
+until its selected attempts and independent cleanup are inspected.
 
 The pagination task asks for one result per page and an exact `answer.json`
 inventory. Trusted native call annotations must establish a complete token chain,
@@ -293,6 +331,51 @@ not a production benchmark or statistical improvement claim. Cases used to tune
 the product are validation data. A later hillclimb needs broader frozen cases and
 untouched evaluation data. The design follows the adopted mafe-si `build-eval`
 guidance, informed by the [Anthropic article](https://claude.dev/blog/automating-eval-design-and-hillclimbing/).
+
+## First frozen unused-case assessment (2026-11-06)
+
+All four selected cells passed: `selective-labels` and `select-rename`, each with
+Sonnet and Sol once. Both cases were version 1, graded with version 4, against
+clean revision `0d86d2e44c0eb036b3fde5f71e2fa0078dcf3dbf`. The local Worker bundle was
+`60f3f476b86710a315247e418f8dd1467f9a51e9d40ebca34236ffce74b611aa`.
+Before inference, the retained protocol froze all 134 tracked entries, partition,
+models, caps and stop conditions. Deterministic real-Google calibration and both
+synthetic runner preflights passed first. No product, skill, prompt or grader
+tuning followed exposure, and no warmups, retries or fallback attempts ran.
+
+Gmail passed all 14 criteria per model; Drive passed all 12. Ordered discovery and
+Workspace resource retrieval, exact content-dependent selections, complete native
+outcomes, independent state preservation, file answers and model identity passed.
+All fixture cleanup completed with no failures or unknown effects. Both workflows
+generated their reports directly; offline `eval-verify` also accepted each pair.
+
+| Case             | Model       | Requests |   Input | Output | Cache read | Cache creation |        Cost estimate USD |
+| ---------------- | ----------- | -------: | ------: | -----: | ---------: | -------------: | -----------------------: |
+| selective-labels | Sonnet 5.5  |        6 |      12 |  1,661 |     73,864 |         26,939 |     0.1317764 native CLI |
+| selective-labels | GPT 6.1 Sol |       10 |  96,904 |    505 |     78,336 |        unknown | 0.0500196 published rate |
+| select-rename    | Sonnet 5.5  |        6 |      12 |  1,557 |     39,705 |          9,970 |     0.0594445 native CLI |
+| select-rename    | GPT 6.1 Sol |        9 | 219,316 |    583 |    170,240 |        unknown | 0.1210060 published rate |
+
+Across both attempts, Sonnet used 12 requests, 24 ordinary input tokens, 3,218
+output, 113,569 cache-read and 36,909 cache-creation tokens; its native estimate
+totalled $0.1912209. Sol used 19 requests, 316,220 inclusive input tokens, 1,088
+output and 248,576 cache-read tokens; its published-rate estimate totalled
+$0.1710256. Sol's conservative committed estimate was $0.64332. All reported
+counters have coverage 2/2 per model except Sol cache creation, which is unknown;
+Sol reported zero reasoning tokens. Claude's ordinary input excludes its separate
+cache counters; Sol's input includes cache reads. Every model response matched
+the requested identity, and system/tool prefixes remained stable within each
+attempt. Provider/proxy billing remains unknown; estimates are not bills.
+
+The earlier skipped preflight, incomplete native installation and event-input
+failure remain retained. The launcher now carries all dispatch inputs in its
+event file, refuses a successful exit without a report, and installs the pinned
+Claude postinstall with scoped npm permission. These repairs preceded the freeze.
+The assessment establishes prospectively unused-case feasibility with same-author
+exposure, not blindness, reliability, a fresh full validation suite, target-host
+activation or hosted acceptance. If these results inform tuning, both cases become
+validation data and a later evaluation needs a new unused partition. Historical
+failures and their original grades remain unchanged.
 
 ## Observed pilot results
 

@@ -182,11 +182,21 @@ Identity must match before any stress probe. The planned sequence is identity, t
 4. An active unawaited read whose `finally` attempts a second call after cancellation.
 5. Five sequential Google bridge reads in one program, investigating the production `subRequests: 1` setting.
 
-Each request has a 30-second external deadline. A failed healthy follow-up stops further probes. Follow-ups are planned liveness observations, not replay of a failed probe. The counter is local to each request and remains alive through the explicit observation window; it does not rely on isolate reuse or an eventually consistent cross-request store. Only intercepted synthetic read dispatches are counted. This establishes that no Google dispatch happened after close within the tested window; it does not claim durable scheduling/replay support.
+Harness version 2 adds three fixed controls, each with its own healthy
+follow-up (17 requests total): an intercepted synthetic write whose response is
+lost, an acknowledged synthetic write followed by a program error, and direct
+network/credential-override refusals. Trusted transport counters and native
+outcomes must agree: one unknown write effect, queued/subsequent writes fenced
+while reads work, and an acknowledged effect preserved after the program error.
+Isolation observes the loaded `globalOutbound: null`, a rejected direct fetch to
+a resolvable URL, refused transport overrides, and response-token redaction. Local
+outer egress must remain zero. These controls never dispatch writes to Google.
+
+Each request has a 30-second external deadline. A failed healthy follow-up stops further probes. Follow-ups are planned liveness observations, not replay of a failed probe. The counter is local to each request and remains alive through the explicit observation window; it does not rely on isolate reuse or an eventually consistent cross-request store. Intercepted synthetic read/write dispatches and write effects are counted. This establishes that no Google dispatch happened after close within the tested window; it does not claim durable scheduling/replay support.
 
 CPU passes only when the observed native executor throws a CPU-specific platform exception. The observer records that exception before the production runtime converts it to its safe error receipt. A generic resource-limit error, HTTP 1102, transport failure, or external HTTP timeout is **unknown**, never CPU proof. If the platform suppresses the specific exception, correlate independently retained platform diagnostics with the deployed version, timestamp and request ID before making any stronger claim. Do not reinterpret a generic error as CPU enforcement or blindly rerun the loop.
 
-`report.json` marks hosted qualification only if the complete planned sequence passes. It records the selected digest/version, prepared-manifest hash, per-probe grades and request IDs. It qualifies the executor limits and finite protocol behavior of the retained harness candidate against synthetic reads, not live Google, gateway token projection, Skills activation, or Claude/ChatGPT/OpenClaw usability. Preserve deployment, ingress and platform receipts alongside it. After review, retire only the newly owned verification Worker/bridge through the owning project; the harness does not perform broad cleanup.
+`report.json` marks hosted qualification only if the complete planned sequence passes. It records the selected digest/version, prepared-manifest hash, per-probe grades and request IDs. It qualifies the executor limits, isolation and finite protocol behavior of the retained harness candidate against synthetic reads/writes, not live Google, gateway token projection, Skills activation, or Claude/ChatGPT/OpenClaw usability. Preserve deployment, ingress and platform receipts alongside it. Restore the selected product deployment after temporary probes; retire only newly owned resources through the owning project. The harness does not perform broad cleanup.
 
 ## Credential-free checks
 
@@ -195,6 +205,71 @@ node --experimental-strip-types --test tests/integration/hosted.test.ts
 ```
 
 The ordinary test workflow includes these tests. They build the private candidate and exercise it in local Miniflare, including the actual 15-second async timeout, late-call fences, five reads, and healthy follow-ups. Outbound networking fails if attempted. CPU grading is tested with synthetic exception evidence; the infinite loop is deliberately never run in local workerd, whose CPU limit behavior does not establish hosted enforcement. A local pass is not a hosted pass.
+
+## Hosted mutation and isolation (2026-11-06)
+
+Harness version 2 passed all 17 planned requests on deployed version
+`16a83534-c898-4971-b712-67aeb19cb453`. Its prepared source digest was
+`2f91c52e80508ce07ca32fe1b524d27bf9696298935515afaef544a89e14bbc9`;
+the retained manifest and native deployment receipts identify the uploaded bundle.
+
+An intercepted write applied exactly one synthetic effect before losing its
+response. The production ledger reported `unknown`, refused queued and subsequent
+writes, and still acknowledged a read. A separate acknowledged synthetic write
+remained acknowledged after the program threw. Isolation refused direct sandbox
+networking and transport/credential overrides, hid request credentials and
+environment bindings, and verified upstream credential redaction inside the
+sandbox before returning. CPU termination, asynchronous timeout, late-call
+fencing, five bridge calls and every healthy follow-up also passed. The local
+workerd control independently observed zero outer network requests.
+
+No real Google or model calls occurred. After the temporary probe deployment,
+the original product bundle was restored as version
+`ea008939-b42c-40dd-b923-362fc8b19278`. Native settings and protected discovery
+confirmed the original candidate, R2 binding and download origin, disabled previews
+and observability. Missing Access credentials returned 403 and a wrong secret
+returned 401 before, during and after the trial. These synthetic controls do not
+qualify live Google mutation semantics or the ordinary deployment entrypoint.
+
+## Ordinary environment deployment (2026-11-06)
+
+The ordinary `just deploy` path passed on the existing Access-protected test
+Worker from clean commit `630351f196c6c20ff7b12e9795f9e2ac145d41fc`.
+`WORKER_NAME`, `ARTIFACTS_BUCKET` and `ARTIFACT_DOWNLOAD_ORIGIN` selected the target
+and its existing storage without checkout edits. The entrypoint was
+`src/worker.ts`, without the hosted identity wrapper. Version previews are
+explicitly disabled in the base configuration. Artifact-config dry-runs retain
+their bundle in the checkout's `dist/` directory.
+
+Native version `cd71c4d5-6a9d-45b5-92ee-c6377896de2a` and downloaded script content
+had matching Cloudflare ETags. The executing module's SHA-256 matched the retained
+dry-run bundle exactly:
+`f902f98b3bea3c86140b742dcb06539300a19c8fd54e0cde4694f5fe322c04a4`.
+The published source map differed from the dry-run map; its separate hash is
+retained and no source-map byte equivalence is claimed. Cloudflare ETags identify
+version correspondence here; they are not treated as bundle SHA-256 values.
+
+Protected discovery and a real native Drive rename followed by an explicit
+revert passed. Each operation had one acknowledged name-only mutation outcome;
+independent Google reads confirmed the requested name, preserved metadata,
+original content length and SHA-256. Only the known fixture was deleted, and
+cleanup reported no failures or unknown mutations. No model calls occurred.
+
+Missing Access credentials returned 403, a wrong secret returned 401 and the
+version preview endpoint returned 404. Native metadata confirmed the expected
+runtime and R2/download bindings, no attached domains and disabled observability.
+The original product bundle and configuration were restored as version
+`1f3c43c9-0692-44c4-84f5-f379b8a0e5c6`, with matching protected-discovery identity.
+
+Earlier verification failures remain retained: a temporary-config dry-run output
+path defect, an OAuth transport timeout, a source-map comparison mismatch, and
+an invalid assumption that the script download API follows a selected older
+version. None reached Google fixture setup. Selecting an older version for traffic
+can leave the generic script download API returning the latest uploaded code;
+match native version metadata and response ETags before associating downloaded
+bytes with a deployment. This qualification covers the selected workers.dev
+environment path. Workers Builds, custom domain/routes, public deploy-button
+behavior and real lost-response Google writes remain separate.
 
 ## Direct hosted Gmail gate
 

@@ -7,6 +7,7 @@ import {
   gradeDriveOutbound,
   prepareDriveFixture,
   getDriveCase,
+  selectDriveCases,
   type DriveExpected,
   type DriveObservation,
 } from '../eval/drive.ts';
@@ -681,5 +682,85 @@ test('Drive page readiness deadline fails before actor preparation and reconcile
     assert.equal(calls.filter((call) => call.path === '/drive/v3/files').length, 1);
     assert.equal(calls.filter((call) => call.method === 'DELETE').length, 3);
     assert.deepEqual(manifests.at(-1).cleanup, { failures: [], unknownMutations: [] });
+  });
+});
+
+test('explicit content-selected rename fixture and oracle protect every candidate', async () => {
+  await withSyntheticDrive({}, async ({ stored }) => {
+    const fixture = await prepareDriveFixture({
+      accessToken: 'synthetic-google-token',
+      expectedUser: 'test@example.invalid',
+      caseId: 'select-rename',
+    });
+    try {
+      assert.equal(selectDriveCases('select-rename')[0].id, 'select-rename');
+      assert.equal(selectDriveCases().length, 4);
+      assert.ok(!selectDriveCases().some((item) => item.id === 'select-rename'));
+      const selection = fixture.expected.selection!;
+      const facts = [...stored.values()].map((file) => JSON.parse(file.bytes.toString()).current);
+      assert.ok(facts.some((fact) => fact.approved && fact.blocked));
+      assert.ok(facts.some((fact) => !fact.approved && !fact.blocked));
+      const chosen = [...stored].filter(([, file]) => {
+        const body = JSON.parse(file.bytes.toString());
+        return body.current.approved && !body.current.blocked;
+      });
+      assert.equal(chosen.length, 1);
+      assert.equal(chosen[0][0], selection.fileId);
+      assert.equal(JSON.parse(chosen[0][1].bytes.toString()).destination, selection.name);
+      chosen[0][1].metadata.name = selection.name;
+      const observed = await fixture.observe();
+      const outcomes = [
+        ...fixture.expected.pagination!.map((target) => ({
+          path: 'drive/v3/files.get',
+          mutation: false,
+          outcome: 'acknowledged',
+          resourceId: target.fileId,
+        })),
+        {
+          path: 'drive/v3/files.update',
+          mutation: true,
+          outcome: 'acknowledged',
+          resourceId: selection.fileId,
+          mutationFields: ['name'],
+        },
+      ];
+      const output = files('answer.json', selection);
+      const passes = (value = observed, captured = output, ledger = outcomes) =>
+        gradeDrive(fixture.expected, value, captured, audit(ledger)).every(
+          (item) => item.status === 'pass',
+        );
+      assert.equal(passes(), true);
+      assert.equal(passes(observed, files('answer.json', { ...selection, extra: true })), false);
+      assert.equal(
+        passes(observed, files('answer.json', { ...selection, fileId: 'wrong' })),
+        false,
+      );
+      for (const ledger of [
+        outcomes.slice(0, 3),
+        outcomes.slice(1),
+        [...outcomes, outcomes.at(-1)!],
+        [...outcomes.slice(0, 3), { ...outcomes.at(-1)!, resourceId: 'wrong' }],
+        [],
+      ])
+        assert.equal(passes(observed, output, ledger), false);
+      for (const change of [
+        (value: DriveObservation) => {
+          value.complete = false;
+        },
+        (value: DriveObservation) => {
+          value.pagination!.find((item) => item.file!.id !== selection.fileId)!.file!.name =
+            'wrong';
+        },
+        (value: DriveObservation) => {
+          value.pagination![0].sha256 = 'wrong';
+        },
+      ]) {
+        const wrong = structuredClone(observed);
+        change(wrong);
+        assert.equal(passes(wrong), false);
+      }
+    } finally {
+      assert.deepEqual(await fixture.cleanup(), { failures: [], unknownMutations: [] });
+    }
   });
 });

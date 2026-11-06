@@ -85,7 +85,7 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts
-      - run: npm install --global @anthropic-ai/claude-code@2.1.318
+      - run: npm install --global --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@2.1.318
       - name: Install pinned native Codex for its optional capability probe
         if: inputs.native_codex_probe == true
         run: npm install --global @openai/codex@0.166.0

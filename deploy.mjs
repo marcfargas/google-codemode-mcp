@@ -55,7 +55,7 @@ const args = ['deploy'];
 if (selectedName) args.push('--name', selectedName);
 if (domain) args.push('--domain', domain);
 if (route) args.push('--route', route);
-if (options.includes('--dry-run')) args.push('--dry-run', '--outdir', 'dist');
+if (options.includes('--dry-run')) args.push('--dry-run', '--outdir', resolve('dist'));
 
 let temporary;
 try {

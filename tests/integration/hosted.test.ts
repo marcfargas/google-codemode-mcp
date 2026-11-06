@@ -13,6 +13,7 @@ let directory: string;
 let worker: Miniflare;
 let candidateDigest: string;
 const workerVersion = 'local-synthetic-version';
+let outerEgress = 0;
 before(async () => {
   directory = await mkdtemp(join(tmpdir(), 'hosted-harness-'));
   const output = join(directory, 'prepared');
@@ -34,6 +35,7 @@ before(async () => {
       WORKER_VERSION: { type: 'json', value: { id: workerVersion } },
     },
     outbound: async () => {
+      outerEgress++;
       throw new Error('Verification must not access a real network');
     },
   });
@@ -121,6 +123,48 @@ test('verification Worker rejects arbitrary programs and has no public product t
   const response = await invoke('return 123');
   assert.ok(response.error || response.result?.isError, JSON.stringify(response));
   assert.equal((await worker.dispatchFetch('http://localhost/test')).status, 404);
+});
+
+test('hosted mutation and isolation controls exercise production ledgers with independent effects and no egress', async () => {
+  for (const probe of ['mutationUnknown', 'mutationAcknowledged', 'isolation'] as const) {
+    const response = await invoke(probe);
+    const receipt = response.result?.structuredContent;
+    assert.equal(
+      gradeProbe(probe, receipt, { candidateDigest, workerVersion }).status,
+      'pass',
+      JSON.stringify(response),
+    );
+    assert.equal(
+      outerEgress,
+      0,
+      'sandbox denial must not come from the outer fixture rejecting egress',
+    );
+    assert.ok(!JSON.stringify(receipt).includes(SYNTHETIC_TOKEN));
+    const changed = structuredClone(receipt);
+    changed.syntheticEffects++;
+    assert.equal(gradeProbe(probe, changed, { candidateDigest, workerVersion }).status, 'fail');
+    const missing = structuredClone(receipt);
+    delete missing.execution.outcomesComplete;
+    assert.equal(gradeProbe(probe, missing, { candidateDigest, workerVersion }).status, 'unknown');
+    const wrongOutcome = structuredClone(receipt);
+    wrongOutcome.execution.outcomes[0].outcome =
+      probe === 'mutationAcknowledged' ? 'unknown' : 'acknowledged';
+    assert.equal(
+      gradeProbe(probe, wrongOutcome, { candidateDigest, workerVersion }).status,
+      'fail',
+    );
+    const late = structuredClone(receipt);
+    late.dispatches[0].afterClose = true;
+    assert.equal(gradeProbe(probe, late, { candidateDigest, workerVersion }).status, 'fail');
+    if (probe === 'isolation') {
+      const outerRedactionOnly = structuredClone(receipt);
+      outerRedactionOnly.execution.result.echoRedactedBeforeReturn = false;
+      assert.equal(
+        gradeProbe(probe, outerRedactionOnly, { candidateDigest, workerVersion }).status,
+        'fail',
+      );
+    }
+  }
 });
 
 test('CPU qualification needs an explicit platform CPU exception and correct identity', async () => {

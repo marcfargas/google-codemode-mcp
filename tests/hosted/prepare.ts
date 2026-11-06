@@ -4,6 +4,7 @@ import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { artifactDownloadOrigin } from '../../src/artifacts.ts';
+import { HARNESS_VERSION } from './contract.ts';
 
 const checkout = fileURLToPath(new URL('../../', import.meta.url).href);
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
@@ -96,7 +97,7 @@ export async function prepareHosted(
     encoding: 'utf8',
   }).stdout.trim();
   const manifest = {
-    harnessVersion: 1,
+    harnessVersion: HARNESS_VERSION,
     mode,
     sourceDigest,
     sourceFiles,

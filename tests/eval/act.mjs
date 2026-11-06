@@ -183,7 +183,26 @@ async function main() {
           };
     const secrets = join(directory, 'secrets');
     const empty = join(directory, 'empty');
+    const event = join(directory, 'event.json');
     await writeFile(empty, '', { mode: 0o600 });
+    await writeFile(
+      event,
+      JSON.stringify({
+        ref: 'refs/heads/main',
+        inputs: {
+          backend,
+          profile,
+          ...(selection ? { selection } : { model }),
+          cases: cases ?? '',
+          proxy_url: proxy,
+          output: '/eval-evidence',
+          repeats,
+          preflight_only: String(preflight_only === 'true'),
+          native_codex_probe: String(runner === 'codex'),
+        },
+      }),
+      { mode: 0o600 },
+    );
     await writeFile(
       secrets,
       Object.entries(credentials)
@@ -215,6 +234,7 @@ async function main() {
           privileged: false,
           addedCapabilities: [],
           nodeOptions: process.env.ACT_NODE_OPTIONS ?? null,
+          eventRef: 'refs/heads/main',
         },
         null,
         2,
@@ -235,6 +255,8 @@ async function main() {
         empty,
         '--secret-file',
         secrets,
+        '--eventpath',
+        event,
         '--network',
         'host',
         '--container-daemon-socket',
@@ -248,27 +270,9 @@ async function main() {
         ...(process.env.ACT_NODE_OPTIONS === undefined
           ? []
           : ['--env', `NODE_OPTIONS=${process.env.ACT_NODE_OPTIONS}`]),
-        '--input',
-        `backend=${backend}`,
         ...Object.entries(hosted)
           .filter(([name]) => name !== 'HOSTED_ACCESS_HEADERS_JSON')
           .flatMap(([name, value]) => ['--var', `${name}=${value}`]),
-        '--input',
-        `profile=${profile}`,
-        '--input',
-        selection ? `selection=${selection}` : `model=${model}`,
-        '--input',
-        `cases=${cases ?? ''}`,
-        '--input',
-        `proxy_url=${proxy}`,
-        '--input',
-        'output=/eval-evidence',
-        '--input',
-        `repeats=${repeats}`,
-        '--input',
-        `preflight_only=${preflight_only === 'true'}`,
-        '--input',
-        `native_codex_probe=${runner === 'codex'}`,
         '-P',
         'ubuntu-latest=catthehacker/ubuntu:act-latest',
       ],
@@ -284,6 +288,13 @@ async function main() {
         child.on('error', reject);
         child.on('exit', (code) => resolve(code ?? 1));
       });
+      if (process.exitCode === 0) {
+        try {
+          await readFile(join(destination, 'workflow-report', 'summary.json'));
+        } catch {
+          throw new Error('Evaluation workflow produced no report; its job may have been skipped');
+        }
+      }
     } finally {
       process.off('SIGINT', onInterrupt);
       process.off('SIGTERM', onTerminate);

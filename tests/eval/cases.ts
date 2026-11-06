@@ -4,7 +4,14 @@ import { getMediaCase, selectMediaCases } from './media.ts';
 import type { MechanismPolicy } from './mechanisms.ts';
 
 export type GmailCaseId =
-  'combined' | 'read-search' | 'reply' | 'attachment' | 'labels' | 'pagination' | 'failure';
+  | 'combined'
+  | 'read-search'
+  | 'reply'
+  | 'attachment'
+  | 'labels'
+  | 'pagination'
+  | 'failure'
+  | 'selective-labels';
 
 export interface GmailCase {
   id: GmailCaseId;
@@ -43,6 +50,19 @@ export const GMAIL_CASES: readonly GmailCase[] = [
   { id: 'failure', version: 2, title: 'Handle a missing email safely', policy: readOnly },
 ];
 
+/** Explicit-only unused composition; excluded from validation `all`. */
+export const GMAIL_EVALUATION_CASES: readonly GmailCase[] = [
+  {
+    id: 'selective-labels',
+    version: 1,
+    title: 'Select messages by current body facts',
+    policy: {
+      expectedSends: 0,
+      allowedMutations: [...labelMutations, 'gmail/v1/users.messages.batchModify'],
+    },
+  },
+];
+
 export const COMBINED_GMAIL_CASE: GmailCase = {
   id: 'combined',
   version: 1,
@@ -54,7 +74,9 @@ export const COMBINED_GMAIL_CASE: GmailCase = {
 };
 
 export function getGmailCase(id: string = 'combined'): GmailCase {
-  const selected = [COMBINED_GMAIL_CASE, ...GMAIL_CASES].find((entry) => entry.id === id);
+  const selected = [COMBINED_GMAIL_CASE, ...GMAIL_CASES, ...GMAIL_EVALUATION_CASES].find(
+    (entry) => entry.id === id,
+  );
   if (!selected) throw new Error(`Unknown Gmail case: ${id}`);
   return selected;
 }

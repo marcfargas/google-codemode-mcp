@@ -65,7 +65,7 @@ npm ci --ignore-scripts
 # Supply CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN through your environment.
 export WORKER_NAME=my-google-mcp
 export WORKER_DOMAIN=mcp.example.com  # optional
-just deploy --dry-run                # Bundle and validate; no upload
+just deploy --dry-run                # Bundle to dist/ and validate; no upload
 just deploy                          # Publish and configure the domain/route
 ```
 
@@ -74,6 +74,11 @@ with `--dry-run`. The helper maps settings to pinned Wrangler flags and keeps
 Cloudflare credentials in the deployment process. `ARTIFACTS_BUCKET` generates a temporary Wrangler configuration with the R2 binding;
 `ARTIFACT_DOWNLOAD_ORIGIN` becomes a Worker runtime variable. The other variables are deployment settings. Export them in the shell or configure them in CI build settings;
 the helper does not load dotenv files.
+
+The [ordinary hosted deployment check](tests/hosted/README.md#ordinary-environment-deployment-2026-11-06)
+verified this path with an existing private R2 bucket, protected workers.dev
+ingress and a reversible real Drive rename. Workers Builds and domain/route
+variants retain separate qualification.
 
 With no domain or route, Wrangler enables
 `https://<worker-name>.<account-subdomain>.workers.dev/mcp`. With either setting,
@@ -87,7 +92,9 @@ directly, while a route requires existing proxied DNS/origin configuration.
 middleware. Anyone who can reach it can submit code and consume your Worker
 resources; Google operations additionally require the supplied Google token.
 Put the endpoint behind the authenticated gateway or Cloudflare Access, and
-protect any workers.dev or preview URLs that you enable. Choosing a custom domain
+protect any workers.dev or preview URLs that you enable. Version preview URLs are
+disabled in the checked-in configuration; enabling them requires protecting that
+additional endpoint. Choosing a custom domain
 does not itself add authentication. The Google token remains the `accessToken`
 tool argument; an Authorization header does not populate that argument.
 
@@ -233,6 +240,10 @@ without credentials; after deployment, `just hosted-verify OUTPUT` uses the
 documented `HOSTED_*` environment settings. It checks native CPU termination,
 the 15-second asynchronous timeout, late-call fencing, multiple bridge calls and
 healthy follow-ups. Local tests cover these paths except hosted CPU enforcement.
+Harness version 2 also verifies synthetic lost-response writes and subsequent
+write fencing, acknowledged effects retained after program failure, and hosted
+network/credential isolation. Its [17-request hosted qualification](tests/hosted/README.md#hosted-mutation-and-isolation-2026-11-06)
+uses no real Google writes or inference; live Google failure semantics remain separate.
 An external timeout or generic resource error cannot pass the CPU criterion.
 The qualified run observed the native `Worker exceeded CPU time limit.` exception;
 see the [hosted result and its limits](tests/hosted/README.md#qualified-hosted-run-2026-11-04).
@@ -534,6 +545,12 @@ task outcomes with both required models; the initial stricter discovery gate fai
 for Sonnet on attachment and pagination. A later focused hosted run passed both
 cases with Sonnet and Sol, including strict discovery and skill retrieval. See the
 [versioned results](tests/eval/README.md#independent-gmail-cases-with-grading-version-2-2026-11-04).
+The first prospectively frozen unused-case assessment also passed all four
+Sonnet/Sol cells: content-selected Gmail labelling and Drive renaming, with strict
+discovery, actual skill retrieval and clean independent readback/cleanup. See
+[assessment and usage metrics](tests/eval/README.md#first-frozen-unused-case-assessment-2026-11-06).
+This is same-author feasibility evidence; it does not establish blindness or
+reliability, and later tuning requires another unused evaluation partition.
 The separate hosted synthetic Worker passed CPU/timeout/cancellation and bridge
 checks. The protected test Worker also ran the actual product against Gmail,
 using test-account tokens directly. Gateway adaptation is deployed in its owning project, but the Code Mode
