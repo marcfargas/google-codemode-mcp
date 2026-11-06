@@ -7,6 +7,7 @@ import type { SnippetDefinition } from './snippets.ts';
 import { SERVICES } from './services.ts';
 import { createArtifactStore } from './artifacts.ts';
 import { registerExecutionArtifactReferences } from './artifact-references.ts';
+import type { StreamArtifactStore } from './stream-artifacts.ts';
 
 type ArtifactStore = ReturnType<typeof createArtifactStore>;
 
@@ -213,6 +214,7 @@ export async function executeProgram(options: {
   transport?: typeof fetch;
   snippetName?: string;
   artifactStore?: ArtifactStore;
+  streamArtifactStore?: StreamArtifactStore;
   waitUntil?: (promise: Promise<unknown>) => void;
 }) {
   const { args, catalog, snippets, executor } = options;
@@ -225,11 +227,16 @@ export async function executeProgram(options: {
   if (!/^[\w.:-]{1,128}$/.test(requestId)) throw new Error('Invalid requestId');
   const inputs = args.inputs ?? {};
   if (JSON.stringify(inputs).length > 64_000) throw new Error('Inputs exceed 64000 characters');
+  const streamArtifacts = options.streamArtifactStore?.createExecution({
+    token: args.accessToken,
+    waitUntil: options.waitUntil,
+  });
   const dispatcher = createDispatcher({
     catalog,
     accessToken: args.accessToken,
     requestId,
     transport: options.transport,
+    streamArtifacts,
   });
   const artifactExecution = (options.artifactStore ?? createArtifactStore()).createExecution({
     token: args.accessToken,
@@ -260,6 +267,34 @@ export async function executeProgram(options: {
                 ok: false,
                 error: { code: 'ARTIFACT_INPUT', message: 'Invalid artifact input' },
               };
+            const input = JSON.parse(serialized) as { uri?: unknown };
+            if (
+              typeof input.uri === 'string' &&
+              input.uri.startsWith('artifact://google-codemode-mcp/v2/')
+            ) {
+              if (
+                !streamArtifacts ||
+                Object.keys(input).join() !== 'uri' ||
+                !['readBytes', 'delete'].includes(op)
+              )
+                return {
+                  ok: false,
+                  error: { code: 'ARTIFACT_UNAVAILABLE', message: 'Artifact unavailable' },
+                };
+              try {
+                return {
+                  ok: true,
+                  value: await (op === 'delete'
+                    ? streamArtifacts.delete(input.uri)
+                    : streamArtifacts.readBytes(input.uri)),
+                };
+              } catch {
+                return {
+                  ok: false,
+                  error: { code: 'ARTIFACT_UNAVAILABLE', message: 'Artifact unavailable' },
+                };
+              }
+            }
             return artifactExecution.invoke(op, serialized);
           },
           call: async (path, params) => {
@@ -311,6 +346,7 @@ export async function executeProgram(options: {
     // Includes unawaited and in-flight calls, even when the program returns normally.
     dispatcher.close('Execution ended');
     artifactExecution.close();
+    streamArtifacts?.close();
   }
   const output = {
     requestId,
@@ -329,7 +365,18 @@ export async function executeProgram(options: {
     discovery: catalog.provenance,
     scopeAvailability: 'unknown',
     deduplication: 'none',
-    artifacts: artifactExecution.snapshot(),
+    artifacts: (() => {
+      const bounded = artifactExecution.snapshot(),
+        streamed = streamArtifacts?.snapshot();
+      return streamed
+        ? {
+            outcomes: [...bounded.outcomes, ...streamed.outcomes],
+            references: [...bounded.references, ...streamed.references],
+            outcomesComplete: bounded.outcomesComplete && streamed.outcomesComplete,
+            hasUnknownOutcome: bounded.hasUnknownOutcome || streamed.hasUnknownOutcome,
+          }
+        : bounded;
+    })(),
   };
   // The credential never enters the sandbox. Redaction also covers hostile upstream echoes.
   const redact = (value: unknown) =>
@@ -356,6 +403,6 @@ export async function executeProgram(options: {
     });
   }
   const parsed = JSON.parse(serialized) as Record<string, unknown>;
-  registerExecutionArtifactReferences(parsed, artifactExecution.snapshot().references);
+  registerExecutionArtifactReferences(parsed, output.artifacts.references);
   return parsed;
 }

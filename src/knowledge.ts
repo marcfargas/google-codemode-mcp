@@ -7,6 +7,40 @@ Drive \`files.create\` multipart uploads; native method names and metadata remai
 unchanged. A file or folder ID does not grant access: \`drive.file\` covers files
 created by, or explicitly shared/opened with, this OAuth application.
 
+## Stored Drive files without byte values in Code Mode
+
+Inspect \`describe({path:'artifacts'})\` and the native method descriptions. When
+\`streaming.enabled:true\`, native Drive media downloads return \`.data\` as a v2
+artifact reference (\`uri\`, \`mimeType\`, \`size\`, \`sha256\`, expiry and completeness).
+Google HTTP bodies stream directly to/from private storage in the trusted
+executor. Pass the reference as a Drive upload body; change names/parents using
+native metadata:
+
+\`\`\`js
+const drive = google.drive({ version: 'v3' });
+const { data: file } = await drive.files.get({ fileId: inputs.fileId, alt: 'media' });
+const { data: copy } = await drive.files.create({
+  requestBody: { name: inputs.name, parents: [inputs.folderId] },
+  media: { mimeType: file.mimeType, body: { artifact: file.uri } },
+});
+await artifacts.delete(file.uri);
+return copy;
+\`\`\`
+
+Describe both native methods first. Keep the original MIME type; names are
+metadata, never storage keys. References can be reused in later executions until
+expiry. Limits are 64 MiB per object, 128 MiB transferred per execution (downloads
+and uploads both count), one active transfer, four put attempts, 32 storage
+operations and one-hour expiry. The 15-second deadlines still apply through
+storage completion. Failed transfers consume reservations; no automatic retry is
+provided. These bounds are not measured live/hosted capacity.
+
+Without storage, downloads retain the 128 KiB inline envelope below and reference
+uploads are unavailable. Small inline uploads remain supported with storage too.
+Gmail attachments remain bounded JSON/base64url; large Gmail decode/MIME streaming
+and resumable upload are not implemented. Do not move large files through
+\`artifacts.readBytes\`, \`putBytes\`, MCP chunks or a giant Gmail \`raw\` value.
+
 ## Gmail attachments to a chosen Drive folder
 
 Gmail \`MessagePart\` supplies the filename and MIME type. Its body either contains
@@ -52,7 +86,7 @@ host-side intermediate file is required.
 ## Drive bytes to a Gmail draft
 
 Discover \`drive/v3/files.get\`, the \`composeMime\` snippet descriptor, and
-\`gmail/v1/users.drafts.create\`. Downloaded \`.data\` is a byte envelope with standard
+\`gmail/v1/users.drafts.create\`. Without storage, downloaded \`.data\` is a byte envelope with standard
 **base64**, decoded \`size\`, \`mimeType\`, and \`sha256\`. It can also be forwarded as a
 Drive upload's \`media.body\` unchanged, with its MIME type supplied alongside it.
 
@@ -60,11 +94,12 @@ Drive upload's \`media.body\` unchanged, with its MIME type supplied alongside i
 const drive = google.drive({ version: 'v3' });
 const gmail = google.gmail({ version: 'v1' });
 const { data: file } = await drive.files.get({ fileId: inputs.fileId, alt: 'media' });
+const bytes = file.uri ? await artifacts.readBytes(file.uri) : file;
 const raw = await snippets.run('composeMime', {
   to: inputs.to,
   subject: inputs.subject,
   text: inputs.text,
-  attachments: [{ name: inputs.name, ...file }],
+  attachments: [{ name: inputs.name, ...bytes }],
 });
 return (
   await gmail.users.drafts.create({
@@ -97,9 +132,9 @@ Encoding is \`base64\` or \`base64url\`, with canonical bits and optional valid 
 whitespace, mixed alphabets and invalid padding are rejected. \`size\` and \`sha256\`
 are checked against decoded bytes. A body MIME assertion must match outer MIME.
 If metadata includes \`mimeType\`, it must also match the upload MIME type.
-Limits are 131072 decoded bytes per upload, 1048576 uploaded bytes per execution,
+Inline limits are 131072 decoded bytes per upload, 1048576 uploaded bytes per execution,
 65536 UTF-8 metadata bytes, 2097152 UTF-8 serialized parameter bytes per native call,
-and 262144 collected multipart wire bytes. Downloads remain 131072 bytes; native
+and 262144 collected multipart wire bytes. Inline downloads remain 131072 bytes; native
 JSON responses remain bounded to 1000000 bytes and execution output to 256000
 characters. Return small metadata, not large base64 strings.
 
@@ -107,8 +142,8 @@ Only Drive \`files.create\` multipart blob uploads with a metadata object are
 supported. Media-only upload, media on \`files.update\`, Google-native conversion,
 Gmail media upload endpoints, resumable upload, arbitrary streams/URLs, Range,
 headers and second-argument transport options are refused. Native metadata-only
-methods remain available. Optional artifact storage is separate; inspect its
-deployment capability before assuming a returned byte envelope is durable.
+methods remain available. Only the stored-reference path above raises media size
+limits; native JSON limits and inline encodings remain bounded.
 
 A transfer loop is not atomic. Earlier writes may be acknowledged when a later
 file fails. Inspect all execution mutation outcomes, even if code catches an
@@ -144,6 +179,39 @@ available only to top-level \`execute\` programs, not nested or exposed snippets
 Discover each Google method first and read this reference before storing results.
 The trusted caller still supplies the Google token outside the sandbox.
 
+## Native streamed media (v2)
+
+When \`streaming.enabled:true\`, native Drive media downloads automatically store
+content and return a v2 reference. Upload with
+\`media:{mimeType:file.mimeType,body:{artifact:file.uri}}\` to keep bytes outside
+Code Mode; discover the destination method first. See the
+[streaming example](skill://google-codemode-mcp/google-workspace/references/media-transfers.md).
+\`artifacts.delete(uri)\` removes its data and manifest. \`artifacts.readBytes(uri)\`
+permits explicit inspection only up to 131072 bytes; do not hydrate a large file.
+
+V2 manifest resources contain metadata only. There is no v2 chunk endpoint or
+executor-generated download URL. Direct signed client upload/download URLs belong
+to the future authentication gateway. Legacy v1 URLs/chunks below are unchanged.
+
+V2 limits: 64 MiB per file, 128 MiB transferred per execution, one active transfer,
+four put attempts, 32 operations and 3600-second expiry. A round trip counts the
+file twice; reads reserve its declared size before streaming, writes count chunks
+as received. Failed attempts consume reservations. R2 buffers one 5 MiB part and
+admits two writers per isolate. Existing 15-second deadlines still apply, so the
+byte cap is not a measured transfer capacity guarantee.
+
+The data commits before a complete manifest becomes readable. Source/storage
+failure publishes no completed reference and attempts partial cleanup. Google
+acknowledgements and storage outcomes remain separate; never replay a write to
+repair storage. Logical expiry does not prove physical deletion.
+
+Standalone v2 references use bearer possession. A trusted authenticated wrapper
+can bind the store to stable principal/account context; then execution and resource
+reads must match that owner, independent of Google token rotation. Clients cannot
+assert an owner through MCP. This wrapper integration is not implemented by the
+standalone Worker. Shared bucket access remains an accepted executor-compromise
+risk; no refresh credentials or URL-signing keys belong in that executor.
+
 ## Explicit JSON storage
 
 A native Google response may fit its per-call limit but exceed the final inline
@@ -177,15 +245,14 @@ native JSON returned to the program.
 ## Byte storage and later use
 
 \`putBytes(envelope,{name?})\` accepts a canonical base64/base64url byte envelope
-with required MIME type and optional size/SHA-256 assertions. Drive download and
-export envelopes can be passed directly; Gmail attachment bodies need
+with required MIME type and optional size/SHA-256 assertions. Without streamed storage, Drive download/export envelopes can be passed directly; Gmail attachment bodies need
 \`encoding:'base64url'\` and their MIME type. Integrity assertions are checked against
 the decoded bytes. A name is display metadata, not a filesystem path.
 
 \`\`\`js
 const drive = google.drive({ version: 'v3' });
 const { data } = await drive.files.get({ fileId: inputs.fileId, alt: 'media' });
-return await artifacts.putBytes(data, { name: inputs.name });
+return data.uri ? data : await artifacts.putBytes(data, { name: inputs.name });
 \`\`\`
 
 A reference contains \`uri\`, \`kind\`, original \`mimeType\`, optional \`name\`, decoded
@@ -196,7 +263,7 @@ a useful selection. Byte reads return a standard base64 envelope. Keep the
 capability in inputs when passing it to code. \`await artifacts.delete(uri)\`
 explicitly removes the object; do not infer recipient delivery from storage.
 
-## Whole-file download and cross-service transfer
+## Bounded v1 whole-file download and cross-service transfer
 
 If \`describe({path:'artifacts'})\` reports \`downloads.enabled:true\`, stored references
 and manifests also contain a \`downloadUrl\`. The standalone MCP Worker serves that
@@ -275,7 +342,7 @@ expiry does not physically delete R2 bytes. Operators must configure the private
 bucket's physical lifecycle separately; exact hosted retention is unqualified
 until verified. Explicit deletion and access expiry are separate mechanisms.
 
-Current caps:
+Bounded v1 caps:
 
 - JSON: 1000000 UTF-8 bytes per object; bytes: 131072 decoded bytes per object.
 - Four put attempts and 4000000 attempted stored bytes per execution.

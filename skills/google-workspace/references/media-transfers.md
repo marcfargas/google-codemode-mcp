@@ -6,6 +6,40 @@ Drive `files.create` multipart uploads; native method names and metadata remain
 unchanged. A file or folder ID does not grant access: `drive.file` covers files
 created by, or explicitly shared/opened with, this OAuth application.
 
+## Stored Drive files without byte values in Code Mode
+
+Inspect `describe({path:'artifacts'})` and the native method descriptions. When
+`streaming.enabled:true`, native Drive media downloads return `.data` as a v2
+artifact reference (`uri`, `mimeType`, `size`, `sha256`, expiry and completeness).
+Google HTTP bodies stream directly to/from private storage in the trusted
+executor. Pass the reference as a Drive upload body; change names/parents using
+native metadata:
+
+```js
+const drive = google.drive({ version: 'v3' });
+const { data: file } = await drive.files.get({ fileId: inputs.fileId, alt: 'media' });
+const { data: copy } = await drive.files.create({
+  requestBody: { name: inputs.name, parents: [inputs.folderId] },
+  media: { mimeType: file.mimeType, body: { artifact: file.uri } },
+});
+await artifacts.delete(file.uri);
+return copy;
+```
+
+Describe both native methods first. Keep the original MIME type; names are
+metadata, never storage keys. References can be reused in later executions until
+expiry. Limits are 64 MiB per object, 128 MiB transferred per execution (downloads
+and uploads both count), one active transfer, four put attempts, 32 storage
+operations and one-hour expiry. The 15-second deadlines still apply through
+storage completion. Failed transfers consume reservations; no automatic retry is
+provided. These bounds are not measured live/hosted capacity.
+
+Without storage, downloads retain the 128 KiB inline envelope below and reference
+uploads are unavailable. Small inline uploads remain supported with storage too.
+Gmail attachments remain bounded JSON/base64url; large Gmail decode/MIME streaming
+and resumable upload are not implemented. Do not move large files through
+`artifacts.readBytes`, `putBytes`, MCP chunks or a giant Gmail `raw` value.
+
 ## Gmail attachments to a chosen Drive folder
 
 Gmail `MessagePart` supplies the filename and MIME type. Its body either contains
@@ -51,7 +85,7 @@ host-side intermediate file is required.
 ## Drive bytes to a Gmail draft
 
 Discover `drive/v3/files.get`, the `composeMime` snippet descriptor, and
-`gmail/v1/users.drafts.create`. Downloaded `.data` is a byte envelope with standard
+`gmail/v1/users.drafts.create`. Without storage, downloaded `.data` is a byte envelope with standard
 **base64**, decoded `size`, `mimeType`, and `sha256`. It can also be forwarded as a
 Drive upload's `media.body` unchanged, with its MIME type supplied alongside it.
 
@@ -59,11 +93,12 @@ Drive upload's `media.body` unchanged, with its MIME type supplied alongside it.
 const drive = google.drive({ version: 'v3' });
 const gmail = google.gmail({ version: 'v1' });
 const { data: file } = await drive.files.get({ fileId: inputs.fileId, alt: 'media' });
+const bytes = file.uri ? await artifacts.readBytes(file.uri) : file;
 const raw = await snippets.run('composeMime', {
   to: inputs.to,
   subject: inputs.subject,
   text: inputs.text,
-  attachments: [{ name: inputs.name, ...file }],
+  attachments: [{ name: inputs.name, ...bytes }],
 });
 return (
   await gmail.users.drafts.create({
@@ -96,9 +131,9 @@ Encoding is `base64` or `base64url`, with canonical bits and optional valid padd
 whitespace, mixed alphabets and invalid padding are rejected. `size` and `sha256`
 are checked against decoded bytes. A body MIME assertion must match outer MIME.
 If metadata includes `mimeType`, it must also match the upload MIME type.
-Limits are 131072 decoded bytes per upload, 1048576 uploaded bytes per execution,
+Inline limits are 131072 decoded bytes per upload, 1048576 uploaded bytes per execution,
 65536 UTF-8 metadata bytes, 2097152 UTF-8 serialized parameter bytes per native call,
-and 262144 collected multipart wire bytes. Downloads remain 131072 bytes; native
+and 262144 collected multipart wire bytes. Inline downloads remain 131072 bytes; native
 JSON responses remain bounded to 1000000 bytes and execution output to 256000
 characters. Return small metadata, not large base64 strings.
 
@@ -106,8 +141,8 @@ Only Drive `files.create` multipart blob uploads with a metadata object are
 supported. Media-only upload, media on `files.update`, Google-native conversion,
 Gmail media upload endpoints, resumable upload, arbitrary streams/URLs, Range,
 headers and second-argument transport options are refused. Native metadata-only
-methods remain available. Optional artifact storage is separate; inspect its
-deployment capability before assuming a returned byte envelope is durable.
+methods remain available. Only the stored-reference path above raises media size
+limits; native JSON limits and inline encodings remain bounded.
 
 A transfer loop is not atomic. Earlier writes may be acknowledged when a later
 file fails. Inspect all execution mutation outcomes, even if code catches an

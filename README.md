@@ -116,7 +116,7 @@ export ARTIFACT_DOWNLOAD_ORIGIN=https://mcp.example.com
 just deploy
 ```
 
-References and manifests then include a `downloadUrl` served by this Worker at
+Bounded v1 references and manifests then include a `downloadUrl` served by this Worker at
 `/mcp/artifacts/v1/...`. GET or HEAD returns the complete file after size and SHA-256
 verification. The URL grants read-only access until the artifact expires or is
 deleted; it cannot authorize MCP reads or deletion. Keep URLs private. Leaving the
@@ -164,7 +164,10 @@ acknowledged native Google call, top-level code can explicitly store JSON or a b
 envelope with `artifacts.putJson(value,{name})` or
 `artifacts.putBytes(envelope,{name})` and return its small reference. Later code can
 read or delete using the complete URI. Snippets cannot access storage helpers.
-Google's per-call limits and the inline output limit remain hard.
+Native JSON/inline response limits remain hard. With R2 enabled, native Drive media
+downloads use the separate [streamed reference path](#compose-gmail-and-drive-attachments).
+V2 streamed references expose metadata resources but no executor-generated
+`downloadUrl`; gateway-issued direct client URLs remain future integration.
 
 Artifact URIs are random bearer capabilities: possession grants access and sharing
 delegates it. They are not bound to a stable user or Google token. Base URIs read as
@@ -380,16 +383,45 @@ means the traversal cannot establish a complete search. The Worker does not fetc
 additional pages automatically. See the native [list reference](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list).
 
 Methods declaring `runtime.mediaDownload` expose their media selection and byte
-limit. `files.get({fileId: inputs.id, alt: 'media'})` returns `.data` as
+limit. Without R2, `files.get({fileId: inputs.id, alt: 'media'})` returns `.data` as
 `{encoding: 'base64', data, size, mimeType, sha256}`. `data` is standard base64;
 `size` and SHA-256 describe the original bytes, including arbitrary binary files.
 `files.export` uses this envelope directly, with a discovered export MIME type.
 Downloads are limited to **131072 raw bytes** and the execution's overall output
 limit still applies. Metadata reads retain Google's normal JSON `.data` shape.
 The host decodes the bytes when saving a file; optional R2 artifacts provide a
-separate bounded persistence channel. Gmail attachments continue to use Google's native base64url JSON fields.
+streamed reference path when enabled. Gmail attachments continue to use Google's native base64url JSON fields.
 
 ### Compose Gmail and Drive attachments
+
+With private artifact storage enabled, native Drive media downloads return an opaque artifact reference
+instead of inline bytes. Upload the stored content directly, keeping filenames
+and destination metadata in JavaScript:
+
+```js
+const drive = google.drive({ version: 'v3' });
+const { data: file } = await drive.files.get({ fileId: inputs.id, alt: 'media' });
+const { data: copy } = await drive.files.create({
+  requestBody: { name: inputs.name, parents: [inputs.folderId] },
+  media: { mimeType: file.mimeType, body: { artifact: file.uri } },
+});
+await artifacts.delete(file.uri);
+return copy;
+```
+
+The storage path allows up to 64 MiB per file and 128 MiB of transferred bytes
+per execution (a download followed by upload counts twice), one transfer at a time.
+R2 writers buffer at most one 5 MiB part and admit two writers per isolate.
+Artifacts expire after one hour; manifests become readable only after data commits.
+Only references cross the sandbox/MCP boundary, with separate storage outcomes.
+`artifacts.readBytes(uri)` deliberately limits inspection to 128 KiB.
+The existing 15-second call/execution deadlines include storage and can limit
+practical file size below the byte cap. Synthetic Miniflare controls cover a
+33 MiB round trip for known/unknown lengths, source interruption, cancellation,
+cleanup and lost-response mutation fencing; live/hosted large-file support and
+new paid-agent feasibility remain unqualified.
+It does not introduce gateway authentication, client URL signing or large Gmail
+MIME composition. The existing inline byte path remains available without R2.
 
 Read `skill://google-codemode-mcp/google-workspace/references/media-transfers.md`
 for executable transfers and discover the native methods before execution.
@@ -400,7 +432,7 @@ assertions. Pass Gmail attachment bodies directly, transform names in JavaScript
 and set native `parents` to choose a Drive folder. Downloads can be forwarded in
 the same way without a host-side intermediate file.
 
-Uploads allow 131072 decoded bytes per file, 1048576 per execution, 65536 bytes
+Inline uploads allow 131072 decoded bytes per file, 1048576 per execution, 65536 bytes
 of metadata and 262144 multipart wire bytes. Every native call has a 2097152-byte
 serialized parameter limit. Existing call, output, time and download caps apply.
 Media-only, update-media, conversion and resumable uploads remain unsupported.
@@ -472,7 +504,7 @@ When execution ends, the dispatcher closes and aborts active work. A mutation
 already in flight remains unknown unless a successful status was observed.
 Queued calls cannot start afterward. The execution's asynchronous timer is 15s;
 Google calls also have a 15s deadline. Defaults allow 100 Google call attempts,
-1 MB per Google response (bounded during reading), 64,000 characters each for code
+1 MB per native JSON response (bounded during reading), 64,000 characters each for code
 and inputs, 256,000 characters for the output, and 16 nested snippet invocations
 with depth at most four. Oversized/non-JSON program results return an error while
 preserving recorded outcomes. Logs are capped to 100 entries of 4,096 characters.

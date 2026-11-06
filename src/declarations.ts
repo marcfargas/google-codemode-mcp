@@ -4,14 +4,22 @@ import { supportsUpload } from './media.ts';
 
 // Descriptions are generated for one method and only its referenced types.
 // Native Discovery remains the source for runtime validation and dispatch.
-export function methodDeclaration(document: DiscoveryDocument, method: MethodMetadata): string {
-  const projection = callableParameters(method);
+export function methodDeclaration(
+  document: DiscoveryDocument,
+  method: MethodMetadata,
+  streamMedia = false,
+): string {
+  const projection = callableParameters(method, streamMedia);
   if (!method.supported || !projection.supported)
     return `// ${method.path}: unsupported by the execution parameter policy`;
   const definitions = new Map<string, DiscoverySchema>();
   const typeName = (name: string) => `Google_${name.replace(/[^A-Za-z0-9_$]/g, '_')}`;
   function render(schema: DiscoverySchema, depth = 0): string {
     if (depth > 30) return 'unknown';
+    if (Array.isArray(schema.anyOf))
+      return (schema.anyOf as DiscoverySchema[])
+        .map((option) => render(option, depth + 1))
+        .join(' | ');
     if (schema.repeated) return `Array<${render({ ...schema, repeated: false }, depth + 1)}>`;
     if (schema.$ref) {
       if (!definitions.has(schema.$ref)) {
@@ -56,11 +64,8 @@ export function methodDeclaration(document: DiscoveryDocument, method: MethodMet
     additionalProperties: false,
   });
   const download = supportsDownload(method);
-  const response = method.response
-    ? render(method.response)
-    : download
-      ? 'GoogleMediaBytes'
-      : 'null';
+  const mediaType = streamMedia ? 'GoogleMediaArtifact' : 'GoogleMediaBytes';
+  const response = method.response ? render(method.response) : download ? mediaType : 'null';
   // Iterating the map also visits references added by rendering earlier definitions.
   const aliases: string[] = [];
   for (const [name, schema] of definitions)
@@ -70,8 +75,8 @@ export function methodDeclaration(document: DiscoveryDocument, method: MethodMet
     `Promise<{data: ${data}; status: number; headers: Record<string,string>}>`;
   const signatures = download
     ? method.response
-      ? `${name}(params: Omit<Params, 'alt'> & {alt: 'media'}): ${result('GoogleMediaBytes')}; ${name}(params: Omit<Params, 'alt'> & {alt?: 'json'}): ${result('Data')}; ${name}(params: Params): ${result('Data | GoogleMediaBytes')};`
-      : `${name}(params: Params): ${result('GoogleMediaBytes')};`
+      ? `${name}(params: Omit<Params, 'alt'> & {alt: 'media'}): ${result(mediaType)}; ${name}(params: Omit<Params, 'alt'> & {alt?: 'json'}): ${result('Data')}; ${name}(params: Params): ${result('Data | ' + mediaType)};`
+      : `${name}(params: Params): ${result(mediaType)};`
     : supportsUpload(method)
       ? `${name}(params: Omit<Params, 'media'> & {media?: never}): ${result('Data')}; ${name}(params: Params & {media: NonNullable<Params['media']>; requestBody: NonNullable<Params['requestBody']>}): ${result('Data')};`
       : `${name}(params: Params): ${result('Data')};`;
@@ -79,7 +84,9 @@ export function methodDeclaration(document: DiscoveryDocument, method: MethodMet
     ...aliases,
     ...(download
       ? [
-          "type GoogleMediaBytes = { encoding: 'base64'; data: string; size: number; mimeType: string; sha256: string };",
+          streamMedia
+            ? "type GoogleMediaArtifact = { uri: string; kind: 'bytes'; size: number; mimeType: string; sha256: string; complete: true; createdAt: number; expiresAt: number };"
+            : "type GoogleMediaBytes = { encoding: 'base64'; data: string; size: number; mimeType: string; sha256: string };",
         ]
       : []),
     `type Params = ${params};`,

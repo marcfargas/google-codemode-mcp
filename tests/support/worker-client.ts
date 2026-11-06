@@ -114,6 +114,7 @@ export async function openBuiltWorker(options: BuiltWorkerOptions = {}) {
     throw new Error('Built Worker MCP connection failed; remote diagnostics suppressed');
   }
   return {
+    artifactBucket: options.artifacts ? await worker.getR2Bucket('ARTIFACTS') : undefined,
     fetch(url: string, init?: Parameters<typeof worker.dispatchFetch>[1]) {
       return worker.dispatchFetch(url, init);
     },
