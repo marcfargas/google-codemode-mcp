@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { localCredentials } from '../tests/support/credentials.mjs';
+import { localCredentials } from '../apps/executor/tests/support/credentials.mjs';
 
 export async function installGitHubSecrets(options) {
   const credentials = await localCredentials(options);

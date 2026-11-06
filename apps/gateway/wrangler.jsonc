@@ -1,0 +1,18 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "google-workspace-gateway",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-07-28",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": true,
+  "preview_urls": true,
+  "observability": { "enabled": false },
+  "services": [
+    { "binding": "EXECUTOR", "service": "google-codemode-mcp", "entrypoint": "Executor" },
+  ],
+  "vars": {
+    "GATEWAY_ORIGIN": "https://google-workspace.lachispa.dev",
+    "ENVIRONMENT": "development",
+    "REQUIRE_ACCESS_ON_MCP": "true",
+  },
+}

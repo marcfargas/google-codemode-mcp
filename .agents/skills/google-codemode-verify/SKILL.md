@@ -6,7 +6,7 @@ description: Verify a Google Code Mode change with the maintained just and GitHu
 # Verify a candidate
 
 Read [README workflow verification](../../../README.md#workflow-verification)
-and [agent gate documentation](../../../tests/eval/README.md) for the selected
+and [agent gate documentation](../../../apps/executor/tests/eval/README.md) for the selected
 path. Product/fixture changes use the delivery procedure when available; this skill
 owns proof, not unrelated repairs or deployment authority.
 
@@ -16,7 +16,7 @@ Record `git rev-parse HEAD`, `git status --short`, and the relevant diff/untrack
 source bytes with results. Local `act` tests working-tree bytes; remote GitHub tests
 its checked-out SHA. A prior pass does not qualify a new candidate. Use new absolute
 evidence directories outside the checkout, retain command/exit/output and receipts,
-and preserve failed attempts. Inspect `justfile`, `tests/run.mjs`, relevant
+and preserve failed attempts. Inspect `justfile`, `apps/executor/tests/run.mjs`, relevant
 workflow and launcher when prerequisites or behavior changed.
 
 Check Node 24, `just`, dependencies (`npm ci --ignore-scripts` when preparation is
@@ -36,7 +36,7 @@ passing acceptance. Keep candidate equivalence and unselected coverage explicit.
 | Goal                                                      | Maintained command                                                | What it establishes                                                                                                            |
 | --------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | Ordinary change check                                     | `just check`                                                      | Check workflow in `act`: typecheck, Wrangler dry-run, credential-free tests, formatting                                        |
-| Fast host feedback / unavailable compatible Docker runner | `just verify`                                                     | Same `tests/run.mjs check` steps on this host; no claim of `act` compatibility                                                 |
+| Fast host feedback / unavailable compatible Docker runner | `just verify`                                                     | Same `apps/executor/tests/run.mjs check` steps on this host; no claim of `act` compatibility                                   |
 | Runner/MCP/file plumbing                                  | `just eval-preflight /absolute/new/evidence`                      | Both isolated runners with synthetic responses; no model, OAuth, or Google calls                                               |
 | Saved trial grading                                       | `just eval-regrade /absolute/saved/trial-1 /absolute/new/regrade` | Offline current grader against retained evidence, preserving original results                                                  |
 | Saved run reporting                                       | `just eval-report /absolute/saved/evidence /absolute/new/report`  | Offline recorded gates and token/cache/cost summary; no inference, OAuth, cleanup or regrading                                 |
@@ -51,16 +51,19 @@ passing acceptance. Keep candidate equivalence and unselected coverage explicit.
 | Prepare private hosted probes                             | `just hosted-prepare /absolute/new/prepared`                      | Exact source/bundle identity and private dry-run; no deployment                                                                |
 | Hosted runtime limits                                     | `just hosted-verify /absolute/new/evidence`                       | Selected deployed version via protected ingress; requires documented `HOSTED_*` inputs                                         |
 
-Maintained suites, helpers and local workflow launchers live under `tests/`;
-`.github/` contains GitHub workflows and repository-secret installation, with
-commands in `justfile` and the deployment entrypoint at root `deploy.mjs`. Credential-free
-checks select `tests/unit/`, `tests/integration/` and `tests/preflight/`; credentialed suites in
-`tests/live/` run only through the explicit live targets. `just build` and `just deploy --dry-run`
-only bundle/validate; `just deploy` publishes and needs deployment scope.
+Executor suites, helpers and local workflow launchers live under
+`apps/executor/tests/`; gateway tests live under `apps/gateway/tests/`, and root
+`tests/integration/` contains cross-app checks. The shared credential-free runner
+selects all three, builds both Workers and checks formatting/types. `.github/`
+contains workflow glue and repository-secret installation; root `justfile` owns
+the commands. Credentialed executor suites run only through explicit live targets.
+`just build`, `just deploy --dry-run` and `just deploy-gateway --dry-run` validate
+without publishing. Both deployment commands need deployment scope when run
+without `--dry-run`.
 
 `just live` mutates the dedicated test account: labels/drafts and controlled
 self-send. Prerequisites are the matching installed-app client, test user, and
-refresh grant. Resolve through `tests/support/credentials.mjs` and README's local setup;
+refresh grant. Resolve through `apps/executor/tests/support/credentials.mjs` and README's local setup;
 `.test.env` is ignored and client/token overrides are `GOOGLE_OAUTH_CLIENT_FILE`
 and `GOOGLE_TEST_TOKEN_FILE`. Inspect existence/readability without printing contents.
 The default client and grant live together in the private
@@ -156,25 +159,27 @@ Google/R2/Google synthetic round trip, exact multipart/hash verification, source
 failure and partial-write cleanup, lost-response mutation fencing, trusted-owner
 and expiry checks. These are inference-free transport controls, not live Google,
 hosted capacity or new paid-agent acceptance. V2 metadata resources have no
-executor download URL or chunk endpoint; client URL signing remains gateway work.
+executor download URL or chunk endpoint. The gateway issues direct signed R2
+URLs after verified-owner checks; its local integration proof is described below.
 
 Optional artifact storage uses `ARTIFACTS_BUCKET` only during deploy/preparation;
 absence leaves storage disabled. `just check` includes actual workerd + private
-Miniflare R2 proof under `tests/integration/artifacts.test.ts`, with cross-request
+Miniflare R2 proof under `apps/executor/tests/integration/artifacts.test.ts`, with cross-request
 and new-Worker reads, large native JSON and cap refusal, binary/chunks/hash, strict JSON, scoped snippet
 refusal and preserved native write receipts. Core tests exercise expiry, quotas,
 wrong capabilities, deletion and late-put cleanup. For deployment changes also
 exercise `ARTIFACTS_BUCKET=synthetic-private-artifacts just deploy --dry-run`;
 this validates binding configuration without provisioning or publishing.
 
-A stored artifact URI is a bearer capability, not stable user identity. Inspect
+Standalone artifact URIs use bearer possession; through the gateway both v1 and
+v2 also require verified-owner/Google-account context, independent of token rotation. Inspect
 separate trusted artifact outcomes/references after program/output errors. A
 pending write retains an unknown outcome and tentative URI; completion-aware
 cleanup is best effort. Request-context cleanup and access expiry do not establish
 physical R2 retention. Two no-model hosted storage controls passed on the retained
 610de00 product-backed candidate: full JSON/binary contents, later helper/resource
 reads, explicit deletion, independent R2 absence and empty returned REST inventory;
-JSON also survived same-bundle redeployment. See [hosted storage evidence](../../../tests/hosted/README.md#hosted-artifact-storage-2026-11-05)
+JSON also survived same-bundle redeployment. See [hosted storage evidence](../../../apps/executor/tests/hosted/README.md#hosted-artifact-storage-2026-11-05)
 for exact digest/version identities, protected admission and the S3 TLS limitation.
 The bucket's one-day prefix lifecycle was configured/read back, not exercised.
 Physical lifecycle execution and native host downloadable-file presentation remain
@@ -197,6 +202,25 @@ artifact regression controls, not a repeated artifact actor campaign. The four p
 qualify later artifact code or an R2-enabled hosted deployment. Avoid new paid
 runs merely to report these existing metrics.
 
+For gateway changes, `apps/gateway/tests/auth.test.ts` exercises the actual OAuth
+provider with synthetic Google/CFA endpoints: admission, consent binding,
+encrypted grants, downstream token exchange, refresh and stable owner context.
+Root `tests/integration/gateway-executor.test.ts` exercises two Workers with the
+named executor service binding: hidden token arguments, Skills/resources,
+v1/v2 ownership, signed R2 URL shape, upload completion integrity, fail-closed
+executor admission and no replay after a lost response. No raw file bytes pass
+through MCP or the service-binding completion call.
+
+These checks establish local behavior. The signed PUT is tested by inspecting the
+signature and independently staging R2 bytes, not by contacting live R2's S3
+endpoint. Live Google OAuth, hosted infrastructure, actual S3 signature acceptance
+and Claude/ChatGPT/OpenClaw connections remain unqualified for this gateway.
+The current gateway config requires Access on MCP requests; authorization and
+callback also verify Access. Executor development URLs/previews are enabled with
+fail-closed Access admission; `just dev` explicitly overrides that guard locally.
+The historical hosted verifier retains its separate protected configuration.
+Neither local checks nor older standalone receipts qualify this new deployment.
+
 For standalone whole-file downloads, set `ARTIFACT_DOWNLOAD_ORIGIN` alongside the
 private binding. `just check` exercises GET/HEAD directly against the built Worker,
 including exact JSON/binary/empty files, read-only token separation, expiry,
@@ -206,7 +230,7 @@ without a gateway or model-visible bytes. Extend the deployment dry-run with
 `ARTIFACT_DOWNLOAD_ORIGIN=https://mcp.example.com`; this validates runtime variable
 injection, not actual ingress. Cloudflare Access still applies. Local checks alone
 do not qualify deployed downloads or native host file presentation. Two no-model
-[standalone hosted download controls](../../../tests/hosted/README.md#standalone-artifact-downloads-2026-11-05)
+[standalone hosted download controls](../../../apps/executor/tests/hosted/README.md#standalone-artifact-downloads-2026-11-05)
 verified exact GET/HEAD delivery, protected ingress and deletion on their retained
 bundle/version; the first failed length-header assertion is preserved. Retain
 historical hosted storage and paid evidence under their original identities.

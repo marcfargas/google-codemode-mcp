@@ -1,0 +1,233 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import test from 'node:test';
+
+test('deployment CLI maps environment settings and preserves native credentials and Builds guards', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codemode-deploy-'));
+  const executable = join(directory, 'node_modules', '.bin', 'wrangler');
+  const helper = resolve('apps/executor/deploy.mjs');
+  try {
+    await mkdir(join(directory, 'node_modules', '.bin'), { recursive: true });
+    await writeFile(
+      executable,
+      `#!/usr/bin/env node
+console.log(JSON.stringify({
+  args: process.argv.slice(2),
+  account: process.env.CLOUDFLARE_ACCOUNT_ID,
+  token: process.env.CLOUDFLARE_API_TOKEN,
+  tag: process.env.WRANGLER_CI_MATCH_TAG,
+  expectedName: process.env.WRANGLER_CI_OVERRIDE_NAME,
+}));
+process.exitCode = Number(process.env.DEPLOY_TEST_EXIT || 0);
+`,
+      { mode: 0o700 },
+    );
+    function invoke(values: Record<string, string> = {}, args: string[] = []) {
+      return spawnSync(process.execPath, [helper, ...args], {
+        cwd: directory,
+        encoding: 'utf8',
+        env: { PATH: process.env.PATH, ...values },
+      });
+    }
+    const defaults = invoke();
+    assert.equal(defaults.status, 0, defaults.stderr);
+    assert.deepEqual(JSON.parse(defaults.stdout).args, ['deploy']);
+
+    const builds = invoke(
+      {
+        CLOUDFLARE_ACCOUNT_ID: 'synthetic-account',
+        CLOUDFLARE_API_TOKEN: 'synthetic-deployment-token',
+        WRANGLER_CI_MATCH_TAG: 'synthetic-worker-tag',
+        WRANGLER_CI_OVERRIDE_NAME: 'builds-selected-worker',
+        WORKER_DOMAIN: 'mcp.example.invalid',
+      },
+      ['--dry-run'],
+    );
+    assert.equal(builds.status, 0, builds.stderr);
+    assert.deepEqual(JSON.parse(builds.stdout), {
+      args: [
+        'deploy',
+        '--name',
+        'builds-selected-worker',
+        '--domain',
+        'mcp.example.invalid',
+        '--dry-run',
+        '--outdir',
+        join(directory, 'dist'),
+      ],
+      account: 'synthetic-account',
+      token: 'synthetic-deployment-token',
+      tag: 'synthetic-worker-tag',
+      expectedName: 'builds-selected-worker',
+    });
+
+    const routed = invoke({ WORKER_NAME: 'my-worker', WORKER_ROUTE: 'example.invalid/mcp*' });
+    assert.equal(routed.status, 0, routed.stderr);
+    assert.deepEqual(JSON.parse(routed.stdout).args, [
+      'deploy',
+      '--name',
+      'my-worker',
+      '--route',
+      'example.invalid/mcp*',
+    ]);
+    assert.equal(invoke({ WORKER_NAME: 'same', WRANGLER_CI_OVERRIDE_NAME: 'same' }).status, 0);
+    assert.equal(invoke({ DEPLOY_TEST_EXIT: '7' }).status, 7);
+
+    for (const [values, args] of [
+      [{ WORKER_NAME: 'wrong', WRANGLER_CI_OVERRIDE_NAME: 'selected' }, []],
+      [{ WORKER_NAME: '--dry-run' }, []],
+      [{ WORKER_NAME: 'name with spaces' }, []],
+      [{ WORKER_DOMAIN: 'mcp.example.invalid', WORKER_ROUTE: 'example.invalid/*' }, []],
+      ...[
+        'https://mcp.example.invalid',
+        'mcp.example.invalid/path',
+        '*.example.invalid',
+        'mcp.example.invalid:443',
+        '-bad.example.invalid',
+      ].map((domain) => [{ WORKER_DOMAIN: domain }, []]),
+      [{ WORKER_ROUTE: '--route=value/' }, []],
+      [{ WORKER_ROUTE: 'missing-path.example.invalid' }, []],
+      [{}, ['--unknown']],
+      [{}, ['--dry-run', '--dry-run']],
+    ] as [Record<string, string>, string[]][]) {
+      const refused = invoke(values, args);
+      assert.notEqual(refused.status, 0);
+      assert.equal(refused.stdout, '', 'Invalid input must fail before invoking Wrangler');
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('README wire examples work against the pinned MCP handler', async () => {
+  const { handleMcp } = await import('../../src/protocol.ts');
+  const readme = await readFile('README.md', 'utf8');
+  const listBody = readme.match(/--data-binary '(\{"jsonrpc"[^\n]+\})'/)?.[1];
+  assert.ok(listBody, 'README tools/list curl body');
+  const call = readme.match(/```http\nPOST \/mcp HTTP\/1\.1\n([\s\S]+?)\n```/)?.[1];
+  assert.ok(call, 'README execute HTTP example');
+  const [rawHeaders, callBody] = call.split('\n\n');
+  let execution: unknown;
+  const app = {
+    snippets: [],
+    describe: async () => ({}),
+    execute: async (args: unknown) => {
+      execution = args;
+      return { status: 'completed', outcomes: [] };
+    },
+    runSnippet: async () => ({}),
+  };
+  const listed = await handleMcp(
+    new Request('https://mcp.example.invalid/mcp', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'MCP-Protocol-Version': '2026-07-28',
+        'MCP-Method': 'tools/list',
+      },
+      body: listBody,
+    }),
+    app,
+  );
+  assert.equal(listed.status, 200);
+  assert.equal(((await listed.json()) as any).result.tools[0].name, 'describe');
+  const called = await handleMcp(
+    new Request('https://mcp.example.invalid/mcp', {
+      method: 'POST',
+      headers: Object.fromEntries(
+        rawHeaders.split('\n').map((line) => {
+          const separator = line.indexOf(':');
+          return [line.slice(0, separator), line.slice(separator + 1).trim()];
+        }),
+      ),
+      body: callBody,
+    }),
+    app,
+  );
+  assert.equal(called.status, 200);
+  assert.equal(((await called.json()) as any).result.structuredContent.status, 'completed');
+  assert.deepEqual(execution, JSON.parse(callBody).params.arguments);
+});
+
+test('optional artifact bucket generates a disposable config without changing the checkout', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'codemode-artifact-deploy-'));
+  const helper = resolve('apps/executor/deploy.mjs');
+  const base = await readFile('apps/executor/wrangler.jsonc', 'utf8');
+  try {
+    await mkdir(join(directory, 'node_modules', '.bin'), { recursive: true });
+    await writeFile(join(directory, 'wrangler.jsonc'), base);
+    await writeFile(
+      join(directory, 'node_modules', '.bin', 'wrangler'),
+      `#!/usr/bin/env node
+const fs=require('node:fs');const args=process.argv.slice(2);const path=args[args.indexOf('--config')+1];
+console.log(JSON.stringify({args,path,config:JSON.parse(fs.readFileSync(path,'utf8'))}));
+`,
+      { mode: 0o700 },
+    );
+    const env = {
+      PATH: process.env.PATH,
+      ARTIFACTS_BUCKET: 'private-test-artifacts',
+      ARTIFACT_DOWNLOAD_ORIGIN: 'https://files.example.invalid/',
+      WRANGLER_SEND_METRICS: 'false',
+    };
+    const result = spawnSync(process.execPath, [helper, '--dry-run'], {
+      cwd: directory,
+      encoding: 'utf8',
+      env,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const saved = JSON.parse(result.stdout);
+    assert.equal(saved.args[saved.args.indexOf('--outdir') + 1], join(directory, 'dist'));
+    assert.deepEqual(saved.config.r2_buckets, [
+      { binding: 'ARTIFACTS', bucket_name: 'private-test-artifacts' },
+    ]);
+    assert.equal(saved.config.vars.ARTIFACT_DOWNLOAD_ORIGIN, 'https://files.example.invalid');
+    assert.deepEqual(saved.config.worker_loaders, [{ binding: 'LOADER' }]);
+    assert.equal(saved.config.compatibility_date, '2026-07-28');
+    assert.deepEqual(saved.config.observability, { enabled: false });
+    assert.equal(saved.config.workers_dev, true);
+    assert.equal(saved.config.preview_urls, true);
+    assert.equal(saved.config.main, join(directory, 'src', 'worker.ts'));
+    assert.equal(await readFile(join(directory, 'wrangler.jsonc'), 'utf8'), base);
+    await assert.rejects(readFile(saved.path), { code: 'ENOENT' });
+    for (const origin of [
+      '',
+      'http://files.test',
+      'https://user@files.test',
+      'https://files.test/path',
+      'https://files.test/foo/..',
+      'https://files.test?',
+      'https://files.test#',
+      'https://files.test/?q=x',
+    ]) {
+      const invalid = spawnSync(process.execPath, [helper], {
+        cwd: directory,
+        encoding: 'utf8',
+        env: { ...env, ARTIFACT_DOWNLOAD_ORIGIN: origin },
+      });
+      assert.notEqual(invalid.status, 0);
+      assert.equal(invalid.stdout, '');
+    }
+    const unbound = spawnSync(process.execPath, [helper], {
+      cwd: directory,
+      encoding: 'utf8',
+      env: { PATH: process.env.PATH, ARTIFACT_DOWNLOAD_ORIGIN: 'https://files.test' },
+    });
+    assert.notEqual(unbound.status, 0);
+    assert.equal(unbound.stdout, '');
+    for (const bucket of ['', 'BadBucket', '../bucket', 'ab', 'a'.repeat(64), 'https://bucket']) {
+      const invalid = spawnSync(process.execPath, [helper], {
+        cwd: directory,
+        encoding: 'utf8',
+        env: { ...env, ARTIFACTS_BUCKET: bucket },
+      });
+      assert.notEqual(invalid.status, 0);
+      assert.equal(invalid.stdout, '', 'invalid bucket fails before Wrangler');
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

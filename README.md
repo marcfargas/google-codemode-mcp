@@ -26,14 +26,125 @@ publishing it.
 Connect directly with a compatible MCP client. The trusted caller supplies a
 short-lived Google OAuth token through the `accessToken` tool argument. The server
 owns Google execution, private artifact storage, artifact reads and byte movement
-between Google services. A gateway can adapt caller authentication and inject the
-token as a consumer of this interface.
+between Google services. The gateway supplies caller authentication and injects
+the token for hosts that connect through it.
 
-The deployed MCP service does not acquire, refresh or retain Google credentials.
+The executor does not acquire, refresh or retain durable Google credentials.
 Request arguments are visible to the submitting host; keep credential injection
 in the trusted caller. Deployment ingress controls who can reach the Worker.
 
-## Deploy to Cloudflare
+## Gateway deployment
+
+The monorepo separates `apps/executor` (Discovery, Code Mode and Google↔storage
+transfers) from `apps/gateway` (MCP OAuth, Google grant custody and client URLs).
+Each app owns its tests; root integration tests exercise their boundary. Run
+`just` commands from the repository root. Existing local tests reuse their saved
+desktop OAuth grant and root `.test.env`.
+
+The intended gateway endpoint is `https://google-workspace.lachispa.dev/mcp`.
+The browser flow verifies Cloudflare Access admission, asks for consent for the
+particular MCP client, and links a Google account. It requires a **web OAuth
+client** with callback `https://google-workspace.lachispa.dev/callback` in the
+project's dedicated Google test project. The desktop client for `just oauth` is
+separate. Google scopes are `openid`, `email`, `gmail.modify` and `drive.file`.
+
+Hosts use MCP OAuth with resource `<GATEWAY_ORIGIN>/mcp` and scopes
+`google-workspace offline_access`; they omit `accessToken`. The gateway rejects
+credential overrides, refreshes the encrypted Google grant when the MCP token is
+refreshed, and injects a short-lived Google token through the named `Executor`
+service binding. The executor receives a stable verified caller/account owner
+separately from tool arguments. Transport remains finite, sessionless revision
+`2026-07-28`; other host revisions are not adapted.
+
+The gateway owns `OAUTH_KV`, the web-client secret and R2 signing credentials.
+The provider encrypts credential props and hashes host tokens/codes in KV. The
+executor has `LOADER` and the temporary bucket, with no grant-store or signing
+binding. Google media bodies stream directly between Google and R2 in the
+executor. MCP and service calls carry references and metadata. Shared executor
+access to recent artifacts and other in-flight access tokens remains an accepted
+limitation; this is not full tenant isolation.
+
+Provision existing resources before publishing, then configure deployment through
+environment variables without changing the checkout:
+
+| Variable                                                   | Purpose                                                                                                                                  |
+| ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`            | Wrangler deployment identity; account ID also selects the R2 signing endpoint.                                                           |
+| `GATEWAY_WORKER_NAME`, `EXECUTOR_WORKER_NAME`              | Optional names; default `google-workspace-gateway` and `google-codemode-mcp`.                                                            |
+| `GATEWAY_ORIGIN`                                           | Canonical HTTPS OAuth origin; defaults to `https://google-workspace.lachispa.dev`.                                                       |
+| `GATEWAY_DOMAIN`                                           | Optional custom hostname routed to the gateway.                                                                                          |
+| `OAUTH_KV_NAMESPACE_ID`                                    | Existing gateway-only KV namespace.                                                                                                      |
+| `ARTIFACTS_BUCKET`                                         | Existing private bucket bound to both apps.                                                                                              |
+| `CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD`, `ALLOWED_EMAILS` | Verified CFA issuer/audience and comma-separated admitted email addresses. Use the executor's own Access audience when deploying it.     |
+| `GOOGLE_OAUTH_CLIENT_ID`                                   | Google **web** client ID.                                                                                                                |
+| `ENVIRONMENT`                                              | Stable owner namespace; defaults to `development`.                                                                                       |
+| `REQUIRE_ACCESS_ON_MCP`                                    | Defaults to `true`: CFA assertion plus MCP OAuth on machine calls. Set `false` only with the authorization-route policy described below. |
+
+Install `GOOGLE_OAUTH_CLIENT_SECRET`, `R2_ACCESS_KEY_ID` and
+`R2_SECRET_ACCESS_KEY` as **gateway Worker secrets**, using Wrangler's native
+`secret put`/`secret bulk` commands and the gateway configuration. The R2 S3
+credential needs Object Read & Write limited to the temporary bucket. It is
+separate from the Workers deployment token and never bound to the executor.
+Namespace, bucket, lifecycle, DNS and Access provisioning are separate operations;
+these deployment helpers do not grant administrative permissions or change billing.
+
+```sh
+# Export the settings above and install the gateway's Worker secrets first.
+WORKER_NAME="$EXECUTOR_WORKER_NAME" CF_ACCESS_AUD="$EXECUTOR_CF_ACCESS_AUD" just deploy --dry-run
+just deploy-gateway --dry-run
+# After checking the generated bindings, publish the same configuration:
+WORKER_NAME="$EXECUTOR_WORKER_NAME" CF_ACCESS_AUD="$EXECUTOR_CF_ACCESS_AUD" just deploy
+just deploy-gateway
+```
+
+Both apps keep `workers.dev` and previews enabled. Configure Access for those
+endpoints as well as the custom hostname. Browser authorization from an alias
+redirects to the canonical origin before creating consent cookies. The checked-in
+executor requires CFA admission on public HTTP and fails closed without its
+issuer/audience/allowlist. Binding calls use trusted owner context independently.
+
+**CFA route choice affects host compatibility.** The strict default also requires
+an Access assertion on authenticated gateway calls. Native remote hosts generally
+cannot send CFA browser cookies or custom service headers. For those hosts,
+configure CFA on `/authorize` and `/callback`, let OAuth metadata, registration,
+token and `/mcp*` requests reach the Worker, and set `REQUIRE_ACCESS_ON_MCP=false`.
+CFA then gates grant issuance; MCP OAuth and the current email allowlist guard
+every protected call. This alternative requires an explicitly selected Access
+route policy. Neither source configuration nor a dry-run applies that policy.
+
+### Client file transfers
+
+Artifact reads in gateway mode require both the full reference and its verified
+owner. Returned artifact resource links gain direct signed R2 download links;
+manifest resources include `downloadUrl` and `downloadExpiresAt`. URLs expire
+within ten minutes and no later than the artifact's expiry. CFA protects issuance;
+redemption uses the URL alone. Keep these bearer URLs private.
+
+An authenticated client can also POST to `/mcp/artifacts/download` with `{uri}`.
+For uploads, POST `/mcp/artifacts/upload` with `{size,sha256,mimeType,name?}`. PUT
+the file directly to the returned `uploadUrl` with the returned headers, including
+its exact length and create-only condition. Then POST `{uri}` to
+`/mcp/artifacts/complete`. The executor checks the stored length and hashes the
+stream before committing an owner-bound v2 manifest. Only then can Code Mode use
+`media.body:{artifact:uri}`. No file body travels through MCP or service RPC.
+An interrupted completion can be reconciled with the same grant; Google writes
+are never automatically replayed.
+
+Upload grants last ten minutes; complete artifacts last one hour. Configure a
+one-day lifecycle for `artifacts/` and abort abandoned multipart uploads as a
+physical cleanup backstop. Expiry is enforced on reads; abandoned staging data
+waits for lifecycle cleanup. Browser clients need bucket CORS permitting their
+origin, PUT and the signed request headers. Host file presentation depends on
+the particular client.
+
+Local workerd tests exercise the actual OAuth provider's browser/PKCE/nonce and
+refresh flow, two-worker ownership and credential isolation, file staging,
+manifest validation and lost-response behavior. They do not establish real R2
+signature redemption, deployed CFA policy, hosted Google consent or Claude,
+ChatGPT/OpenClaw acceptance. Historical paid and hosted evidence below remains
+qualified by its original source identity.
+
+## Deploy the standalone executor to Cloudflare
 
 Deployment requires Node 24 and a **Workers Paid plan** for the
 [Dynamic Workers](https://developers.cloudflare.com/dynamic-workers/pricing/)
@@ -43,7 +154,7 @@ persistent sessions or Google OAuth secrets to provision on the Worker. Optional
 artifact storage adds a private R2 bucket.
 
 The deployment command below uses environment variables without editing
-`wrangler.jsonc` or application source:
+`apps/executor/wrangler.jsonc` or application source:
 
 | Variable                   | Purpose                                                                                               |
 | -------------------------- | ----------------------------------------------------------------------------------------------------- |
@@ -69,34 +180,30 @@ just deploy --dry-run                # Bundle to dist/ and validate; no upload
 just deploy                          # Publish and configure the domain/route
 ```
 
-The equivalent command without `just` is `node deploy.mjs`, optionally
+The equivalent command without `just` is `node apps/executor/deploy.mjs`, optionally
 with `--dry-run`. The helper maps settings to pinned Wrangler flags and keeps
 Cloudflare credentials in the deployment process. `ARTIFACTS_BUCKET` generates a temporary Wrangler configuration with the R2 binding;
-`ARTIFACT_DOWNLOAD_ORIGIN` becomes a Worker runtime variable. The other variables are deployment settings. Export them in the shell or configure them in CI build settings;
+`ARTIFACT_DOWNLOAD_ORIGIN` and the CFA admission settings become Worker runtime variables. The remaining variables are deployment settings. Export them in the shell or configure them in CI build settings;
 the helper does not load dotenv files.
 
-The [ordinary hosted deployment check](tests/hosted/README.md#ordinary-environment-deployment-2026-11-06)
+The [ordinary hosted deployment check](apps/executor/tests/hosted/README.md#ordinary-environment-deployment-2026-11-06)
 verified this path with an existing private R2 bucket, protected workers.dev
 ingress and a reversible real Drive rename. Workers Builds and domain/route
 variants retain separate qualification.
 
-With no domain or route, Wrangler enables
-`https://<worker-name>.<account-subdomain>.workers.dev/mcp`. With either setting,
-it disables the workers.dev endpoint and publishes the configured domain/route;
-a custom-domain endpoint is `https://<domain>/mcp`. Keep the domain/route setting
-on every deployment: configuring it only in the dashboard can let a later deploy
-re-enable workers.dev. A route must cover `/mcp`; a custom domain serves the Worker
-directly, while a route requires existing proxied DNS/origin configuration.
+The development configuration keeps `workers.dev` and version previews enabled
+alongside custom domains/routes. A custom-domain endpoint is `https://<domain>/mcp`.
+A route must cover `/mcp`; a custom domain serves the Worker directly, while a
+route requires existing proxied DNS/origin configuration. Protect every enabled
+endpoint with Access. Production endpoint restrictions are a separate deployment choice.
 
-**Caller access protection is separate.** This Worker has no caller authentication
-middleware. Anyone who can reach it can submit code and consume your Worker
-resources; Google operations additionally require the supplied Google token.
-Put the endpoint behind the authenticated gateway or Cloudflare Access, and
-protect any workers.dev or preview URLs that you enable. Version preview URLs are
-disabled in the checked-in configuration; enabling them requires protecting that
-additional endpoint. Choosing a custom domain
-does not itself add authentication. The Google token remains the `accessToken`
-tool argument; an Authorization header does not populate that argument.
+The checked-in executor requires a valid human Cloudflare Access assertion and
+current `ALLOWED_EMAILS` membership before serving public HTTP. Supply
+`CF_ACCESS_TEAM_DOMAIN`, `CF_ACCESS_AUD` and `ALLOWED_EMAILS` during deployment;
+missing configuration denies access. `just dev` disables this gate only for local
+Wrangler development. Gateway service-binding calls do not use public HTTP and
+receive their owner context separately. A Google token is still an `accessToken`
+tool argument on the standalone interface; an Authorization header does not fill it.
 
 ### Optional artifact storage
 
@@ -133,11 +240,11 @@ presentation in Claude, ChatGPT or OpenClaw remains host-specific and unqualifie
 Range requests return the whole file; HTTP upload, delete, listing and resumable
 transport are unavailable. Two direct hosted controls verified exact JSON/binary
 downloads, HEAD, protected ingress, capability rejection and deletion. See the
-[standalone download evidence](tests/hosted/README.md#standalone-artifact-downloads-2026-11-05)
+[standalone download evidence](apps/executor/tests/hosted/README.md#standalone-artifact-downloads-2026-11-05)
 for the tested candidate and limits.
 
 Use `describe({path:'pagination'})` and its
-[reference](skills/google-workspace/references/pagination.md) to collect bounded
+[reference](apps/executor/skills/google-workspace/references/pagination.md) to collect bounded
 Gmail or Drive list pages:
 
 ```js
@@ -190,7 +297,7 @@ after storage failure. Core fault controls cover quotas, expiry, wrong capabilit
 and late writes. Four local Sonnet/Sol artifact attempts passed on their retained
 candidate. Two later no-model hosted controls verified full JSON/binary content,
 resource reads and deletion; JSON also survived redeployment. See the
-[hosted storage evidence](tests/hosted/README.md#hosted-artifact-storage-2026-11-05)
+[hosted storage evidence](apps/executor/tests/hosted/README.md#hosted-artifact-storage-2026-11-05)
 for candidate identities and limits. Physical lifecycle execution and host
 downloadable-file presentation remain unqualified.
 
@@ -206,11 +313,11 @@ checkout can serve different accounts, names, and domains through
 | Production branch | `main`                                                                                  |
 | Build variables   | `NODE_VERSION=24`, `SKIP_DEPENDENCY_INSTALL=1`, plus optional `WORKER_*` settings above |
 | Build command     | `npm ci --ignore-scripts`                                                               |
-| Deploy command    | `node deploy.mjs`                                                                       |
+| Deploy command    | `node apps/executor/deploy.mjs`                                                         |
 | Preview builds    | Disable for this initial setup; preview deployment/protection is unqualified.           |
 
 If an existing Workers Builds configuration uses `node .github/deploy.mjs`, update
-its Deploy command to `node deploy.mjs` when adopting this layout.
+its Deploy command to `node apps/executor/deploy.mjs` when adopting this layout.
 
 Workers Builds supplies its account/deployment credential. Do not add the Gmail
 test OAuth secrets to Builds or the deployed Worker. Build variables are available
@@ -236,7 +343,7 @@ including native CPU termination, asynchronous timeout, cancellation fences and
 multiple bridge calls. Account/DNS configurations, Workers Builds, and deployment
 of the live Google service remain separate from that bounded qualification.
 
-The [hosted verification harness](tests/hosted/README.md) prepares a separate
+The [hosted verification harness](apps/executor/tests/hosted/README.md) prepares a separate
 private Worker with fixed synthetic probes, then checks its exact deployed
 version through an existing protected ingress. Run `just hosted-prepare OUTPUT`
 without credentials; after deployment, `just hosted-verify OUTPUT` uses the
@@ -245,11 +352,11 @@ the 15-second asynchronous timeout, late-call fencing, multiple bridge calls and
 healthy follow-ups. Local tests cover these paths except hosted CPU enforcement.
 Harness version 2 also verifies synthetic lost-response writes and subsequent
 write fencing, acknowledged effects retained after program failure, and hosted
-network/credential isolation. Its [17-request hosted qualification](tests/hosted/README.md#hosted-mutation-and-isolation-2026-11-06)
+network/credential isolation. Its [17-request hosted qualification](apps/executor/tests/hosted/README.md#hosted-mutation-and-isolation-2026-11-06)
 uses no real Google writes or inference; live Google failure semantics remain separate.
 An external timeout or generic resource error cannot pass the CPU criterion.
 The qualified run observed the native `Worker exceeded CPU time limit.` exception;
-see the [hosted result and its limits](tests/hosted/README.md#qualified-hosted-run-2026-11-04).
+see the [hosted result and its limits](apps/executor/tests/hosted/README.md#qualified-hosted-run-2026-11-04).
 
 ## HTTP connection contract
 
@@ -528,7 +635,7 @@ process can lose its in-memory ledger. Repeating a submission can repeat effects
 
 ## Deployment snippets and Skills
 
-Edit [snippets.config.ts](snippets.config.ts) to import bundled or project-owned
+Edit [apps/executor/snippets.config.ts](apps/executor/snippets.config.ts) to import bundled or project-owned
 snippet modules, including modules at a chosen deployment path. Wrangler bundles
 the registry. Each `SnippetDefinition` declares:
 
@@ -552,7 +659,7 @@ gmail_inbox({ accessToken: '<injected>', inputs: { maxResults: 10 } });
 runtime snippet installation API. Version snippets through their deployment.
 
 The official MCP Skills extension and Resources expose
-[skills/google-workspace/SKILL.md](skills/google-workspace/SKILL.md). It is also a
+[apps/executor/skills/google-workspace/SKILL.md](apps/executor/skills/google-workspace/SKILL.md). It is also a
 standard skill directory suitable for host packaging. Claude, ChatGPT, and
 OpenClaw remain the host targets; their concrete tool, Code Mode, and Skills paths
 still need qualification. The gateway now implements namespaced Resources and
@@ -576,11 +683,11 @@ GitHub, as recorded below. The six independent Gmail agent cases completed their
 task outcomes with both required models; the initial stricter discovery gate failed
 for Sonnet on attachment and pagination. A later focused hosted run passed both
 cases with Sonnet and Sol, including strict discovery and skill retrieval. See the
-[versioned results](tests/eval/README.md#independent-gmail-cases-with-grading-version-2-2026-11-04).
+[versioned results](apps/executor/tests/eval/README.md#independent-gmail-cases-with-grading-version-2-2026-11-04).
 The first prospectively frozen unused-case assessment also passed all four
 Sonnet/Sol cells: content-selected Gmail labelling and Drive renaming, with strict
 discovery, actual skill retrieval and clean independent readback/cleanup. See
-[assessment and usage metrics](tests/eval/README.md#first-frozen-unused-case-assessment-2026-11-06).
+[assessment and usage metrics](apps/executor/tests/eval/README.md#first-frozen-unused-case-assessment-2026-11-06).
 This is same-author feasibility evidence; it does not establish blindness or
 reliability, and later tuning requires another unused evaluation partition.
 The separate hosted synthetic Worker passed CPU/timeout/cancellation and bridge
@@ -593,7 +700,7 @@ failure remains recorded; the fresh download validation passed after its repair.
 Live multi-page traversal and conditional-option refusal are now qualified through
 the built Worker. Conditional mutations remain unsupported; concurrent lost
 updates are not prevented. See the
-[Drive qualification and limits](tests/eval/README.md#drive-pagination-and-conditional-write-boundary-2026-11-05).
+[Drive qualification and limits](apps/executor/tests/eval/README.md#drive-pagination-and-conditional-write-boundary-2026-11-05).
 The current local Drive matrix passes all eight required cells: four cases each
 for Sonnet and Sol, on one product bundle. Method descriptions now put execution
 guidance before large native metadata so Claude's truncated preview retains it.
@@ -603,16 +710,16 @@ are diagnostic. All fixtures were cleaned, with no unknown effects.
 Earlier version-guard and discovery failures remain retained. Hosted conditional
 attempts stop before inference because independent recording is local. This is
 one-attempt-per-cell feasibility, with hosted Drive and target-host activation
-still unqualified. See [results and token/cache/cost metrics](tests/eval/README.md#current-candidate-drive-completion-2026-11-05).
+still unqualified. See [results and token/cache/cost metrics](apps/executor/tests/eval/README.md#current-candidate-drive-completion-2026-11-05).
 Gmail/Drive media composition now passes all four local Sonnet/Sol cells, with
 68/68 criteria and complete fixture cleanup. Three independent live controls
 also pass, including native-document export. Agents retrieved the advanced skill
 resource and discovered every used method before execution. See the
-[media results and token/cache/cost metrics](tests/eval/README.md#media-composition-results-2026-11-05).
+[media results and token/cache/cost metrics](apps/executor/tests/eval/README.md#media-composition-results-2026-11-05).
 Optional artifact storage has local R2/workerd proof, four passing local
 Sonnet/Sol attempts, and two passing no-model hosted storage controls. Each result
-qualifies its retained candidate; see the [artifact agent results](tests/eval/README.md#artifact-agent-acceptance-2026-11-05)
-and [hosted storage evidence](tests/hosted/README.md#hosted-artifact-storage-2026-11-05).
+qualifies its retained candidate; see the [artifact agent results](apps/executor/tests/eval/README.md#artifact-agent-acceptance-2026-11-05)
+and [hosted storage evidence](apps/executor/tests/hosted/README.md#hosted-artifact-storage-2026-11-05).
 Hosted media composition, physical lifecycle execution and target-host activation
 remain unqualified.
 Subsequent APIs are Sheets, Docs, and
@@ -645,14 +752,14 @@ Select existing checks by affected behavior, reuse applicable retained evidence,
 and run fresh paid cells only for unresolved agent behavior. `just check` qualifies
 its deterministic checks; agent and hosted acceptance remain separate.
 
-Test suites and infrastructure live under `tests/`: `unit/` for isolated checks,
+Test suites and infrastructure live under `apps/executor/tests/`: `unit/` for isolated checks,
 `integration/` for Worker, HTTP, CLI and runner checks, `live/` for credentialed
 Google checks, and `fixtures/`, `support/`, `eval/` and `hosted/` for their helpers.
 `.github/` contains GitHub workflows and repository-secret installation. Local
-workflow launchers live in `tests/`; the deployment entrypoint is root `deploy.mjs`. Commands are
+workflow launchers live in `apps/executor/tests/`; the deployment entrypoint is `apps/executor/deploy.mjs`. Commands are
 exposed through `justfile`; there is no project `scripts/` directory or npm task
 layer. Requires Node 24, Docker, `act`, `just`, and `gh` for secret installation.
-GitHub and local checks invoke `tests/run.mjs` directly.
+GitHub and local checks invoke `apps/executor/tests/run.mjs` directly.
 
 Local workflow launchers can set `ACT_NODE_OPTIONS` to pass Node options verbatim
 to the container. For a local network-family selection timeout, use
@@ -702,7 +809,7 @@ It also appends the report to the workflow step summary. Missing measurements
 stay unknown and estimates remain separate from billing. Regenerate offline with
 `just eval-report SAVED_EVIDENCE NEW_REPORT_DIRECTORY`; this makes no Google or
 model calls and preserves original grades. See the
-[report contract](tests/eval/README.md#generated-run-reports).
+[report contract](apps/executor/tests/eval/README.md#generated-run-reports).
 
 To consume selected saved agent acceptance, use
 `just eval-verify SAVED_EVIDENCE NEW_REPORT_DIRECTORY`. It writes the same report
@@ -729,7 +836,7 @@ remain separate qualifications.
 Sheets, Docs, and Calendar remain pending
 coverage targets; selecting them fails before model spending. This is a synthetic
 feasibility check, not acceptance of every host or service. See the
-[gate documentation](tests/eval/README.md) for isolation, usage accounting,
+[gate documentation](apps/executor/tests/eval/README.md) for isolation, usage accounting,
 offline regrading, and manual GitHub setup.
 
 The first matrix completed all task outcomes with Sonnet, Terra, and Haiku, but
@@ -737,7 +844,7 @@ all three failed the full discovery/skill gate. Sonnet and Haiku skipped method
 discovery; Terra skipped root discovery and the skill resource. Luna exhausted
 18 turns without completing the task, stopping the campaign before Opus/Sol.
 All attempted cells cleaned up successfully with no unknown mutations. The
-[gate results](tests/eval/README.md#first-model-matrix-2026-11-04) retain these
+[gate results](apps/executor/tests/eval/README.md#first-model-matrix-2026-11-04) retain these
 failures, observed cache counters, estimates, and the unattempted cells.
 
 Under the earlier grading version, each required model had one passing attempt: Sonnet after fixing
@@ -745,10 +852,10 @@ instruction handoff and clarifying product guidance; Sol after additionally fixi
 conservative budget settlement. Both completed the Gmail task, discovery, skill
 retrieval, and cleanup with zero unknown mutations. These are separate harness
 candidates, not a fresh pair pass or a reliability claim. The earlier failed pair
-remains retained. See the [qualified results](tests/eval/README.md#sol-validation-with-accounting-version-2-2026-11-04)
+remains retained. See the [qualified results](apps/executor/tests/eval/README.md#sol-validation-with-accounting-version-2-2026-11-04)
 for cost/cache evidence and the earlier method criterion's coverage limits. The
 current grader requires every used method to be described before execution; the
-[independent case results](tests/eval/README.md#independent-gmail-cases-with-grading-version-2-2026-11-04)
+[independent case results](apps/executor/tests/eval/README.md#independent-gmail-cases-with-grading-version-2-2026-11-04)
 retain the remaining Sonnet discovery failures and the corrected pagination grades.
 
 ### Initial test consent and CI secrets

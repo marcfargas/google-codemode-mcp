@@ -7,22 +7,24 @@ description: Retrieve, author, or assess Google Code Mode documentation; prepare
 
 Use these existing homes according to the reader's question:
 
-| Home                                                                                     | Purpose / evidence to inspect                                                                                       |
-| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| [README.md](../../../README.md)                                                          | Product contract, discovery/execution examples, deployment, HTTP headers, OAuth and verification setup              |
-| [tests/eval/README.md](../../../tests/eval/README.md)                                    | Agent gate commands, coverage, caps, model/runner identities, qualified pilot results                               |
-| [skills/google-workspace/SKILL.md](../../../skills/google-workspace/SKILL.md)            | Distributed agent instructions served through MCP Resources/Skills; inspect `src/protocol.ts` for serving/integrity |
-| [Issue #1](https://github.com/marcfargas/google-codemode-mcp/issues/1) and linked issues | Requested outcomes, open decisions and acceptance; tracker is not proof of deployed behavior                        |
+| Home                                                                                                      | Purpose / evidence to inspect                                                                                                     |
+| --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| [README.md](../../../README.md)                                                                           | Product contract, discovery/execution examples, deployment, HTTP headers, OAuth and verification setup                            |
+| [apps/executor/tests/eval/README.md](../../../apps/executor/tests/eval/README.md)                         | Agent gate commands, coverage, caps, model/runner identities, qualified pilot results                                             |
+| [apps/executor/skills/google-workspace/SKILL.md](../../../apps/executor/skills/google-workspace/SKILL.md) | Distributed agent instructions served through MCP Resources/Skills; inspect `apps/executor/src/protocol.ts` for serving/integrity |
+| [Issue #1](https://github.com/marcfargas/google-codemode-mcp/issues/1) and linked issues                  | Requested outcomes, open decisions and acceptance; tracker is not proof of deployed behavior                                      |
 
 These developer skills in `.agents/skills` are separate from the distributed
 Workspace skill. Product behavior comes from current source/configuration and
 observed runtime evidence; current code alone cannot establish a historical reason
-or a hosted pass. Keep provisional research/reviews in external task material.
+or a hosted pass. Gateway authentication, ownership and signed transfers have
+app-owned source/tests under `apps/gateway`; the two-Worker seam lives in root
+`tests/integration`. Keep provisional research/reviews in external task material.
 
 ## Retrieve and answer
 
 Start with the supplied link/path/section. Otherwise use `rg -n 'TERMS' README.md
-tests/eval/README.md skills src .github/workflows justfile wrangler.jsonc` and
+apps/executor/tests/eval/README.md apps/executor/skills apps/executor/src apps/gateway tests/integration .github/workflows justfile apps/executor/wrangler.jsonc` and
 read enough surrounding content to preserve limits. Follow useful links and
 inspect relevant code/workflow before claiming freshness. Resolve issue references
 with `gh issue view NUMBER --repo marcfargas/google-codemode-mcp`; search work via

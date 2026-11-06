@@ -92,24 +92,24 @@ jobs:
       - name: Verify native file tools without provider or Google calls
         run: |
           CLI="$(command -v claude)"
-          EVAL_NATIVE_CLI="$CLI" node --experimental-strip-types --test tests/preflight/claude.test.ts
+          EVAL_NATIVE_CLI="$CLI" node --experimental-strip-types --test apps/executor/tests/preflight/claude.test.ts
       - name: Verify isolated GPT runner without provider or Google calls
-        run: sudo -E "$(command -v node)" --experimental-strip-types --test tests/preflight/responses.test.ts
+        run: sudo -E "$(command -v node)" --experimental-strip-types --test apps/executor/tests/preflight/responses.test.ts
       - name: Verify optional native Codex through synthetic relays only
         if: inputs.native_codex_probe == true
         run: |
           CLI="$(command -v codex)"
-          sudo -E env EVAL_NATIVE_CODEX_CLI="$CLI" "$(command -v node)" --experimental-strip-types --test tests/preflight/codex.test.ts
-      - run: node tests/run.mjs build
+          sudo -E env EVAL_NATIVE_CODEX_CLI="$CLI" "$(command -v node)" --experimental-strip-types --test apps/executor/tests/preflight/codex.test.ts
+      - run: node apps/executor/tests/run.mjs build
       - name: Run isolated native agent and independent outcome checks
         if: inputs.preflight_only != true
-        run: sudo -E "$(command -v node)" --experimental-strip-types tests/eval/campaign.ts
+        run: sudo -E "$(command -v node)" --experimental-strip-types apps/executor/tests/eval/campaign.ts
       - name: Prepare synthetic failed-campaign report evidence without inference
         if: inputs.preflight_only == true
-        run: sudo -E "$(command -v node)" --experimental-strip-types tests/eval/report-preflight.ts
+        run: sudo -E "$(command -v node)" --experimental-strip-types apps/executor/tests/eval/report-preflight.ts
       - name: Summarize retained gates, tokens, cache and cost even on failure
         if: always() && env.ACT == 'true'
-        run: sudo -E "$(command -v node)" --experimental-strip-types tests/eval/report.ts "$EVAL_OUTPUT" "$EVAL_OUTPUT/workflow-report" --step-summary
+        run: sudo -E "$(command -v node)" --experimental-strip-types apps/executor/tests/eval/report.ts "$EVAL_OUTPUT" "$EVAL_OUTPUT/workflow-report" --step-summary
       - name: Retain private evidence even on failure
         if: always() && !env.ACT && inputs.preflight_only != true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

@@ -1,0 +1,12 @@
+{
+  "name": "@google-codemode/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@cloudflare/workers-oauth-provider": "1.2.4",
+    "@google-codemode/executor": "0.1.0",
+    "aws4fetch": "1.0.20",
+    "jose": "6.2.15"
+  }
+}
