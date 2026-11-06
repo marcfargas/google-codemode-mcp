@@ -1,0 +1,13 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "google-codemode-mcp",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-07-28",
+  "compatibility_flags": ["nodejs_compat"],
+  "worker_loaders": [{ "binding": "LOADER" }],
+  "rules": [{ "type": "Text", "globs": ["**/*.md"], "fallthrough": true }],
+  "workers_dev": true,
+  "preview_urls": true,
+  "vars": { "GATEWAY_ONLY": "true" },
+  "observability": { "enabled": false },
+}

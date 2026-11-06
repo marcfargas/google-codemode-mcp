@@ -13,9 +13,9 @@ consuming selected saved acceptance, after establishing relevant source equivale
 ## Select, prepare and run
 
 1. Recover the authorized service/cases, backend, models, attempt count and spend
-   ceiling. Read [the maintained gate guide](../../../../tests/eval/README.md),
-   [case/model selection](../../../../tests/eval/campaign.ts), and
-   [the launcher](../../../../tests/eval/act.mjs) when those inputs changed.
+   ceiling. Read [the maintained gate guide](../../../../apps/executor/tests/eval/README.md),
+   [case/model selection](../../../../apps/executor/tests/eval/campaign.ts), and
+   [the launcher](../../../../apps/executor/tests/eval/act.mjs) when those inputs changed.
    Defaults are Sonnet 5.5 (`sonnet`) and GPT 6.1 Sol (`sol`), one fresh attempt
    per case/model. Gmail has six cases, at most twelve $1 estimates; Drive has
    four cases, at most eight $1 estimates. Artifacts has two cases through local Miniflare R2, at most four $1 estimates. Media has two cases, at most four $1 estimates, and requires ordered advanced-media resource retrieval. Use explicit case/model selections
@@ -120,9 +120,9 @@ quoting a complete total, and retain report-generation failures alongside the
 original gate. `just eval-preflight` exercises the workflow's report step with an
 explicitly synthetic failed/passing campaign; it is no evidence of paid model or
 Google acceptance. Read the maintained
-[actor summaries](../../../../tests/eval/actor.ts),
-[Responses summaries](../../../../tests/eval/responses.ts) and
-[Responses accounting](../../../../tests/eval/responses-relay.ts) if telemetry
+[actor summaries](../../../../apps/executor/tests/eval/actor.ts),
+[Responses summaries](../../../../apps/executor/tests/eval/responses.ts) and
+[Responses accounting](../../../../apps/executor/tests/eval/responses-relay.ts) if telemetry
 changes. Raw nested attribution and stream counters are not additional usage.
 
 | Measurement           | Retained source and interpretation                                                                                                                                                                                                                                                                                                                                                                                                    |

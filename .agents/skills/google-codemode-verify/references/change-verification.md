@@ -40,9 +40,10 @@ task worklog, with only the useful result in the delivery report.
 | Gmail/Drive file composition                              | Workerd media integration, live media controls; two media cases, `gmail-to-drive` and `drive-to-gmail`                                                      |
 | Stored artifacts                                          | Workerd/R2 artifact integration; two artifact cases, `large-json` and `binary-attachment`; HTTP downloads use exact-byte no-model controls                  |
 | Runner, isolation, accounting, reporting                  | Owning unit/integration checks; `just eval-preflight NEW_OUTPUT` for changed runner/MCP/file plumbing. Synthetic results do not establish agent feasibility |
+| Gateway authentication, ownership and client transfers    | Gateway auth checks and root two-Worker integration; live S3 signature acceptance and native host connections require their own selected proof              |
 | Hosted limits, deployment or native host behavior         | Maintained hosted controls or actual host journey; local actor passes cannot replace these boundaries                                                       |
 
-Case definitions live in `tests/eval/{cases,drive,media,artifacts}.ts`; current
+Case definitions live in `apps/executor/tests/eval/{cases,drive,media,artifacts}.ts`; current
 versions and required Sonnet/Sol roles come from those registries and `matrix.ts`.
 A common contract needs an owning check, not a separate matrix for every skill.
 Preserve cases that exercise distinct failure mechanisms. Sheets, Docs and
