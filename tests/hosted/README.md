@@ -231,6 +231,46 @@ and observability. Missing Access credentials returned 403 and a wrong secret
 returned 401 before, during and after the trial. These synthetic controls do not
 qualify live Google mutation semantics or the ordinary deployment entrypoint.
 
+## Ordinary environment deployment (2026-11-06)
+
+The ordinary `just deploy` path passed on the existing Access-protected test
+Worker from clean commit `630351f196c6c20ff7b12e9795f9e2ac145d41fc`.
+`WORKER_NAME`, `ARTIFACTS_BUCKET` and `ARTIFACT_DOWNLOAD_ORIGIN` selected the target
+and its existing storage without checkout edits. The entrypoint was
+`src/worker.ts`, without the hosted identity wrapper. Version previews are
+explicitly disabled in the base configuration. Artifact-config dry-runs retain
+their bundle in the checkout's `dist/` directory.
+
+Native version `cd71c4d5-6a9d-45b5-92ee-c6377896de2a` and downloaded script content
+had matching Cloudflare ETags. The executing module's SHA-256 matched the retained
+dry-run bundle exactly:
+`f902f98b3bea3c86140b742dcb06539300a19c8fd54e0cde4694f5fe322c04a4`.
+The published source map differed from the dry-run map; its separate hash is
+retained and no source-map byte equivalence is claimed. Cloudflare ETags identify
+version correspondence here; they are not treated as bundle SHA-256 values.
+
+Protected discovery and a real native Drive rename followed by an explicit
+revert passed. Each operation had one acknowledged name-only mutation outcome;
+independent Google reads confirmed the requested name, preserved metadata,
+original content length and SHA-256. Only the known fixture was deleted, and
+cleanup reported no failures or unknown mutations. No model calls occurred.
+
+Missing Access credentials returned 403, a wrong secret returned 401 and the
+version preview endpoint returned 404. Native metadata confirmed the expected
+runtime and R2/download bindings, no attached domains and disabled observability.
+The original product bundle and configuration were restored as version
+`1f3c43c9-0692-44c4-84f5-f379b8a0e5c6`, with matching protected-discovery identity.
+
+Earlier verification failures remain retained: a temporary-config dry-run output
+path defect, an OAuth transport timeout, a source-map comparison mismatch, and
+an invalid assumption that the script download API follows a selected older
+version. None reached Google fixture setup. Selecting an older version for traffic
+can leave the generic script download API returning the latest uploaded code;
+match native version metadata and response ETags before associating downloaded
+bytes with a deployment. This qualification covers the selected workers.dev
+environment path. Workers Builds, custom domain/routes, public deploy-button
+behavior and real lost-response Google writes remain separate.
+
 ## Direct hosted Gmail gate
 
 Prepare the production-backed candidate with `just hosted-product-prepare OUTPUT`.

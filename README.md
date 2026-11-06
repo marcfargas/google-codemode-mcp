@@ -75,6 +75,11 @@ Cloudflare credentials in the deployment process. `ARTIFACTS_BUCKET` generates a
 `ARTIFACT_DOWNLOAD_ORIGIN` becomes a Worker runtime variable. The other variables are deployment settings. Export them in the shell or configure them in CI build settings;
 the helper does not load dotenv files.
 
+The [ordinary hosted deployment check](tests/hosted/README.md#ordinary-environment-deployment-2026-11-06)
+verified this path with an existing private R2 bucket, protected workers.dev
+ingress and a reversible real Drive rename. Workers Builds and domain/route
+variants retain separate qualification.
+
 With no domain or route, Wrangler enables
 `https://<worker-name>.<account-subdomain>.workers.dev/mcp`. With either setting,
 it disables the workers.dev endpoint and publishes the configured domain/route;
