@@ -187,6 +187,7 @@ console.log(JSON.stringify({args,path,config:JSON.parse(fs.readFileSync(path,'ut
     assert.deepEqual(saved.config.worker_loaders, [{ binding: 'LOADER' }]);
     assert.equal(saved.config.compatibility_date, '2026-07-28');
     assert.deepEqual(saved.config.observability, { enabled: false });
+    assert.equal(saved.config.preview_urls, false);
     assert.equal(saved.config.main, join(directory, 'src', 'worker.ts'));
     assert.equal(await readFile(join(directory, 'wrangler.jsonc'), 'utf8'), base);
     await assert.rejects(readFile(saved.path), { code: 'ENOENT' });

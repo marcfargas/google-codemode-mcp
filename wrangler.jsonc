@@ -6,5 +6,6 @@
   "compatibility_flags": ["nodejs_compat"],
   "worker_loaders": [{ "binding": "LOADER" }],
   "rules": [{ "type": "Text", "globs": ["**/*.md"], "fallthrough": true }],
+  "preview_urls": false,
   "observability": { "enabled": false },
 }

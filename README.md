@@ -87,7 +87,9 @@ directly, while a route requires existing proxied DNS/origin configuration.
 middleware. Anyone who can reach it can submit code and consume your Worker
 resources; Google operations additionally require the supplied Google token.
 Put the endpoint behind the authenticated gateway or Cloudflare Access, and
-protect any workers.dev or preview URLs that you enable. Choosing a custom domain
+protect any workers.dev or preview URLs that you enable. Version preview URLs are
+disabled in the checked-in configuration; enabling them requires protecting that
+additional endpoint. Choosing a custom domain
 does not itself add authentication. The Google token remains the `accessToken`
 tool argument; an Authorization header does not populate that argument.
 
