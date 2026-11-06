@@ -1,6 +1,8 @@
 import { readMultipart } from '../support/multipart.ts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
+import { createR2Storage } from '../../src/storage.ts';
 import { openBuiltWorker, type ExecutionReceipt } from '../support/worker-client.ts';
 import { MEDIA_SKILL_URI } from '../../src/media.ts';
 
@@ -122,35 +124,34 @@ test('actual workerd/native SDK composes Gmail attachments and Drive bytes witho
   const bytes = Buffer.from(Array.from({ length: 131072 }, (_, index) => index % 256));
   const uploads: ReturnType<typeof readMultipart>[] = [];
   const drafts: ReturnType<typeof attachment>[] = [];
-  const client = await openBuiltWorker({
-    artifacts: true,
-    outbound: async (request) => {
-      const url = new URL(request.url);
-      if (url.pathname.includes('/discovery/') || url.pathname.includes('$discovery'))
-        return json(url.pathname.includes('/drive/') ? docs.drive : docs.gmail);
-      assert.equal(request.headers.get('authorization'), 'Bearer ' + token);
-      if (url.pathname.includes('/attachments/'))
-        return json({ data: bytes.toString('base64url'), size: bytes.length });
-      if (url.pathname === '/upload/drive/v3/files') {
-        assert.equal(url.searchParams.get('uploadType'), 'multipart');
-        uploads.push(
-          readMultipart(
-            Buffer.from(await request.arrayBuffer()),
-            request.headers.get('content-type')!,
-          ),
-        );
-        return json({ id: 'created-file', name: uploads.at(-1)!.metadata.name });
-      }
-      if (url.pathname === '/drive/v3/files/source')
-        return new Response(bytes, { headers: { 'content-type': 'application/octet-stream' } });
-      if (url.pathname.endsWith('/drafts')) {
-        const body = (await request.json()) as { message: { raw: string } };
-        drafts.push(attachment(body.message.raw));
-        return json({ id: 'created-draft' });
-      }
-      throw new Error('Unexpected fixture route');
-    },
-  });
+  const outbound = async (request: Request) => {
+    const url = new URL(request.url);
+    if (url.pathname.includes('/discovery/') || url.pathname.includes('$discovery'))
+      return json(url.pathname.includes('/drive/') ? docs.drive : docs.gmail);
+    assert.equal(request.headers.get('authorization'), 'Bearer ' + token);
+    if (url.pathname.includes('/attachments/'))
+      return json({ data: bytes.toString('base64url'), size: bytes.length });
+    if (url.pathname === '/upload/drive/v3/files') {
+      assert.equal(url.searchParams.get('uploadType'), 'multipart');
+      uploads.push(
+        readMultipart(
+          Buffer.from(await request.arrayBuffer()),
+          request.headers.get('content-type')!,
+        ),
+      );
+      return json({ id: 'created-file', name: uploads.at(-1)!.metadata.name });
+    }
+    if (url.pathname === '/drive/v3/files/source')
+      return new Response(bytes, { headers: { 'content-type': 'application/octet-stream' } });
+    if (url.pathname.endsWith('/drafts')) {
+      const body = (await request.json()) as { message: { raw: string } };
+      drafts.push(attachment(body.message.raw));
+      return json({ id: 'created-draft' });
+    }
+    throw new Error('Unexpected fixture route');
+  };
+  const client = await openBuiltWorker({ artifacts: true, outbound });
+  const inline = await openBuiltWorker({ outbound });
   try {
     const guide = await client.resource(MEDIA_SKILL_URI);
     assert.match((guide.contents[0] as { text: string }).text, /composeMime/);
@@ -190,7 +191,7 @@ test('actual workerd/native SDK composes Gmail attachments and Drive bytes witho
     assert.equal(reused.hasUnknownOutcome, false);
     assert.deepEqual(uploads[1].bytes, bytes);
     assert.equal(uploads[1].metadata.name, 'stored-copy.bin');
-    const draft = await client.tool<ExecutionReceipt>('execute', {
+    const draft = await inline.tool<ExecutionReceipt>('execute', {
       accessToken: token,
       code: `
       const {data: file} = await google.drive({version:'v3'}).files.get({fileId:'source',alt:'media'});
@@ -210,6 +211,7 @@ test('actual workerd/native SDK composes Gmail attachments and Drive bytes witho
     assert.match(drafts[0].headers, /Content-Type: application\/octet-stream/);
   } finally {
     await client.close();
+    await inline.close();
   }
 });
 
@@ -237,6 +239,234 @@ test('workerd keeps empty multipart bodies and acknowledged writes when their re
     assert.equal(readMultipart(wire!, contentType).bytes.length, 0);
     assert.equal(result.outcomes[0].outcome, 'acknowledged');
     assert.equal(result.outcomes[0].httpStatus, 200);
+  } finally {
+    await client.close();
+  }
+});
+
+// The fixture and receiver retain only chunks, headers and hashes, never a whole file.
+const largeSize = 33 * 1024 * 1024 + 17;
+function generatedMedia(size: number, failAfter = Infinity, credential = false) {
+  let offset = 0;
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (offset >= failAfter) {
+        if (credential) {
+          controller.enqueue(Buffer.from(token));
+          controller.close();
+        } else controller.error(new Error('Interrupted source'));
+        return;
+      }
+      if (offset === size) {
+        controller.close();
+        return;
+      }
+      const chunk = new Uint8Array(Math.min(65536, size - offset));
+      for (let i = 0; i < chunk.length; i++) chunk[i] = (offset + i) % 251;
+      offset += chunk.length;
+      controller.enqueue(chunk);
+    },
+  });
+}
+async function streamHash(body: ReadableStream<Uint8Array>) {
+  const hash = createHash('sha256');
+  for await (const chunk of body) hash.update(chunk);
+  return hash.digest('hex');
+}
+async function verifyLargeUpload(request: Request) {
+  const boundary = /boundary=([A-Za-z0-9-]+)$/.exec(request.headers.get('content-type')!)![1];
+  const prefix = Buffer.from(
+    `--${boundary}\r\ncontent-type: application/json\r\n\r\n{"name":"streamed-copy.bin"}\r\n--${boundary}\r\ncontent-type: application/octet-stream\r\n\r\n`,
+  );
+  const footer = Buffer.from(`\r\n--${boundary}--`);
+  const hash = createHash('sha256');
+  let offset = 0;
+  for await (const value of request.body!) {
+    const chunk = Buffer.from(value);
+    let cursor = 0;
+    if (offset < prefix.length) {
+      const count = Math.min(chunk.length, prefix.length - offset);
+      assert.deepEqual(chunk.subarray(0, count), prefix.subarray(offset, offset + count));
+      cursor += count;
+      offset += count;
+    }
+    if (offset < prefix.length + largeSize) {
+      const count = Math.min(chunk.length - cursor, prefix.length + largeSize - offset);
+      hash.update(chunk.subarray(cursor, cursor + count));
+      cursor += count;
+      offset += count;
+    }
+    if (cursor < chunk.length) {
+      const start = offset - prefix.length - largeSize;
+      assert.deepEqual(
+        chunk.subarray(cursor),
+        footer.subarray(start, start + chunk.length - cursor),
+      );
+      offset += chunk.length - cursor;
+    }
+  }
+  assert.equal(offset, prefix.length + largeSize + footer.length);
+  assert.equal(request.headers.get('content-length'), String(offset));
+  return hash.digest('hex');
+}
+
+test('native SDK streams 33 MiB through R2 references with known and unknown lengths', async () => {
+  const expected = await streamHash(generatedMedia(largeSize));
+  let uploaded = 0;
+  let uploadError: unknown;
+  const client = await openBuiltWorker({
+    artifacts: true,
+    outbound: async (request) => {
+      const url = new URL(request.url);
+      if (url.pathname.includes('/discovery/')) return json(docs.drive);
+      assert.equal(request.headers.get('authorization'), 'Bearer ' + token);
+      if (request.method === 'GET') {
+        assert.equal(request.headers.get('accept-encoding'), 'identity');
+        return new Response(generatedMedia(largeSize), {
+          headers: {
+            'content-type': 'application/octet-stream',
+            ...(url.pathname.endsWith('/known') ? { 'content-length': String(largeSize) } : {}),
+          },
+        });
+      }
+      try {
+        assert.equal(await verifyLargeUpload(request), expected);
+      } catch (error) {
+        uploadError = error;
+        throw error;
+      }
+      uploaded++;
+      return json({ id: 'uploaded-' + uploaded });
+    },
+  });
+  try {
+    const description = await client.tool<{
+      runtime: { mediaResult: string; maxDownloadBytes: number };
+      declarations: string;
+    }>('describe', { path: 'drive/v3/files.get' });
+    assert.equal(description.runtime.mediaResult, 'artifact-reference');
+    assert.match(description.declarations, /GoogleMediaArtifact/);
+    for (const id of ['known', 'unknown']) {
+      const receipt = await client.tool<
+        ExecutionReceipt<{
+          file: { uri: string; sha256: string; size: number };
+          copy: { id: string };
+        }> & { artifacts: { outcomes: { outcome: string }[]; references: unknown[] } }
+      >('execute', {
+        accessToken: token,
+        inputs: { id },
+        code: `
+          const drive=google.drive({version:'v3'});
+          const {data:file}=await drive.files.get({fileId:inputs.id,alt:'media'});
+          const {data:copy}=await drive.files.create({requestBody:{name:'streamed-copy.bin'},media:{mimeType:file.mimeType,body:{artifact:file.uri}}});
+          return {file,copy};`,
+      });
+      assert.ifError(uploadError);
+      assert.equal(receipt.status, 'completed', JSON.stringify(receipt));
+      assert.equal(receipt.result.file.size, largeSize);
+      assert.equal(receipt.result.file.sha256, expected);
+      assert.deepEqual(
+        receipt.artifacts.outcomes.map((item) => item.outcome),
+        ['stored', 'read'],
+      );
+      assert.equal(receipt.artifacts.references.length, 1);
+      assert.ok(JSON.stringify(receipt).length < 6000, 'bridge/MCP receipt contains metadata only');
+      const resource = await client.resource(receipt.result.file.uri);
+      assert.equal(JSON.parse((resource.contents[0] as { text: string }).text).sha256, expected);
+      const cleanup = await client.tool<ExecutionReceipt>('execute', {
+        accessToken: token,
+        inputs: { uri: receipt.result.file.uri },
+        code: 'await artifacts.delete(inputs.uri); return true;',
+      });
+      assert.equal(cleanup.status, 'completed', JSON.stringify(cleanup));
+      assert.equal(
+        (await client.artifactBucket!.list({ prefix: 'artifacts/v2/' })).objects.length,
+        0,
+      );
+    }
+    assert.equal(uploaded, 2);
+  } finally {
+    await client.close();
+  }
+});
+
+test('interrupted stored media cleans partial R2 writes and never replays uncertain uploads', async () => {
+  let uploads = 0;
+  const client = await openBuiltWorker({
+    artifacts: true,
+    outbound: async (request) => {
+      const url = new URL(request.url);
+      if (url.pathname.includes('/discovery/')) return json(docs.drive);
+      if (request.method === 'GET')
+        return new Response(
+          generatedMedia(
+            largeSize,
+            url.pathname.endsWith('/broken') ? 6 * 1024 * 1024 : Infinity,
+            true,
+          ),
+          {
+            headers: {
+              'content-type': 'application/octet-stream',
+            },
+          },
+        );
+      uploads++;
+      await streamHash(request.body!);
+      throw new TypeError('Upload response lost');
+    },
+  });
+  try {
+    // Miniflare's RPC proxy uses Node Headers in its declarations; R2 wire API is identical.
+    const adapter = createR2Storage(client.artifactBucket! as unknown as R2Bucket);
+    await assert.rejects(
+      adapter.write('artifacts/v2/source-error', generatedMedia(largeSize, 6 * 1024 * 1024)),
+      /Interrupted source/,
+    );
+    assert.equal(
+      (await client.artifactBucket!.list({ prefix: 'artifacts/v2/' })).objects.length,
+      0,
+    );
+    const failed = await client.tool<
+      ExecutionReceipt & {
+        artifacts: { outcomes: { outcome: string; cleanup?: string }[]; references: unknown[] };
+      }
+    >('execute', {
+      accessToken: token,
+      code: "return (await google.drive({version:'v3'}).files.get({fileId:'broken',alt:'media'})).data;",
+    });
+    assert.equal(failed.status, 'error');
+    assert.equal(failed.outcomes[0].outcome, 'acknowledged');
+    assert.equal(failed.artifacts.outcomes[0].outcome, 'unknown');
+    assert.equal(failed.artifacts.references.length, 0);
+    assert.equal(
+      (await client.artifactBucket!.list({ prefix: 'artifacts/v2/' })).objects.length,
+      0,
+    );
+    const interrupted = await client.tool<ExecutionReceipt<{ uri: string }>>('execute', {
+      accessToken: token,
+      code: `
+      const drive=google.drive({version:'v3'});
+      const {data:file}=await drive.files.get({fileId:'source',alt:'media'});
+      try { await drive.files.create({requestBody:{name:'streamed-copy.bin'},media:{mimeType:file.mimeType,body:{artifact:file.uri}}}); } catch {}
+      try { await drive.files.create({requestBody:{name:'must-not-run'}}); } catch {}
+      return {uri:file.uri};`,
+    });
+    assert.equal(interrupted.hasUnknownOutcome, true);
+    assert.deepEqual(
+      interrupted.outcomes.map((item) => item.outcome),
+      ['acknowledged', 'unknown', 'not_dispatched'],
+    );
+    assert.equal(uploads, 1);
+    const cleanup = await client.tool<ExecutionReceipt>('execute', {
+      accessToken: token,
+      inputs: interrupted.result,
+      code: 'return artifacts.delete(inputs.uri);',
+    });
+    assert.equal(cleanup.status, 'completed');
+    assert.equal(
+      (await client.artifactBucket!.list({ prefix: 'artifacts/v2/' })).objects.length,
+      0,
+    );
   } finally {
     await client.close();
   }

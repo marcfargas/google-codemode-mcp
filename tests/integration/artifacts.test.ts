@@ -82,7 +82,7 @@ test('actual workerd artifacts survive new requests and Worker instances with ve
     const templates = await client.resourceTemplates();
     assert.equal(
       templates.resourceTemplates.filter((item) => item.uriTemplate.startsWith('artifact:')).length,
-      2,
+      3,
     );
     const listed = await client.resources();
     assert.equal(

@@ -150,6 +150,14 @@ unreconciled writes before folder deletion; retained folders or unknown effects
 fail cleanup. Live controls cover native export; the paid reverse case uses a blob.
 Neither establishes durable artifacts or hosted media qualification.
 
+R2-enabled native media uses v2 streamed references; without R2 it retains the
+bounded inline envelope. `just check` includes a 33 MiB known/unknown-length
+Google/R2/Google synthetic round trip, exact multipart/hash verification, source
+failure and partial-write cleanup, lost-response mutation fencing, trusted-owner
+and expiry checks. These are inference-free transport controls, not live Google,
+hosted capacity or new paid-agent acceptance. V2 metadata resources have no
+executor download URL or chunk endpoint; client URL signing remains gateway work.
+
 Optional artifact storage uses `ARTIFACTS_BUCKET` only during deploy/preparation;
 absence leaves storage disabled. `just check` includes actual workerd + private
 Miniflare R2 proof under `tests/integration/artifacts.test.ts`, with cross-request

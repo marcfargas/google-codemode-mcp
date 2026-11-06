@@ -5,6 +5,8 @@ import { validateSnippets } from './snippets.ts';
 import { handleMcp } from './protocol.ts';
 import definitions from '../snippets.config.ts';
 import { createArtifactStore, ARTIFACTS_CAPABILITIES } from './artifacts.ts';
+import { createR2Storage } from './storage.ts';
+import { createStreamArtifactStore, STREAM_ARTIFACT_CAPABILITIES } from './stream-artifacts.ts';
 
 const snippets = validateSnippets(definitions);
 const catalog = new DiscoveryCatalog();
@@ -18,12 +20,22 @@ export default {
       downloadOrigin: env.ARTIFACT_DOWNLOAD_ORIGIN,
     });
     const pathname = new URL(request.url).pathname;
+    const streamArtifactStore = env.ARTIFACTS
+      ? createStreamArtifactStore(createR2Storage(env.ARTIFACTS))
+      : undefined;
     if (pathname.startsWith('/mcp/artifacts/')) return artifactStore.download(request);
     if (pathname !== '/mcp') return new Response('Not found', { status: 404 });
-    const executionOptions = { artifactStore, waitUntil: ctx?.waitUntil.bind(ctx) };
+    const executionOptions = {
+      artifactStore,
+      streamArtifactStore,
+      waitUntil: ctx?.waitUntil.bind(ctx),
+    };
     return handleMcp(request, {
       snippets,
-      readResource: artifactStore.readResource,
+      readResource: (uri) =>
+        uri.startsWith('artifact://google-codemode-mcp/v2/') && streamArtifactStore
+          ? streamArtifactStore.readResource(uri)
+          : artifactStore.readResource(uri),
       describe: async (args: { path?: string }) => {
         if (args.path === 'snippets') return { snippets };
         if (args.path === 'pagination') return PAGINATION_CAPABILITIES;
@@ -32,6 +44,7 @@ export default {
             ...ARTIFACTS_CAPABILITIES,
             enabled: !!env.ARTIFACTS,
             downloads: { enabled: artifactStore.downloadsEnabled },
+            streaming: { ...STREAM_ARTIFACT_CAPABILITIES, enabled: !!streamArtifactStore },
           };
         if (!args.path)
           return {
@@ -43,7 +56,7 @@ export default {
               skill: 'skill://google-codemode-mcp/google-workspace/references/artifacts.md',
             },
           };
-        return catalog.describe(args.path);
+        return catalog.describe(args.path, { streamMedia: !!streamArtifactStore });
       },
       execute: (args: ExecutionArguments) =>
         executeProgram({

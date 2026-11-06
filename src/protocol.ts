@@ -78,12 +78,14 @@ are requirements, not grants; available scopes are unknown for an opaque token.
 JSON requests and responses include Gmail base64url message bodies and attachments.
 For Drive, use \`google.drive({version: 'v3'})\` and describe its native methods.
 Supported media methods declare \`runtime.mediaDownload\`, \`mediaSelection\`, and
-\`maxDownloadBytes\`: \`files.get\` accepts \`alt: 'media'\`, while \`files.export\` returns
-bytes directly. Media \`.data\` is \`{encoding: 'base64', data, size, mimeType, sha256}\`;
-\`data\` contains standard base64. Decode it in the host when saving a file and verify
-its byte length/hash. Downloads are limited to 131072 raw bytes. Bounded Drive files.create multipart
-uploads accept native media:{mimeType,body:<byte envelope>}; other upload modes,
-transport overrides remain unavailable. Before composing
+\`maxDownloadBytes\`. With R2 enabled, native Drive media downloads return stored
+v2 references; \`runtime.mediaResult\` is \`artifact-reference\`. Upload them through
+\`media:{mimeType:file.mimeType,body:{artifact:file.uri}}\` and change names/parents
+with native metadata, keeping bytes outside Code Mode. Without R2, media \`.data\`
+is \`{encoding:'base64',data,size,mimeType,sha256}\` with a 131072-byte cap.
+Small inline uploads remain supported. Inspect \`describe({path:'artifacts'})\`
+for streaming limits and expiry; large Gmail/MIME and resumable paths are pending.
+Other upload modes and transport overrides remain unavailable. Before composing
 Gmail/Drive transfers, read [media transfers](skill://google-codemode-mcp/google-workspace/references/media-transfers.md)
 through MCP Resources for encoding, composeMime, scopes, examples and limits. Google acknowledgement of a send does not establish recipient delivery.
 
@@ -226,6 +228,11 @@ export async function handleMcp(request: Request, app: ProtocolApp): Promise<Res
       if (app.readResource) {
         for (const [name, template, mimeType] of [
           ['artifact-manifest', 'artifact://google-codemode-mcp/v1/{secret}', 'application/json'],
+          [
+            'stream-artifact-manifest',
+            'artifact://google-codemode-mcp/v2/{secret}',
+            'application/json',
+          ],
           [
             'artifact-chunk',
             'artifact://google-codemode-mcp/v1/{secret}/chunk/{offset}/{length}',

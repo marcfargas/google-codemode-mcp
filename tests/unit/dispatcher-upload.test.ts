@@ -274,3 +274,13 @@ test('all native parameters are size-bounded and non-JSON parameters never dispa
   assert.equal(calls, 0);
   assert.ok(dispatcher.outcomes.every((outcome) => outcome.outcome === 'not_dispatched'));
 });
+
+test('media descriptions expose reference inputs and results only when storage is enabled', async () => {
+  const discovery = catalog();
+  const inline = await discovery.describe('drive/v3/files.create');
+  const streamed = await discovery.describe('drive/v3/files.create', { streamMedia: true });
+  assert.equal(JSON.stringify(inline.parameters).includes('"artifact"'), false);
+  assert.equal((inline.declarations as string).includes('"artifact"'), false);
+  assert.equal(JSON.stringify(streamed.parameters).includes('"artifact"'), true);
+  assert.match(streamed.declarations as string, /"artifact"/);
+});

@@ -18,7 +18,11 @@ import {
   MAX_EXECUTION_UPLOAD_BYTES,
   MAX_UPLOAD_PARAMS_BYTES,
   jsonBytes,
+  artifactUpload,
+  streamUploadWire,
 } from './media.ts';
+import { MAX_STREAM_BYTES } from './storage.ts';
+import type { StreamArtifactExecution } from './stream-artifacts.ts';
 
 export type Outcome = 'not_dispatched' | 'rejected' | 'acknowledged' | 'unknown';
 export interface CallOutcome {
@@ -64,6 +68,7 @@ interface DispatcherOptions {
   requestId: string;
   limits?: { maxCalls?: number; maxResponseBytes?: number; callTimeoutMs?: number };
   transport?: typeof fetch;
+  streamArtifacts?: StreamArtifactExecution;
 }
 
 export interface DispatchPolicy {
@@ -274,30 +279,46 @@ export function createDispatcher(options: DispatcherOptions) {
       supportsDownload(method) &&
       ((params as Record<string, unknown>).alt === 'media' || !method.response);
     const responseLimit = media
-      ? Math.min(limits.maxResponseBytes, MAX_DOWNLOAD_BYTES)
+      ? options.streamArtifacts
+        ? MAX_STREAM_BYTES
+        : Math.min(limits.maxResponseBytes, MAX_DOWNLOAD_BYTES)
       : limits.maxResponseBytes;
     const uploading = Object.hasOwn(params as object, 'media');
     let nativeParams = params;
     let expectedUpload: { metadataJson: string; mimeType: string; bytes: Uint8Array } | undefined;
+    let streamedUpload: ReturnType<typeof artifactUpload> | undefined;
     if (uploading) {
       try {
         if (!supportsUpload(method)) throw new Error('Unsupported media upload');
-        const prepared = await prepareUpload(params as Record<string, unknown>);
-        if (uploadedBytes + prepared.bytes.length > MAX_EXECUTION_UPLOAD_BYTES)
-          throw new Error('Execution upload limit exceeded');
-        // Failed/unknown attempts still consume the conservative execution budget.
-        uploadedBytes += prepared.bytes.length;
-        expectedUpload = {
-          ...prepared,
-          metadataJson: JSON.stringify((params as Record<string, unknown>).requestBody),
-        };
-        nativeParams = {
-          ...(params as Record<string, unknown>),
-          media: {
-            mimeType: prepared.mimeType,
-            body: Readable.from([prepared.bytes], { objectMode: false }),
-          },
-        };
+        const body = ((params as Record<string, unknown>).media as { body?: object }).body;
+        if (body && Object.hasOwn(body, 'artifact')) {
+          if (!options.streamArtifacts) throw new Error('Storage unavailable');
+          streamedUpload = artifactUpload(params as Record<string, unknown>);
+          nativeParams = {
+            ...(params as Record<string, unknown>),
+            media: {
+              mimeType: streamedUpload.mimeType,
+              body: Readable.from([], { objectMode: false }),
+            },
+          };
+        } else {
+          const prepared = await prepareUpload(params as Record<string, unknown>);
+          if (uploadedBytes + prepared.bytes.length > MAX_EXECUTION_UPLOAD_BYTES)
+            throw new Error('Execution upload limit exceeded');
+          // Failed/unknown attempts still consume the conservative execution budget.
+          uploadedBytes += prepared.bytes.length;
+          expectedUpload = {
+            ...prepared,
+            metadataJson: JSON.stringify((params as Record<string, unknown>).requestBody),
+          };
+          nativeParams = {
+            ...(params as Record<string, unknown>),
+            media: {
+              mimeType: prepared.mimeType,
+              body: Readable.from([prepared.bytes], { objectMode: false }),
+            },
+          };
+        }
       } catch {
         return failure(record, 'INVALID_MEDIA_UPLOAD', 'Invalid or oversized media upload');
       }
@@ -313,7 +334,7 @@ export function createDispatcher(options: DispatcherOptions) {
     try {
       const endpoint = endpointFactory(document)({
         retry: false,
-        ...(media ? { responseType: 'arraybuffer' } : {}),
+        ...(media ? { responseType: options.streamArtifacts ? 'stream' : 'arraybuffer' } : {}),
         headers: { Authorization: `Bearer ${accessToken}` },
         fetchImplementation: async (url: string | URL | Request, init?: RequestInit) => {
           const target = new URL(
@@ -327,14 +348,36 @@ export function createDispatcher(options: DispatcherOptions) {
             throw new Error('Dispatch gate closed');
           const headers = new Headers(init?.headers);
           headers.set('Authorization', `Bearer ${accessToken}`);
+          if (media) headers.set('Accept-Encoding', 'identity');
           // Workerd fetch must receive bytes, not the native SDK's Node stream.
-          const uploadBody = expectedUpload
+          let uploadBody: BodyInit | undefined = expectedUpload
             ? normalizeUploadWire(
                 await uploadWireBody(init?.body),
                 headers.get('content-type'),
                 expectedUpload,
               )
             : undefined;
+          let uploadCompletion: Promise<void> | undefined;
+          if (streamedUpload) {
+            const stored = await options.streamArtifacts!.open(streamedUpload.uri, {
+              signal: controller.signal,
+            });
+            if (stored.reference.mimeType !== streamedUpload.mimeType) {
+              await stored.body.cancel();
+              throw new Error('Media type differs from stored content');
+            }
+            // Keep the SDK's URL/parameter construction; replace its Node body.
+            (init?.body as unknown as { destroy?: () => void })?.destroy?.();
+            const wire = streamUploadWire(headers.get('content-type'), {
+              ...streamedUpload,
+              body: stored.body,
+              size: stored.reference.size,
+              signal: controller.signal,
+            });
+            headers.set('content-length', String(wire.size));
+            uploadBody = wire.body;
+            uploadCompletion = wire.completion;
+          }
           if (closed || timedOut || (method.mutation && unknown))
             throw new Error('Dispatch gate closed');
           const id = (params as Record<string, unknown>).id;
@@ -379,6 +422,7 @@ export function createDispatcher(options: DispatcherOptions) {
             throw new Error('Google redirects are not followed');
           }
           if (response.status >= 200 && response.status < 300) record.outcome = 'acknowledged';
+          if (response.ok && uploadCompletion) await uploadCompletion;
           if (!response.body) return response;
           const reader = response.body.getReader();
           let received = 0;
@@ -391,7 +435,7 @@ export function createDispatcher(options: DispatcherOptions) {
                   return;
                 }
                 received += value.byteLength;
-                if (received > responseLimit) {
+                if (received > (response.ok ? responseLimit : limits.maxResponseBytes)) {
                   bodyLimitExceeded = true;
                   await reader.cancel('Google response exceeds byte limit');
                   stream.error(new Error('Google response exceeds byte limit'));
@@ -428,78 +472,116 @@ export function createDispatcher(options: DispatcherOptions) {
           reject(new Error('Google call timed out'));
         }, limits.callTimeoutMs);
       });
-      const response = await Promise.race([
-        target(nativeParams) as Promise<{
-          data?: unknown;
-          status: number;
-          headers: HeadersInit;
-        }>,
+      return await Promise.race([
+        (async (): Promise<CallResult> => {
+          const response = await (target(nativeParams) as Promise<{
+            data?: unknown;
+            status: number;
+            headers: HeadersInit;
+          }>);
+          if (interrupted.has(record)) {
+            return failure(
+              record,
+              'DISPATCH_CLOSED',
+              'Google call interrupted; inspect its recorded outcome',
+            );
+          }
+          record.httpStatus = response.status;
+          record.outcome = 'acknowledged';
+          if (media) {
+            if (options.streamArtifacts) {
+              if (!(response.data instanceof ReadableStream))
+                return failure(record, 'INVALID_MEDIA', 'Google media response was not a stream');
+              const headers = new Headers(response.headers);
+              const mimeType = headers.get('content-type') ?? 'application/octet-stream';
+              const rawSize = headers.get('content-length');
+              const size =
+                rawSize !== null && /^(0|[1-9][0-9]*)$/.test(rawSize) ? Number(rawSize) : undefined;
+              const reference = await options.streamArtifacts.put(response.data, {
+                mimeType,
+                size,
+                signal: controller.signal,
+              });
+              return {
+                ok: true,
+                value: {
+                  data: reference,
+                  status: response.status,
+                  headers: safeHeaders(response.headers),
+                },
+              };
+            }
+            if (!(response.data instanceof ArrayBuffer))
+              return failure(record, 'INVALID_MEDIA', 'Google media response was not bytes');
+            const bytes = new Uint8Array(response.data);
+            if (bytes.length > responseLimit)
+              return failure(record, 'RESPONSE_LIMIT', 'Google response exceeds execution limit');
+            const tokenBytes = new TextEncoder().encode(accessToken);
+            if (tokenBytes.length && containsBytes(bytes, tokenBytes))
+              return failure(
+                record,
+                'CREDENTIAL_ECHO',
+                'Google media response contained credential bytes',
+              );
+            const responseHeaders = new Headers(response.headers);
+            const mimeType = responseHeaders.get('content-type') ?? 'application/octet-stream';
+            if (
+              mimeType.length > 256 ||
+              /[\u0000-\u001f\u007f]/.test(mimeType) ||
+              (accessToken && mimeType.includes(accessToken))
+            )
+              return failure(record, 'INVALID_MEDIA', 'Google media metadata was invalid');
+            const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+            const sha256 = Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join(
+              '',
+            );
+            let binary = '';
+            for (const byte of bytes) binary += String.fromCharCode(byte);
+            return {
+              ok: true,
+              value: {
+                data: {
+                  encoding: 'base64',
+                  data: btoa(binary),
+                  size: bytes.length,
+                  mimeType,
+                  sha256,
+                },
+                status: response.status,
+                headers: safeHeaders(response.headers),
+              },
+            };
+          }
+          const serialized = JSON.stringify(
+            response.status === 204 ? null : (response.data ?? null),
+          );
+          if (['drive/v3/files.create', 'gmail/v1/users.drafts.create'].includes(method.path)) {
+            const created = response.data as { id?: unknown } | null;
+            if (created && safeAnnotation(created.id, 256) && created.id)
+              record.resourceId = created.id;
+          }
+          if (new TextEncoder().encode(serialized).length > limits.maxResponseBytes) {
+            return failure(record, 'RESPONSE_LIMIT', 'Google response exceeds execution limit');
+          }
+          const escapedToken = JSON.stringify(accessToken).slice(1, -1);
+          const data = accessToken
+            ? JSON.parse(serialized.split(escapedToken).join('[REDACTED]'))
+            : JSON.parse(serialized);
+          if (['gmail/v1/users.messages.list', 'drive/v3/files.list'].includes(method.path)) {
+            const observed = pagination(
+              params,
+              response.data,
+              method.path === 'drive/v3/files.list',
+            );
+            if (observed) record.pagination = observed;
+          }
+          return {
+            ok: true,
+            value: { data, status: response.status, headers: safeHeaders(response.headers) },
+          };
+        })(),
         deadline,
       ]);
-      if (interrupted.has(record)) {
-        return failure(
-          record,
-          'DISPATCH_CLOSED',
-          'Google call interrupted; inspect its recorded outcome',
-        );
-      }
-      record.httpStatus = response.status;
-      record.outcome = 'acknowledged';
-      if (media) {
-        if (!(response.data instanceof ArrayBuffer))
-          return failure(record, 'INVALID_MEDIA', 'Google media response was not bytes');
-        const bytes = new Uint8Array(response.data);
-        if (bytes.length > responseLimit)
-          return failure(record, 'RESPONSE_LIMIT', 'Google response exceeds execution limit');
-        const tokenBytes = new TextEncoder().encode(accessToken);
-        if (tokenBytes.length && containsBytes(bytes, tokenBytes))
-          return failure(
-            record,
-            'CREDENTIAL_ECHO',
-            'Google media response contained credential bytes',
-          );
-        const responseHeaders = new Headers(response.headers);
-        const mimeType = responseHeaders.get('content-type') ?? 'application/octet-stream';
-        if (
-          mimeType.length > 256 ||
-          /[\u0000-\u001f\u007f]/.test(mimeType) ||
-          (accessToken && mimeType.includes(accessToken))
-        )
-          return failure(record, 'INVALID_MEDIA', 'Google media metadata was invalid');
-        const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
-        const sha256 = Array.from(digest, (byte) => byte.toString(16).padStart(2, '0')).join('');
-        let binary = '';
-        for (const byte of bytes) binary += String.fromCharCode(byte);
-        return {
-          ok: true,
-          value: {
-            data: { encoding: 'base64', data: btoa(binary), size: bytes.length, mimeType, sha256 },
-            status: response.status,
-            headers: safeHeaders(response.headers),
-          },
-        };
-      }
-      const serialized = JSON.stringify(response.status === 204 ? null : (response.data ?? null));
-      if (['drive/v3/files.create', 'gmail/v1/users.drafts.create'].includes(method.path)) {
-        const created = response.data as { id?: unknown } | null;
-        if (created && safeAnnotation(created.id, 256) && created.id)
-          record.resourceId = created.id;
-      }
-      if (new TextEncoder().encode(serialized).length > limits.maxResponseBytes) {
-        return failure(record, 'RESPONSE_LIMIT', 'Google response exceeds execution limit');
-      }
-      const escapedToken = JSON.stringify(accessToken).slice(1, -1);
-      const data = accessToken
-        ? JSON.parse(serialized.split(escapedToken).join('[REDACTED]'))
-        : JSON.parse(serialized);
-      if (['gmail/v1/users.messages.list', 'drive/v3/files.list'].includes(method.path)) {
-        const observed = pagination(params, response.data, method.path === 'drive/v3/files.list');
-        if (observed) record.pagination = observed;
-      }
-      return {
-        ok: true,
-        value: { data, status: response.status, headers: safeHeaders(response.headers) },
-      };
     } catch (error) {
       const native = error as {
         response?: { status?: number; data?: { error?: { errors?: { reason?: string }[] } } };
@@ -543,6 +625,7 @@ export function createDispatcher(options: DispatcherOptions) {
         reasons,
       );
     } finally {
+      controller.abort();
       active.delete(record);
       if (timer !== undefined) clearTimeout(timer);
     }

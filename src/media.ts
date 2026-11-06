@@ -16,17 +16,38 @@ export const UPLOAD_SCHEMA: DiscoverySchema = {
     body: {
       type: 'object',
       required: true,
-      additionalProperties: false,
-      properties: {
-        encoding: { type: 'string', enum: ['base64', 'base64url'], required: true },
-        data: { type: 'string', required: true },
-        size: { type: 'integer', minimum: 0, maximum: MAX_UPLOAD_BYTES },
-        sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-        mimeType: { type: 'string' },
-      },
+      anyOf: [
+        {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            encoding: { type: 'string', enum: ['base64', 'base64url'], required: true },
+            data: { type: 'string', required: true },
+            size: { type: 'integer', minimum: 0, maximum: MAX_UPLOAD_BYTES },
+            sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+            mimeType: { type: 'string' },
+          },
+        },
+        {
+          type: 'object',
+          additionalProperties: false,
+          properties: { artifact: { type: 'string', required: true } },
+        },
+      ],
     },
   },
 };
+
+export function uploadSchema(artifacts: boolean): DiscoverySchema {
+  if (artifacts) return UPLOAD_SCHEMA;
+  return {
+    ...UPLOAD_SCHEMA,
+    properties: {
+      ...UPLOAD_SCHEMA.properties,
+      body: { ...(UPLOAD_SCHEMA.properties!.body.anyOf as DiscoverySchema[])[0], required: true },
+    },
+  };
+}
 
 export function supportsUpload(method: {
   path?: string;
@@ -74,6 +95,78 @@ export function validMimeType(value: unknown): value is string {
     !/[^\x20-\x7e]/.test(value) &&
     mimePattern.test(value)
   );
+}
+
+/** References are resolved only by the trusted storage session, never as URLs. */
+export function artifactUpload(params: Record<string, unknown>) {
+  if (jsonBytes(params) > MAX_UPLOAD_PARAMS_BYTES) invalid();
+  const metadata = object(params.requestBody);
+  if (jsonBytes(metadata) > MAX_UPLOAD_METADATA_BYTES) invalid();
+  const media = object(params.media);
+  exactKeys(media, ['mimeType', 'body']);
+  if (
+    !validMimeType(media.mimeType) ||
+    media.mimeType.toLowerCase().startsWith('application/vnd.google-apps.') ||
+    (metadata.mimeType !== undefined && metadata.mimeType !== media.mimeType)
+  )
+    invalid();
+  const body = object(media.body);
+  exactKeys(body, ['artifact']);
+  if (typeof body.artifact !== 'string') invalid();
+  return { uri: body.artifact, mimeType: media.mimeType, metadataJson: JSON.stringify(metadata) };
+}
+
+/** Build Web multipart from trusted metadata and storage; no SDK buffering. */
+export function streamUploadWire(
+  contentType: string | null,
+  upload: {
+    metadataJson: string;
+    mimeType: string;
+    body: ReadableStream<Uint8Array>;
+    size: number;
+    signal?: AbortSignal;
+  },
+) {
+  const boundary = /^multipart\/related; boundary=([A-Za-z0-9-]{1,70})$/.exec(
+    contentType ?? '',
+  )?.[1];
+  if (!boundary) invalid();
+  const encoder = new TextEncoder();
+  const prefix = encoder.encode(
+    `--${boundary}\r\ncontent-type: application/json\r\n\r\n${upload.metadataJson}\r\n` +
+      `--${boundary}\r\ncontent-type: ${upload.mimeType}\r\n\r\n`,
+  );
+  const footer = encoder.encode(`\r\n--${boundary}--`);
+  const reader = upload.body.getReader();
+  let first = true;
+  const source = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        if (first) {
+          first = false;
+          controller.enqueue(prefix);
+          return;
+        }
+        const { done, value } = await reader.read();
+        if (!done) {
+          controller.enqueue(value);
+          return;
+        }
+        controller.enqueue(footer);
+        controller.close();
+        reader.releaseLock();
+      } catch (error) {
+        controller.error(error);
+      }
+    },
+    cancel: (reason) => reader.cancel(reason),
+  });
+  const size = prefix.length + upload.size + footer.length;
+  const fixed = new FixedLengthStream(size);
+  const completion = source.pipeTo(fixed.writable, { signal: upload.signal });
+  // Fetch can reject before it consumes the body; observe rejection immediately.
+  void completion.catch(() => undefined);
+  return { size, body: fixed.readable, completion };
 }
 
 /** Validate JSON input completely before constructing trusted SDK streams. */

@@ -1,5 +1,5 @@
 import type { DiscoverySchema } from './discovery.ts';
-import { supportsUpload, UPLOAD_SCHEMA } from './media.ts';
+import { supportsUpload, uploadSchema } from './media.ts';
 
 interface ParameterMethod {
   path?: string;
@@ -33,7 +33,7 @@ export function parameterExclusion(name: string): ExcludedParameter['reason'] | 
   return undefined;
 }
 
-export function callableParameters(method: ParameterMethod) {
+export function callableParameters(method: ParameterMethod, artifactUploads = true) {
   const parameters: Record<string, DiscoverySchema> = Object.create(null);
   const excludedParameters: ExcludedParameter[] = [];
   for (const [name, schema] of Object.entries(method.parameters ?? {})) {
@@ -51,7 +51,7 @@ export function callableParameters(method: ParameterMethod) {
     if (reason) excludedParameters.push({ name, reason, required: schema.required === true });
     else parameters[name] = schema;
   }
-  if (supportsUpload(method)) parameters.media = UPLOAD_SCHEMA;
+  if (supportsUpload(method)) parameters.media = uploadSchema(artifactUploads);
   return {
     parameters,
     excludedParameters,

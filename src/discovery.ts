@@ -13,6 +13,7 @@ import {
 import { SERVICES, servicePath } from './services.ts';
 import type { ServicePath } from './services.ts';
 import type { ExcludedParameter } from './parameters.ts';
+import { MAX_STREAM_BYTES } from './storage.ts';
 
 export interface DiscoverySchema {
   type?: string;
@@ -81,10 +82,25 @@ export const MEDIA_SCHEMA = {
     sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
   },
 };
+const MEDIA_ARTIFACT_SCHEMA = {
+  type: 'object',
+  required: ['uri', 'kind', 'size', 'mimeType', 'sha256', 'complete', 'createdAt', 'expiresAt'],
+  properties: {
+    uri: { type: 'string', pattern: '^artifact://google-codemode-mcp/v2/[A-Za-z0-9_-]{43}$' },
+    kind: { const: 'bytes' },
+    size: { type: 'integer', maximum: MAX_STREAM_BYTES },
+    mimeType: { type: 'string' },
+    sha256: { type: 'string', pattern: '^[a-f0-9]{64}$' },
+    complete: { const: true },
+    createdAt: { type: 'integer' },
+    expiresAt: { type: 'integer' },
+  },
+};
 
 /** Convert Google's Discovery schema dialect without closing extensible bodies. */
 export function jsonSchema(source: DiscoverySchema): Schema {
   const target: Schema = {};
+  if (Array.isArray(source.anyOf)) target.anyOf = source.anyOf.map(jsonSchema);
   if (source.$ref) target.$ref = `#/definitions/${source.$ref}`;
   if (source.type) target.type = source.type as Schema['type'];
   if (source.description) target.description = source.description;
@@ -242,7 +258,10 @@ export class DiscoveryCatalog {
     return method;
   }
 
-  async describe(path = ''): Promise<Record<string, unknown>> {
+  async describe(
+    path = '',
+    options: { streamMedia?: boolean } = {},
+  ): Promise<Record<string, unknown>> {
     const navigationError = () =>
       new Error('Unknown discovery path. Call describe({}) and follow its returned paths.');
     if (!path)
@@ -281,9 +300,12 @@ export class DiscoveryCatalog {
       const separator = localPath.lastIndexOf('.');
       const described = {
         ...method,
+        parameters: callableParameters(method, !!options.streamMedia).parameters,
         revision: document.revision,
         source: service.discoveryUrl,
-        declarations: method.supported ? methodDeclaration(document, method) : undefined,
+        declarations: method.supported
+          ? methodDeclaration(document, method, options.streamMedia)
+          : undefined,
         skill: 'skill://google-codemode-mcp/google-workspace/SKILL.md',
         documentation: `${service.documentationRoot}/${separator < 0 ? localPath : localPath.slice(0, separator) + '/' + localPath.slice(separator + 1)}`,
         signature: method.supported
@@ -308,17 +330,24 @@ export class DiscoveryCatalog {
                 maxUploadMetadataBytes: MAX_UPLOAD_METADATA_BYTES,
                 maxUploadParamsBytes: MAX_UPLOAD_PARAMS_BYTES,
                 maxUploadWireBytes: MAX_UPLOAD_WIRE_BYTES,
+                artifactUpload: !!options.streamMedia,
+                ...(options.streamMedia ? { maxArtifactUploadBytes: MAX_STREAM_BYTES } : {}),
                 skill: MEDIA_SKILL_URI,
               }
             : {}),
           ...(download
             ? {
-                maxDownloadBytes: MAX_DOWNLOAD_BYTES,
+                maxDownloadBytes: options.streamMedia ? MAX_STREAM_BYTES : MAX_DOWNLOAD_BYTES,
                 mediaSelection: method.response ? "alt: 'media'" : 'always',
+                ...(options.streamMedia ? { mediaResult: 'artifact-reference' } : {}),
               }
             : {}),
         },
-        mediaResponseSchema: download ? MEDIA_SCHEMA : undefined,
+        mediaResponseSchema: download
+          ? options.streamMedia
+            ? MEDIA_ARTIFACT_SCHEMA
+            : MEDIA_SCHEMA
+          : undefined,
         requestSchema: method.request ? this.schemaFor(document, method.request) : undefined,
         responseSchema: method.response ? this.schemaFor(document, method.response) : undefined,
       };
