@@ -23,10 +23,9 @@ test(
       !(await realpath(executable)).includes('cpa'),
       'Native CLI must not resolve to a proxy wrapper',
     );
-    assert.equal(
-      spawnSync(executable, ['--version'], { encoding: 'utf8' }).stdout.trim(),
-      '2.1.318 (Claude Code)',
-    );
+    const version = spawnSync(executable, ['--version'], { encoding: 'utf8' });
+    assert.equal(version.status, 0, version.stderr || version.error?.message);
+    assert.equal(version.stdout.trim(), '2.1.318 (Claude Code)');
     const root = await mkdtemp(join(tmpdir(), 'eval-native-write-'));
     const workspace = join(root, 'workspace');
     const home = join(root, 'home');

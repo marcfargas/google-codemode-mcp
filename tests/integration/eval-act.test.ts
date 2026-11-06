@@ -15,7 +15,16 @@ test('eval launcher forwards only explicit ACT_NODE_OPTIONS and retains it witho
     await mkdir(bin);
     await writeFile(
       join(bin, 'act'),
-      '#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify(process.argv.slice(2)));\n',
+      `#!/usr/bin/env node
+const fs=require('node:fs'),path=require('node:path');
+const args=process.argv.slice(2);
+const event=JSON.parse(fs.readFileSync(args[args.indexOf('--eventpath')+1],'utf8'));
+if(!process.env.EVAL_TEST_SKIP_REPORT){
+  const directory=path.join(process.env.output,'workflow-report');fs.mkdirSync(directory);
+  fs.writeFileSync(path.join(directory,'summary.json'),'{}');
+}
+process.stdout.write(JSON.stringify({args,event}));
+`,
       { mode: 0o700 },
     );
     await writeFile(
@@ -23,10 +32,11 @@ test('eval launcher forwards only explicit ACT_NODE_OPTIONS and retains it witho
       '#!/usr/bin/env node\nprocess.stdout.write("locked\\n");process.stdin.resume();\n',
       { mode: 0o700 },
     );
-    for (const [index, options] of [
-      undefined,
-      '',
-      '--stack-trace-limit=37 --no-deprecation',
+    for (const [index, { options, skipReport }] of [
+      { options: undefined, skipReport: false },
+      { options: '', skipReport: false },
+      { options: '--stack-trace-limit=37 --no-deprecation', skipReport: false },
+      { options: undefined, skipReport: true },
     ].entries()) {
       const output = join(root, String(index));
       const env: NodeJS.ProcessEnv = {
@@ -43,12 +53,37 @@ test('eval launcher forwards only explicit ACT_NODE_OPTIONS and retains it witho
       delete env.ACT_NODE_OPTIONS;
       delete env.model;
       if (options !== undefined) env.ACT_NODE_OPTIONS = options;
+      if (skipReport) env.EVAL_TEST_SKIP_REPORT = 'true';
       const child = spawnSync(process.execPath, [fileURLToPath(helperUrl)], {
         env,
         encoding: 'utf8',
       });
+      if (skipReport) {
+        assert.notEqual(child.status, 0);
+        assert.match(child.stderr, /workflow produced no report/);
+        continue;
+      }
       assert.equal(child.status, 0, child.stderr);
-      const args: string[] = JSON.parse(child.stdout);
+      const {
+        args,
+        event,
+      }: {
+        args: string[];
+        event: { ref: string; inputs: Record<string, string> };
+      } = JSON.parse(child.stdout);
+      assert.equal(event.ref, 'refs/heads/main');
+      assert.deepEqual(event.inputs, {
+        backend: 'local',
+        profile: 'drive',
+        selection: 'required',
+        cases: 'all',
+        proxy_url: 'http://127.0.0.1:1',
+        output: '/eval-evidence',
+        repeats: '1',
+        preflight_only: 'true',
+        native_codex_probe: 'false',
+      });
+      assert.ok(!args.includes('--input'));
       const forwarded = args
         .flatMap((value, i) => (value === '--env' ? [args[i + 1]] : []))
         .filter((value) => value.startsWith('NODE_OPTIONS='));

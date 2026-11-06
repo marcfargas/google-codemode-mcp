@@ -53,6 +53,10 @@ larger selections. `just eval-matrix gmail ...` retains the legacy combined case
 Hosted Cloudflare and actual host/gateway acceptance remain separate from local
 runner results.
 
+The local launcher supplies a main-branch workflow event so the guarded job also
+runs from a feature checkout. Retained source receipts identify the actual checkout
+HEAD and bytes. A successful `act` exit without its workflow report is refused.
+
 Drive defines four cases: `read-file`, `list-pages`, `rename-file`, and
 `conditional-update-unsupported`. Run
 `just eval-drive PROXY_URL NEW_OUTPUT` after `just oauth --drive` and enabling
