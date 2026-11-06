@@ -545,6 +545,12 @@ task outcomes with both required models; the initial stricter discovery gate fai
 for Sonnet on attachment and pagination. A later focused hosted run passed both
 cases with Sonnet and Sol, including strict discovery and skill retrieval. See the
 [versioned results](tests/eval/README.md#independent-gmail-cases-with-grading-version-2-2026-11-04).
+The first prospectively frozen unused-case assessment also passed all four
+Sonnet/Sol cells: content-selected Gmail labelling and Drive renaming, with strict
+discovery, actual skill retrieval and clean independent readback/cleanup. See
+[assessment and usage metrics](tests/eval/README.md#first-frozen-unused-case-assessment-2026-11-06).
+This is same-author feasibility evidence; it does not establish blindness or
+reliability, and later tuning requires another unused evaluation partition.
 The separate hosted synthetic Worker passed CPU/timeout/cancellation and bridge
 checks. The protected test Worker also ran the actual product against Gmail,
 using test-account tokens directly. Gateway adaptation is deployed in its owning project, but the Code Mode
