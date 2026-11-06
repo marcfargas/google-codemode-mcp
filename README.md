@@ -233,6 +233,10 @@ without credentials; after deployment, `just hosted-verify OUTPUT` uses the
 documented `HOSTED_*` environment settings. It checks native CPU termination,
 the 15-second asynchronous timeout, late-call fencing, multiple bridge calls and
 healthy follow-ups. Local tests cover these paths except hosted CPU enforcement.
+Harness version 2 also verifies synthetic lost-response writes and subsequent
+write fencing, acknowledged effects retained after program failure, and hosted
+network/credential isolation. Its [17-request hosted qualification](tests/hosted/README.md#hosted-mutation-and-isolation-2026-11-06)
+uses no real Google writes or inference; live Google failure semantics remain separate.
 An external timeout or generic resource error cannot pass the CPU criterion.
 The qualified run observed the native `Worker exceeded CPU time limit.` exception;
 see the [hosted result and its limits](tests/hosted/README.md#qualified-hosted-run-2026-11-04).
