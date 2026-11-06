@@ -65,7 +65,7 @@ npm ci --ignore-scripts
 # Supply CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN through your environment.
 export WORKER_NAME=my-google-mcp
 export WORKER_DOMAIN=mcp.example.com  # optional
-just deploy --dry-run                # Bundle and validate; no upload
+just deploy --dry-run                # Bundle to dist/ and validate; no upload
 just deploy                          # Publish and configure the domain/route
 ```
 

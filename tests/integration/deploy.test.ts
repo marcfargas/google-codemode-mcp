@@ -56,7 +56,7 @@ process.exitCode = Number(process.env.DEPLOY_TEST_EXIT || 0);
         'mcp.example.invalid',
         '--dry-run',
         '--outdir',
-        'dist',
+        join(directory, 'dist'),
       ],
       account: 'synthetic-account',
       token: 'synthetic-deployment-token',
@@ -180,6 +180,7 @@ console.log(JSON.stringify({args,path,config:JSON.parse(fs.readFileSync(path,'ut
     });
     assert.equal(result.status, 0, result.stderr);
     const saved = JSON.parse(result.stdout);
+    assert.equal(saved.args[saved.args.indexOf('--outdir') + 1], join(directory, 'dist'));
     assert.deepEqual(saved.config.r2_buckets, [
       { binding: 'ARTIFACTS', bucket_name: 'private-test-artifacts' },
     ]);
