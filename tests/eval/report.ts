@@ -4,8 +4,8 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { MATRIX, getCellByModel, selectCells } from './matrix.ts';
-import { GMAIL_CASES, getCase, selectCases } from './cases.ts';
-import { DRIVE_CASES } from './drive.ts';
+import { GMAIL_CASES, GMAIL_EVALUATION_CASES, getCase, selectCases } from './cases.ts';
+import { DRIVE_CASES, DRIVE_EVALUATION_CASES } from './drive.ts';
 import { MEDIA_CASES } from './media.ts';
 
 export interface ReportDeclaration {
@@ -36,6 +36,8 @@ const version = (value: unknown): string | null =>
   typeof value === 'string' && /^[1-9][0-9]{0,19}$/.test(value) ? value : null;
 const caseIds = [
   'combined',
+  ...GMAIL_EVALUATION_CASES.map((item) => item.id),
+  ...DRIVE_EVALUATION_CASES.map((item) => item.id),
   ...GMAIL_CASES.map((item) => item.id),
   ...DRIVE_CASES.map((item) => item.id),
   ...ARTIFACT_CASES.map((item) => item.id),
@@ -45,6 +47,13 @@ const models = MATRIX.map((cell) => cell.model);
 const cellIds = [...MATRIX.map((cell) => cell.id), 'sol-native-codex'];
 const criteria = new Set([
   'readback',
+  'gmail_selection',
+  'gmail_selection_reads',
+  'gmail_selection_writes',
+  'drive_selection_answer',
+  'drive_selection_preserved',
+  'drive_selection_reads',
+  'drive_selection_write',
   'artifact_ledger',
   'artifact_lifecycle',
   'artifact_content',

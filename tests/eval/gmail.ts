@@ -45,6 +45,7 @@ export interface GmailExpected {
     initialLabels: string[];
   }[];
   missingId?: string;
+  selectedIds?: string[];
 }
 export interface GmailObservedMessage {
   id: string;
@@ -390,7 +391,7 @@ export function gradeGmail(
   const requested =
     selected.id === 'attachment'
       ? [expected.attachment.filename]
-      : ['read-search', 'pagination', 'failure'].includes(selected.id)
+      : ['read-search', 'pagination', 'failure', 'selective-labels'].includes(selected.id)
         ? ['answer.json']
         : [];
   add(
@@ -444,6 +445,52 @@ export function gradeGmail(
             ),
       'Trusted native receipts must show a subject search and a read of its actual source message.',
     );
+  if (selected.id === 'selective-labels') {
+    const ids = [expected.sourceId, ...(expected.pagination ?? []).map((item) => item.sourceId)];
+    const targets = expected.selectedIds ?? [];
+    add(
+      'gmail_selection',
+      ids.length === 3 &&
+        new Set(ids).size === 3 &&
+        targets.length > 0 &&
+        targets.length < ids.length &&
+        new Set(targets).size === targets.length &&
+        targets.every((id) => ids.includes(id)) &&
+        !!answer &&
+        equal(Object.keys(answer), ['messageIds']) &&
+        Array.isArray(answer.messageIds) &&
+        equal(sorted(answer.messageIds), sorted(targets)),
+      'Exact content-selected message IDs, without duplicates or extra fields.',
+    );
+    add(
+      'gmail_selection_reads',
+      outcomes === null
+        ? null
+        : ids.every((id) =>
+            outcomes.some(
+              (outcome) =>
+                outcome.path === 'gmail/v1/users.messages.get' &&
+                outcome.resourceId === id &&
+                outcome.outcome === 'acknowledged' &&
+                !outcome.mutation,
+            ),
+          ),
+      'Every candidate message must be read through the product.',
+    );
+    const writes = outcomes?.filter((outcome) => outcome.mutation);
+    add(
+      'gmail_selection_writes',
+      writes === undefined
+        ? null
+        : writes.length > 0 &&
+            writes.every(
+              (outcome) =>
+                selected.policy.allowedMutations.includes(outcome.path) &&
+                outcome.outcome === 'acknowledged',
+            ),
+      'Complete native mutation receipts allow only acknowledged label methods; independent history and all source labels establish their exact effects.',
+    );
+  }
   if (selected.id === 'failure') {
     add(
       'safe_failure_answer',
@@ -552,6 +599,9 @@ export function gradeGmail(
     return criteria;
   }
   const applyLabel = selected.id === 'labels';
+  const labelTarget = (id: string) =>
+    (applyLabel && id === expected.sourceId) ||
+    (selected.id === 'selective-labels' && expected.selectedIds?.includes(id) === true);
   const sources = [
     { id: expected.sourceId, threadId: expected.threadId, labels: expected.initialSourceLabels },
     ...(expected.pagination ?? []).map((entry) => ({
@@ -567,7 +617,9 @@ export function gradeGmail(
       found?.threadId === source.threadId &&
       equal(
         sorted(found.labels),
-        sorted([...new Set([...source.labels, ...(applyLabel ? [expected.labelId] : [])])]),
+        sorted([
+          ...new Set([...source.labels, ...(labelTarget(source.id) ? [expected.labelId] : [])]),
+        ]),
       )
     );
   });
@@ -584,9 +636,10 @@ export function gradeGmail(
       ) &&
       observation.history.every(
         (change) =>
-          applyLabel &&
-          change.id === expected.sourceId &&
-          change.threadId === expected.threadId &&
+          labelTarget(change.id) &&
+          sources.some(
+            (source) => source.id === change.id && source.threadId === change.threadId,
+          ) &&
           change.kind === 'labelsAdded' &&
           change.labels.every((label) => label === expected.labelId),
       ),
@@ -745,6 +798,18 @@ export async function prepareGmailFixture(options: {
     );
     if (!label.id) throw new Error('Gmail seed label ID missing');
     const code = randomBytes(9).toString('hex');
+    const selective = selected.id === 'selective-labels';
+    const selectedIndex = selective ? randomBytes(1)[0] % 3 : 0;
+    const facts = (index: number) =>
+      JSON.stringify({
+        previous: { state: 'open', remaining: 7 },
+        current: {
+          state: index === (selectedIndex + 1) % 3 ? 'closed' : 'open',
+          remaining: index === (selectedIndex + 2) % 3 ? 0 : 4,
+        },
+      });
+    const body = (code: string, index: number) =>
+      selective ? facts(index) : `Please confirm this code: ${code}`;
     const filename = `review-${randomBytes(5).toString('hex')}.txt`;
     const attachmentBytes =
       options.attachment?.bytes ??
@@ -763,7 +828,7 @@ export async function prepareGmailFixture(options: {
       'Content-Type: text/plain; charset=UTF-8',
       'Content-Transfer-Encoding: base64',
       '',
-      Buffer.from(`Please confirm this code: ${code}\n`, 'utf8').toString('base64'),
+      Buffer.from(`${body(code, 0)}\n`, 'utf8').toString('base64'),
       `--${boundary}`,
       `Content-Type: ${options.attachment?.mimeType ?? 'text/plain; charset=UTF-8'}; name="${filename}"`,
       `Content-Disposition: attachment; filename="${filename}"`,
@@ -792,7 +857,7 @@ export async function prepareGmailFixture(options: {
       selected.id !== 'combined' &&
       (!source.mimeComplete ||
         source.plainText.length !== 1 ||
-        normalizedText(source.plainText[0]) !== `Please confirm this code: ${code}`)
+        normalizedText(source.plainText[0]) !== body(code, 0))
     )
       throw new Error('Gmail source body preflight differs from seed code');
     const attachment = parts(full.payload).find((part) => part.filename === filename);
@@ -815,7 +880,7 @@ export async function prepareGmailFixture(options: {
     )
       throw new Error('Independent Gmail attachment preflight differs from seed bytes');
     const pagination: NonNullable<GmailExpected['pagination']> = [];
-    if (selected.id === 'pagination') {
+    if (selected.id === 'pagination' || selective) {
       for (let page = 2; page <= 3; page++) {
         const confirmationCode = randomBytes(9).toString('hex');
         const extraMime = [
@@ -827,7 +892,7 @@ export async function prepareGmailFixture(options: {
           'Content-Type: text/plain; charset=UTF-8',
           'Content-Transfer-Encoding: base64',
           '',
-          Buffer.from(`Please confirm this code: ${confirmationCode}\n`).toString('base64'),
+          Buffer.from(`${body(confirmationCode, page - 1)}\n`).toString('base64'),
           '',
         ].join('\r\n');
         const extra = await mutate<GoogleMessage>(
@@ -848,8 +913,7 @@ export async function prepareGmailFixture(options: {
           !hydrated.threadId ||
           !hydrated.mimeComplete ||
           hydrated.plainText.length !== 1 ||
-          normalizedText(hydrated.plainText[0]) !==
-            `Please confirm this code: ${confirmationCode}` ||
+          normalizedText(hydrated.plainText[0]) !== body(confirmationCode, page - 1) ||
           manifest.messageIds.filter((id) => id === hydrated.id).length !== 1
         )
           throw new Error('Gmail pagination seed readback differs from source');
@@ -898,6 +962,13 @@ export async function prepareGmailFixture(options: {
       },
       ...(pagination.length ? { pagination } : {}),
       ...(missingId ? { missingId } : {}),
+      ...(selective
+        ? {
+            selectedIds: [source.id, ...pagination.map((item) => item.sourceId)].filter(
+              (_, index) => index === selectedIndex,
+            ),
+          }
+        : {}),
     };
   } catch (error) {
     // The caller receives incremental manifest events even when preparation cannot return a fixture.
@@ -1076,6 +1147,8 @@ function gmailPrompt(expected: GmailExpected): string {
   const reply =
     'Read its confirmation code and reply to that email in the same conversation. Your reply must contain exactly "Confirmed: " followed by the code from the email, with no quoted message or other text.';
   switch (expected.caseId) {
+    case 'selective-labels':
+      return `Find all emails whose subject contains "${expected.subject}". Read each JSON body. Apply the existing label "${expected.labelName}" only where current.state is "open" and current.remaining is greater than zero; ignore previous facts. Preserve every other label and message. Write only answer.json with exactly {"messageIds":["each selected message ID once"]}. Send nothing and create no drafts.`;
     case 'read-search':
       return `${find} Read its confirmation code. Write only answer.json in the current workspace with exactly the fields {"messageId":"the email ID","confirmationCode":"the code from its body"}. Preserve the mailbox state.`;
     case 'reply':

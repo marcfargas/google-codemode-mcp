@@ -61,6 +61,40 @@ existing $1 estimate/five-minute caps, at most $8 in estimates. No automatic ret
 Fixtures are app-created files under `drive.file`, with independent metadata,
 content and parents checks and known-ID cleanup.
 
+### Unused evaluation compositions
+
+Two explicit evaluation cases extend the validation corpus: Gmail
+`selective-labels` chooses messages from their current body facts before applying
+an existing label; Drive `select-rename` chooses a file from its contents and
+derives the new name from those contents. Distractors contain previous facts that
+must not determine the action. Exact answers, complete native outcomes and
+independent state checks distinguish correct selection from changing every object
+or doing nothing. Both cases preserve unrelated state and use known-ID cleanup.
+They are excluded from the default `all` suites.
+
+Run these only as an explicitly selected assessment:
+
+```sh
+just eval-gmail PROXY_URL NEW_GMAIL_OUTPUT selective-labels required
+just eval-drive PROXY_URL NEW_DRIVE_OUTPUT select-rename required
+```
+
+One attempt per required model and case means four attempts, at most $4 in the
+existing estimates, with unchanged five-minute limits and no automatic retries.
+Before inference, retain a partition/protocol receipt with the case versions,
+candidate and grader hashes, selected models, caps and stop conditions. Calibrate
+the fixture/oracle paths without models first. Keep the stable shared prompt and
+tools; cache hits come from observed provider counters, without warmups or padding.
+Use each workflow-generated report for full gates and token/cache/cost metrics.
+
+These compositions were authored with implementation knowledge. Their first
+prospectively frozen assessment can establish unused-case feasibility, not strict
+blindness or reliability. Once results inform a change, the cases become
+validation for that tuning; repeating them cannot restore untouched status.
+Existing Gmail/Drive/media/artifact cases already used in development retain
+their historical validation results and failures. No assessment result is claimed
+until its selected attempts and independent cleanup are inspected.
+
 The pagination task asks for one result per page and an exact `answer.json`
 inventory. Trusted native call annotations must establish a complete token chain,
 including projected continuation/completeness fields and exact returned IDs;
