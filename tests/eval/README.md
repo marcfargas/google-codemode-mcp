@@ -194,6 +194,23 @@ identifiers, raw requests and private error text; raw evidence remains private.
 Reporting success never changes the evaluation gate. A report-generation error
 fails its own workflow step and leaves the original failure in place.
 
+For change verification, first select affected cases and establish whether saved
+evidence applies using the [verification procedure](../../.agents/skills/google-codemode-verify/references/change-verification.md).
+Use the offline acceptance command:
+
+```sh
+just eval-verify /absolute/saved/evidence /absolute/new/verification-report
+```
+
+This writes the same report and exits nonzero unless the selected retained gate
+passes with complete result, identity, cleanup and mutation evidence. Synthetic,
+missing and contradictory evidence cannot qualify. Probe/reference score failures
+remain informational under the existing matrix policy; their infrastructure or
+safety failures block acceptance. Missing usage or billing stays unknown.
+This consumes recorded grades, without regrading or checking equivalence to the
+current checkout/deployment. A subset pass does not qualify omitted cases or the
+full required pair. Ordinary `eval-report` remains a report-only command.
+
 `just eval-preflight NEW_OUTPUT` exercises this same reporting step using an
 explicitly synthetic campaign with one failed and one passing cell. Its report
 does not describe real model attempts or Google activity.

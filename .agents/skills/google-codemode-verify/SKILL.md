@@ -27,22 +27,29 @@ readiness at the failed boundary and restart only trial-owned state when warrant
 
 ## Select the smallest useful proof
 
-| Goal                                                      | Maintained command                                                | What it establishes                                                                                                      |
-| --------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| Ordinary change check                                     | `just check`                                                      | Check workflow in `act`: typecheck, Wrangler dry-run, credential-free tests, formatting                                  |
-| Fast host feedback / unavailable compatible Docker runner | `just verify`                                                     | Same `tests/run.mjs check` steps on this host; no claim of `act` compatibility                                           |
-| Runner/MCP/file plumbing                                  | `just eval-preflight /absolute/new/evidence`                      | Both isolated runners with synthetic responses; no model, OAuth, or Google calls                                         |
-| Saved trial grading                                       | `just eval-regrade /absolute/saved/trial-1 /absolute/new/regrade` | Offline current grader against retained evidence, preserving original results                                            |
-| Saved run reporting                                       | `just eval-report /absolute/saved/evidence /absolute/new/report`  | Offline recorded gates and token/cache/cost summary; no inference, OAuth, cleanup or regrading                           |
-| Real Gmail behavior                                       | `just live`                                                       | Manual credentialed Gmail workflow through locally built Worker                                                          |
-| Real Drive behavior                                       | `just live-drive`                                                 | Manual credentialed Drive download/rename, conditional-option refusal and pagination through locally built Worker        |
-| Real attachment composition                               | `just live-media`                                                 | Three built-Worker controls: Gmail to Drive, Drive blob/native export to Gmail draft, exact bytes/MIME and owned cleanup |
-| Agent media feasibility                                   | `just eval-media PROXY_URL /absolute/new/evidence all required`   | Two cases × Sonnet/Sol, ordered advanced-resource retrieval, independent readback and four $1 estimates                  |
-| Agent feasibility                                         | `just eval-matrix gmail PROXY_URL /absolute/new/evidence`         | Manual paid Sonnet/Sol required pair, one fresh attempt each                                                             |
-| Independent Gmail cases                                   | `just eval-gmail PROXY_URL /absolute/new/evidence`                | Six cases, one fresh attempt per model/case, up to twelve $1 estimates                                                   |
-| Independent Drive cases                                   | `just eval-drive PROXY_URL /absolute/new/evidence`                | Four cases after Drive consent, one fresh attempt per model/case, up to eight $1 estimates                               |
-| Prepare private hosted probes                             | `just hosted-prepare /absolute/new/prepared`                      | Exact source/bundle identity and private dry-run; no deployment                                                          |
-| Hosted runtime limits                                     | `just hosted-verify /absolute/new/evidence`                       | Selected deployed version via protected ingress; requires documented `HOSTED_*` inputs                                   |
+During change delivery, apply [change verification](references/change-verification.md)
+to map affected behavior to existing cases, decide which retained evidence applies,
+and select any fresh proof before spending. Consume that evidence with
+`just eval-verify SAVED NEW_REPORT`; successful report generation alone is not
+passing acceptance. Keep candidate equivalence and unselected coverage explicit.
+
+| Goal                                                      | Maintained command                                                | What it establishes                                                                                                            |
+| --------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| Ordinary change check                                     | `just check`                                                      | Check workflow in `act`: typecheck, Wrangler dry-run, credential-free tests, formatting                                        |
+| Fast host feedback / unavailable compatible Docker runner | `just verify`                                                     | Same `tests/run.mjs check` steps on this host; no claim of `act` compatibility                                                 |
+| Runner/MCP/file plumbing                                  | `just eval-preflight /absolute/new/evidence`                      | Both isolated runners with synthetic responses; no model, OAuth, or Google calls                                               |
+| Saved trial grading                                       | `just eval-regrade /absolute/saved/trial-1 /absolute/new/regrade` | Offline current grader against retained evidence, preserving original results                                                  |
+| Saved run reporting                                       | `just eval-report /absolute/saved/evidence /absolute/new/report`  | Offline recorded gates and token/cache/cost summary; no inference, OAuth, cleanup or regrading                                 |
+| Selected retained agent acceptance                        | `just eval-verify /absolute/saved/evidence /absolute/new/report`  | Same offline report with nonzero exit for failed/incomplete/synthetic acceptance; current-source relevance requires inspection |
+| Real Gmail behavior                                       | `just live`                                                       | Manual credentialed Gmail workflow through locally built Worker                                                                |
+| Real Drive behavior                                       | `just live-drive`                                                 | Manual credentialed Drive download/rename, conditional-option refusal and pagination through locally built Worker              |
+| Real attachment composition                               | `just live-media`                                                 | Three built-Worker controls: Gmail to Drive, Drive blob/native export to Gmail draft, exact bytes/MIME and owned cleanup       |
+| Agent media feasibility                                   | `just eval-media PROXY_URL /absolute/new/evidence all required`   | Two cases × Sonnet/Sol, ordered advanced-resource retrieval, independent readback and four $1 estimates                        |
+| Agent feasibility                                         | `just eval-matrix gmail PROXY_URL /absolute/new/evidence`         | Manual paid Sonnet/Sol required pair, one fresh attempt each                                                                   |
+| Independent Gmail cases                                   | `just eval-gmail PROXY_URL /absolute/new/evidence`                | Six cases, one fresh attempt per model/case, up to twelve $1 estimates                                                         |
+| Independent Drive cases                                   | `just eval-drive PROXY_URL /absolute/new/evidence`                | Four cases after Drive consent, one fresh attempt per model/case, up to eight $1 estimates                                     |
+| Prepare private hosted probes                             | `just hosted-prepare /absolute/new/prepared`                      | Exact source/bundle identity and private dry-run; no deployment                                                                |
+| Hosted runtime limits                                     | `just hosted-verify /absolute/new/evidence`                       | Selected deployed version via protected ingress; requires documented `HOSTED_*` inputs                                         |
 
 Maintained suites, helpers and local workflow launchers live under `tests/`;
 `.github/` contains GitHub workflows and repository-secret installation, with

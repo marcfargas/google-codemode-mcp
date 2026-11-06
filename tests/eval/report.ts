@@ -253,6 +253,56 @@ export interface RunReport {
   }[];
   issues: string[];
 }
+
+/** Consume recorded acceptance, not case oracles or current-source equivalence. */
+export function retainedRunPassed(report: RunReport): boolean {
+  return (
+    !report.synthetic &&
+    ['suite', 'matrix', 'single'].includes(report.mode) &&
+    report.recordedGate.selectedStatus === 'pass' &&
+    report.issues.length === 0 &&
+    report.counts.selected !== null &&
+    report.counts.selected > 0 &&
+    report.counts.attempted === report.counts.selected &&
+    report.attempts.length === report.counts.selected &&
+    report.attempts.every((row) => {
+      const identity = row.identity;
+      const scorePassed =
+        row.status === 'pass' &&
+        row.taskSuccess === true &&
+        row.criteria.length > 0 &&
+        row.omittedCriteria === 0 &&
+        row.criteria.every((criterion) => criterion.status === 'pass');
+      const informationalFailure =
+        ['probe', 'reference'].includes(row.role ?? '') && row.status === 'fail';
+      return (
+        (scorePassed || informationalFailure) &&
+        row.attempted === true &&
+        row.resultEvidence === 'present' &&
+        !row.issues.some((issue) => issue !== 'missing_native_usage') &&
+        row.caseId !== null &&
+        row.caseVersion !== null &&
+        row.model !== null &&
+        row.runner !== null &&
+        row.role !== null &&
+        identity.sourceReceiptSha256 !== null &&
+        identity.revision !== null &&
+        identity.backend !== null &&
+        identity.bundleDigest !== null &&
+        identity.runnerVersion !== null &&
+        identity.gradingVersion !== null &&
+        (identity.backend !== 'hosted' || identity.workerVersion !== null) &&
+        row.requests.count !== null &&
+        row.requests.count > 0 &&
+        row.requests.complete === row.requests.count &&
+        row.requests.identityMatches === row.requests.count &&
+        row.cleanup.failures === 0 &&
+        row.cleanup.unknownMutations === 0 &&
+        row.unknownEffects === false
+      );
+    })
+  );
+}
 function cell(value: unknown) {
   const item = object(value);
   const declared = MATRIX.find((entry) => entry.id === item.id);
@@ -515,6 +565,21 @@ async function attempt(plan: AttemptPlan): Promise<AttemptReport> {
         })),
     },
     issues: [
+      ...([
+        ['caseId', plan.caseId],
+        ['caseVersion', plan.caseVersion],
+        ['cellId', plan.cellId],
+        ['requestedModel', plan.model],
+        ['runner', plan.runner],
+        ['role', plan.role],
+      ].some(([key, value]) => value !== null && source[key!] !== value)
+        ? ['cell_source_mismatch']
+        : []),
+      ...(Object.entries({ caseId: source.caseId, caseVersion: source.caseVersion }).some(
+        ([key, value]) => value !== undefined && result[key] !== undefined && result[key] !== value,
+      )
+        ? ['trial_case_mismatch']
+        : []),
       ...([
         sourceFile,
         resultFile,
@@ -805,8 +870,13 @@ export async function writeRetainedReport(
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const [saved, output, ...flags] = process.argv.slice(2);
-  if (!saved || !output || flags.some((flag) => flag !== '--step-summary') || flags.length > 1) {
-    console.error('Usage: report.ts SAVED NEW_OUTPUT [--step-summary]');
+  if (
+    !saved ||
+    !output ||
+    flags.some((flag) => !['--step-summary', '--require-pass'].includes(flag)) ||
+    new Set(flags).size !== flags.length
+  ) {
+    console.error('Usage: report.ts SAVED NEW_OUTPUT [--step-summary] [--require-pass]');
     process.exitCode = 1;
   } else {
     const declaration = {
@@ -820,10 +890,21 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     };
     writeRetainedReport(saved, output, {
       declaration: Object.values(declaration).some(Boolean) ? declaration : undefined,
-      stepSummary: flags.length ? process.env.GITHUB_STEP_SUMMARY : undefined,
-    }).catch(() => {
-      console.error('Retained report generation failed; original evaluation evidence is unchanged');
-      process.exitCode = 1;
-    });
+      stepSummary: flags.includes('--step-summary') ? process.env.GITHUB_STEP_SUMMARY : undefined,
+    })
+      .then((report) => {
+        if (flags.includes('--require-pass') && !retainedRunPassed(report)) {
+          console.error(
+            'Selected retained evidence does not pass verification; inspect the saved report',
+          );
+          process.exitCode = 1;
+        }
+      })
+      .catch(() => {
+        console.error(
+          'Retained report generation failed; original evaluation evidence is unchanged',
+        );
+        process.exitCode = 1;
+      });
   }
 }
