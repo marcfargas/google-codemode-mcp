@@ -590,6 +590,12 @@ and fallbacks when shared mafe-si skills are unavailable.
 
 ## Workflow verification
 
+For change delivery, use the [project verifier](.agents/skills/google-codemode-verify/SKILL.md)
+and its [case/evidence selection procedure](.agents/skills/google-codemode-verify/references/change-verification.md).
+Select existing checks by affected behavior, reuse applicable retained evidence,
+and run fresh paid cells only for unresolved agent behavior. `just check` qualifies
+its deterministic checks; agent and hosted acceptance remain separate.
+
 Test suites and infrastructure live under `tests/`: `unit/` for isolated checks,
 `integration/` for Worker, HTTP, CLI and runner checks, `live/` for credentialed
 Google checks, and `fixtures/`, `support/`, `eval/` and `hosted/` for their helpers.
@@ -648,6 +654,13 @@ stay unknown and estimates remain separate from billing. Regenerate offline with
 `just eval-report SAVED_EVIDENCE NEW_REPORT_DIRECTORY`; this makes no Google or
 model calls and preserves original grades. See the
 [report contract](tests/eval/README.md#generated-run-reports).
+
+To consume selected saved agent acceptance, use
+`just eval-verify SAVED_EVIDENCE NEW_REPORT_DIRECTORY`. It writes the same report
+and exits nonzero for failed, incomplete or synthetic evidence. It does not
+establish equivalence to the current checkout; inspect relevant source receipts
+and environment before reusing a result. Probe/reference score failures retain
+their informational role; missing billing/cache telemetry stays unknown.
 
 The Gmail case requires discovery, retrieval of the server's `skill://` resource,
 reading and replying to an email, applying a label, and saving its attachment.

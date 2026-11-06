@@ -67,6 +67,10 @@ eval-regrade $saved $output:
 eval-report $saved $output:
     node tests/eval/report.ts "$saved" "$output"
 
+# Check selected retained acceptance offline, keeping a report even on refusal.
+eval-verify $saved $output:
+    node tests/eval/report.ts "$saved" "$output" --require-pass
+
 # Retain a private hosted-verification bundle; no authentication or deployment.
 hosted-prepare output:
     node tests/hosted/prepare.ts {{quote(output)}}

@@ -5,6 +5,11 @@ an existing run. The gate uses the actual MCP backend, isolated actor, discovery
 Workspace resource read, file capture and independent Google readback. Passing a
 model task alone does not pass the mechanism or cleanup criteria.
 
+For change delivery, first use [change verification](change-verification.md) to
+select affected cases and reusable evidence. This procedure does not require a
+fresh full suite for every change. Use `just eval-verify SAVED NEW_REPORT` when
+consuming selected saved acceptance, after establishing relevant source equivalence.
+
 ## Select, prepare and run
 
 1. Recover the authorized service/cases, backend, models, attempt count and spend

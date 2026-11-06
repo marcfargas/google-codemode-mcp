@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { MATRIX } from '../eval/matrix.ts';
-import { renderRunReport, summarizeSavedRun, writeRetainedReport } from '../eval/report.ts';
+import {
+  renderRunReport,
+  retainedRunPassed,
+  summarizeSavedRun,
+  writeRetainedReport,
+} from '../eval/report.ts';
 
 const secret =
   'private-test@example.invalid https://private-proxy.invalid /private/home token=SECRET fixture-id-private';
@@ -131,6 +137,96 @@ async function fingerprints(directory: string): Promise<Record<string, string>> 
   }
   return files;
 }
+
+test('offline acceptance consumes complete recorded gates while preserving reports and optional roles', async () => {
+  await workspace(async (root) => {
+    const saved = join(root, 'saved');
+    await savedCell(saved, false, {
+      criteria: [{ id: 'drive_file', status: 'pass' }],
+      usage: undefined,
+    });
+    await receipts(saved, [receipt(1)]);
+    const before = await fingerprints(saved);
+    const original = await readFile(join(saved, 'trial-1/result.json'), 'utf8');
+    const run = (name: string) =>
+      spawnSync(
+        process.execPath,
+        ['tests/eval/report.ts', saved, join(root, name), '--require-pass'],
+        { env: { PATH: process.env.PATH }, encoding: 'utf8' },
+      );
+    const accepted = run('accepted');
+    assert.equal(accepted.status, 0, accepted.stderr);
+    assert.deepEqual(await fingerprints(saved), before);
+    const report = await summarizeSavedRun(saved);
+    assert.equal(
+      report.attempts[0].tokens.inputTokens,
+      null,
+      'unknown usage does not fail acceptance',
+    );
+    assert.equal(
+      report.recordedGate.requiredPairStatus,
+      'unknown',
+      'single model does not qualify the pair',
+    );
+
+    // The aggregate still says pass: contradictory or missing trial evidence must refuse.
+    for (const [name, patch] of Object.entries({
+      failed: { status: 'fail', taskSuccess: false },
+      wrongCase: { caseId: 'rename-file' },
+      wrongVersion: { caseVersion: 999 },
+      unknown: { criteria: [{ id: 'drive_file', status: 'unknown' }] },
+      unsafe: { hasUnknownMutation: true },
+      cleanup: { cleanup: { failures: ['residual'], unknownMutations: [] } },
+    })) {
+      await json(join(saved, 'trial-1/result.json'), { ...JSON.parse(original), ...patch });
+      assert.equal(run(name).status, 1, name);
+      assert.equal(
+        JSON.parse(await readFile(join(root, name, 'summary.json'), 'utf8')).recordedGate
+          .selectedStatus,
+        'pass',
+      );
+    }
+    await rm(join(saved, 'trial-1/result.json'));
+    assert.equal(run('missing').status, 1);
+    await writeFile(join(saved, 'trial-1/result.json'), original);
+    await json(join(saved, 'report-preflight.json'), {
+      synthetic: true,
+      inference: false,
+      google: false,
+    });
+    assert.equal(run('synthetic').status, 1);
+
+    const optional = structuredClone(report);
+    Object.assign(optional.attempts[0], { role: 'probe', status: 'fail', taskSuccess: false });
+    assert.equal(retainedRunPassed(optional), true, 'optional score failures remain informational');
+    optional.attempts[0].cleanup.unknownMutations = 1;
+    assert.equal(retainedRunPassed(optional), false, 'optional safety failures still block');
+
+    const matrix = join(root, 'matrix');
+    const cellPath = join(matrix, 'sol');
+    await json(join(matrix, 'matrix-source.json'), {
+      caseId: goal.id,
+      caseVersion: goal.version,
+      cells: [sol],
+    });
+    await json(join(matrix, 'matrix-results.json'), {
+      selectedStatus: 'pass',
+      results: [],
+      rows: [],
+    });
+    await savedCell(cellPath, false);
+    await receipts(cellPath, [receipt(1)]);
+    const source = JSON.parse(await readFile(join(cellPath, 'source.json'), 'utf8'));
+    await json(join(cellPath, 'source.json'), { ...source, role: 'reference' });
+    const mismatch = await summarizeSavedRun(matrix);
+    assert.ok(mismatch.attempts[0].issues.includes('cell_source_mismatch'));
+    assert.equal(
+      retainedRunPassed(mismatch),
+      false,
+      'a required row cannot demote itself through its child receipt',
+    );
+  });
+});
 
 test('offline report preserves original gates, separates cache bases and is deterministic and public-safe', async () => {
   await workspace(async (root) => {
