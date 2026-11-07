@@ -11,11 +11,50 @@ import {
   uploadWireBody,
   normalizeUploadWire,
   validMimeType,
+  supportsUpload,
+  validateMethodUpload,
+  maxArtifactUploadBytes,
 } from '../../src/media.ts';
 
 const params = (data = '', encoding = 'base64') => ({
   requestBody: { name: 'attachment.bin', parents: ['folder'] },
   media: { mimeType: 'application/octet-stream', body: { encoding, data } },
+});
+
+test('Gmail media upload is limited to the discovered draft route and RFC822 with unambiguous metadata', () => {
+  const method = {
+    path: 'gmail/v1/users.drafts.create',
+    httpMethod: 'POST',
+    supportsMediaUpload: true,
+    mediaUpload: {
+      maxSize: '36700160',
+      protocols: { simple: { multipart: true, path: '/upload/gmail/v1/users/{userId}/drafts' } },
+    },
+  };
+  assert.equal(supportsUpload(method), true);
+  assert.equal(maxArtifactUploadBytes(method), 36700160);
+  for (const update of [
+    { path: 'gmail/v1/users.messages.send' },
+    { httpMethod: 'GET' },
+    {
+      mediaUpload: {
+        ...method.mediaUpload,
+        protocols: { simple: { multipart: true, path: '/other' } },
+      },
+    },
+    { mediaUpload: { ...method.mediaUpload, maxSize: 'Infinity' } },
+  ])
+    assert.equal(supportsUpload({ ...method, ...update }), false);
+  const media = { mimeType: 'message/rfc822' };
+  validateMethodUpload(method, { requestBody: {}, media });
+  validateMethodUpload(method, { requestBody: { message: { threadId: 'thread' } }, media });
+  for (const input of [
+    { requestBody: {}, media: { mimeType: 'text/plain' } },
+    { requestBody: { message: { raw: 'overlapping bytes' } }, media },
+    { requestBody: { message: { threadId: 'thread\r\nInjected: yes' } }, media },
+    { requestBody: { id: 'draft-id' }, media },
+  ])
+    assert.throws(() => validateMethodUpload(method, input));
 });
 
 test('canonical base64 and base64url preserve every byte, empty bytes and optional valid padding', async () => {

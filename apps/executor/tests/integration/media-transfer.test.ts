@@ -96,6 +96,13 @@ const docs = {
                 parameters: { userId: { type: 'string', required: true, location: 'path' } },
                 request: { $ref: 'Draft' },
                 response: { $ref: 'Draft' },
+                supportsMediaUpload: true,
+                mediaUpload: {
+                  maxSize: '36700160',
+                  protocols: {
+                    simple: { multipart: true, path: '/upload/gmail/v1/users/{userId}/drafts' },
+                  },
+                },
               },
             },
           },
@@ -239,6 +246,134 @@ test('workerd keeps empty multipart bodies and acknowledged writes when their re
     assert.equal(readMultipart(wire!, contentType).bytes.length, 0);
     assert.equal(result.outcomes[0].outcome, 'acknowledged');
     assert.equal(result.outcomes[0].httpStatus, 200);
+  } finally {
+    await client.close();
+  }
+});
+
+test('trusted stored-reference helpers round-trip 256 KiB through native Gmail media and JSON attachment storage', async () => {
+  const bytes = Buffer.from(Array.from({ length: 262144 }, (_, index) => index % 251));
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  let drafted: ReturnType<typeof attachment> | undefined;
+  let uploads = 0;
+  let attachmentMode = 'valid';
+  let loseDraftResponse = false;
+  const client = await openBuiltWorker({
+    artifacts: true,
+    outbound: async (request) => {
+      const url = new URL(request.url);
+      if (url.pathname.includes('/discovery/') || url.pathname.includes('$discovery'))
+        return json(url.pathname.includes('/drive/') ? docs.drive : docs.gmail);
+      assert.equal(request.headers.get('authorization'), 'Bearer ' + token);
+      if (url.pathname === '/drive/v3/files/source')
+        return new Response(bytes, { headers: { 'content-type': 'application/octet-stream' } });
+      if (url.pathname === '/upload/gmail/v1/users/me/drafts') {
+        assert.equal(url.searchParams.get('uploadType'), 'multipart');
+        const wire = readMultipart(
+          Buffer.from(await request.arrayBuffer()),
+          request.headers.get('content-type')!,
+        );
+        assert.deepEqual(wire.metadata, {});
+        assert.equal(wire.headers, 'content-type: message/rfc822');
+        drafted = attachment(wire.bytes.toString('base64url'));
+        assert.deepEqual(drafted.bytes, bytes);
+        assert.equal(drafted.name, 'résumé 🌍.bin');
+        assert.match(drafted.headers, /Content-Type: application\/octet-stream/);
+        if (loseDraftResponse) throw new Error('Injected lost Gmail mutation response');
+        return json({ id: 'owned-draft', message: { id: 'owned-message' } });
+      }
+      if (url.pathname.includes('/attachments/')) {
+        if (attachmentMode === 'invalid') return json({ data: 'Zh==', size: 1 });
+        if (attachmentMode === 'credential')
+          return json({
+            data: Buffer.from(token).toString('base64url'),
+            size: Buffer.byteLength(token),
+          });
+        return json({ data: drafted!.bytes.toString('base64url'), size: bytes.length });
+      }
+      if (url.pathname === '/upload/drive/v3/files') {
+        const wire = readMultipart(
+          Buffer.from(await request.arrayBuffer()),
+          request.headers.get('content-type')!,
+        );
+        assert.deepEqual(wire.bytes, bytes);
+        assert.equal(wire.metadata.name, drafted!.name);
+        assert.equal(wire.metadata.mimeType, 'application/octet-stream');
+        uploads++;
+        return json({ id: 'owned-copy' });
+      }
+      throw new Error('Unexpected fixture route');
+    },
+  });
+  try {
+    const capabilities = await client.tool<any>('describe', { path: 'artifacts' });
+    assert.equal(capabilities.referenceMedia.maxAttachmentBytes, 1024 * 1024);
+    const method = await client.tool<any>('describe', { path: 'gmail/v1/users.drafts.create' });
+    assert.equal(method.runtime.mediaUpload, true);
+    assert.equal(method.runtime.maxArtifactUploadBytes, 36700160);
+    assert.match(method.declarations, /message\/rfc822/);
+    const receipt = await client.tool<ExecutionReceipt<any> & { artifacts: any }>('execute', {
+      accessToken: token,
+      code: `const drive=google.drive({version:'v3'}),gmail=google.gmail({version:'v1'});
+      const {data:source}=await drive.files.get({fileId:'source',alt:'media'});
+      const mime=await artifacts.composeMime({to:'recipient@example.test',subject:'Résumé 🌍',text:'Body',attachments:[{artifact:source.uri,name:'résumé 🌍.bin',mimeType:source.mimeType}]});
+      const {data:draft}=await gmail.users.drafts.create({userId:'me',requestBody:{},media:{mimeType:mime.mimeType,body:{artifact:mime.uri}}});
+      const recovered=await artifacts.fromGmailAttachment({userId:'me',messageId:draft.message.id,id:'attachment'},{name:'résumé 🌍.bin',mimeType:'application/octet-stream'});
+      const {data:copy}=await drive.files.create({requestBody:{name:recovered.name,mimeType:recovered.mimeType},media:{mimeType:recovered.mimeType,body:{artifact:recovered.uri}}});
+      await artifacts.delete(source.uri);await artifacts.delete(mime.uri);await artifacts.delete(recovered.uri);
+      return {draft,copy,recovered};`,
+    });
+    assert.equal(receipt.status, 'completed', JSON.stringify(receipt));
+    assert.equal(receipt.result.recovered.sha256, sha256);
+    assert.equal(receipt.result.recovered.size, bytes.length);
+    assert.equal(receipt.result.recovered.name, drafted!.name);
+    assert.equal(receipt.hasUnknownOutcome, false);
+    assert.equal(receipt.outcomesComplete, true);
+    assert.equal(receipt.artifacts.hasUnknownOutcome, false);
+    assert.deepEqual(
+      receipt.outcomes.map((o) => o.outcome),
+      Array(4).fill('acknowledged'),
+    );
+    assert.equal(uploads, 1);
+    assert.equal(JSON.stringify(receipt).includes(bytes.toString('base64url')), false);
+    assert.equal(
+      (await client.artifactBucket!.list({ prefix: 'artifacts/v2/' })).objects.length,
+      0,
+    );
+    for (attachmentMode of ['invalid', 'credential']) {
+      const failed = await client.tool<ExecutionReceipt & { artifacts: any }>('execute', {
+        accessToken: token,
+        code: `return artifacts.fromGmailAttachment({userId:'me',messageId:'owned-message',id:'attachment'},{name:'attachment.bin',mimeType:'application/octet-stream'});`,
+      });
+      assert.equal(failed.status, 'error');
+      assert.equal(failed.outcomes[0].outcome, 'acknowledged');
+      assert.equal(failed.artifacts.references.length, 0);
+      assert.equal(JSON.stringify(failed).includes(token), false);
+      assert.equal(
+        (await client.artifactBucket!.list({ prefix: 'artifacts/v2/' })).objects.length,
+        0,
+      );
+    }
+    loseDraftResponse = true;
+    const lost = await client.tool<ExecutionReceipt>('execute', {
+      accessToken: token,
+      code: `const drive=google.drive({version:'v3'}),gmail=google.gmail({version:'v1'});
+      const {data:source}=await drive.files.get({fileId:'source',alt:'media'});
+      const mime=await artifacts.composeMime({to:'recipient@example.test',subject:'Lost response',text:'Body',attachments:[{artifact:source.uri,name:'résumé 🌍.bin',mimeType:source.mimeType}]});
+      try { await gmail.users.drafts.create({userId:'me',requestBody:{},media:{mimeType:mime.mimeType,body:{artifact:mime.uri}}}); } catch {}
+      try { await drive.files.create({requestBody:{name:'must-not-dispatch'}}); } catch {}
+      await artifacts.delete(source.uri);await artifacts.delete(mime.uri);return true;`,
+    });
+    assert.equal(lost.hasUnknownOutcome, true);
+    assert.deepEqual(
+      lost.outcomes.map((o) => o.outcome),
+      ['acknowledged', 'unknown', 'not_dispatched'],
+    );
+    assert.equal(uploads, 1, 'unknown Gmail mutation is not retried and blocks later mutations');
+    assert.equal(
+      (await client.artifactBucket!.list({ prefix: 'artifacts/v2/' })).objects.length,
+      0,
+    );
   } finally {
     await client.close();
   }

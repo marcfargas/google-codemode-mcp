@@ -9,6 +9,8 @@ import {
   MAX_UPLOAD_METADATA_BYTES,
   MAX_UPLOAD_PARAMS_BYTES,
   MAX_UPLOAD_WIRE_BYTES,
+  maxArtifactUploadBytes,
+  GMAIL_DRAFT_MEDIA_REQUEST,
 } from './media.ts';
 import { SERVICES, servicePath } from './services.ts';
 import type { ServicePath } from './services.ts';
@@ -331,7 +333,15 @@ export class DiscoveryCatalog {
                 maxUploadParamsBytes: MAX_UPLOAD_PARAMS_BYTES,
                 maxUploadWireBytes: MAX_UPLOAD_WIRE_BYTES,
                 artifactUpload: !!options.streamMedia,
-                ...(options.streamMedia ? { maxArtifactUploadBytes: MAX_STREAM_BYTES } : {}),
+                ...(options.streamMedia
+                  ? { maxArtifactUploadBytes: maxArtifactUploadBytes(method) }
+                  : {}),
+                ...(path === 'gmail/v1/users.drafts.create'
+                  ? {
+                      uploadMimeTypes: ['message/rfc822'],
+                      mediaRequestSchema: GMAIL_DRAFT_MEDIA_REQUEST,
+                    }
+                  : {}),
                 skill: MEDIA_SKILL_URI,
               }
             : {}),

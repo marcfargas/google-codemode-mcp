@@ -10,6 +10,7 @@ import { createStreamArtifactStore, STREAM_ARTIFACT_CAPABILITIES } from './strea
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { completeUpload, type ImportMetadata } from './storage-import.ts';
+import { REFERENCE_MEDIA_CAPABILITIES } from './reference-mime.ts';
 
 interface ExecutorEnv {
   LOADER: WorkerLoader;
@@ -94,6 +95,19 @@ async function handle(
           enabled: !!env.ARTIFACTS,
           downloads: { enabled: artifactStore.downloadsEnabled },
           streaming: { ...STREAM_ARTIFACT_CAPABILITIES, enabled: !!streamArtifactStore },
+          referenceMedia: {
+            ...REFERENCE_MEDIA_CAPABILITIES,
+            enabled: !!streamArtifactStore,
+            signatures: {
+              composeMime:
+                'artifacts.composeMime({to,from?,subject,text,attachments:[{artifact,name,mimeType}]}): Promise<ArtifactReference>',
+              fromGmailAttachment:
+                'artifacts.fromGmailAttachment({userId,messageId,id},{name,mimeType}): Promise<ArtifactReference>',
+            },
+            attachmentMethod: 'gmail/v1/users.messages.attachments.get',
+            attachmentTransport: 'bounded-json-base64url',
+            metadataSource: 'caller-selected Gmail message part',
+          },
         };
       if (!args.path)
         return {

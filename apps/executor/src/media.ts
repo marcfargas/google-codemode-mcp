@@ -38,15 +38,65 @@ export const UPLOAD_SCHEMA: DiscoverySchema = {
   },
 };
 
-export function uploadSchema(artifacts: boolean): DiscoverySchema {
-  if (artifacts) return UPLOAD_SCHEMA;
-  return {
-    ...UPLOAD_SCHEMA,
-    properties: {
-      ...UPLOAD_SCHEMA.properties,
-      body: { ...(UPLOAD_SCHEMA.properties!.body.anyOf as DiscoverySchema[])[0], required: true },
+export function uploadSchema(artifacts: boolean, gmail = false): DiscoverySchema {
+  const schema = artifacts
+    ? UPLOAD_SCHEMA
+    : {
+        ...UPLOAD_SCHEMA,
+        properties: {
+          ...UPLOAD_SCHEMA.properties,
+          body: {
+            ...(UPLOAD_SCHEMA.properties!.body.anyOf as DiscoverySchema[])[0],
+            required: true,
+          },
+        },
+      };
+  return gmail
+    ? {
+        ...schema,
+        properties: {
+          ...schema.properties,
+          mimeType: { type: 'string', enum: ['message/rfc822'], required: true },
+        },
+      }
+    : schema;
+}
+
+export const GMAIL_DRAFT_MEDIA_REQUEST: DiscoverySchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    message: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { threadId: { type: 'string' } },
     },
-  };
+  },
+};
+
+export function maxArtifactUploadBytes(method: { path?: string; mediaUpload?: unknown }): number {
+  return method.path === 'gmail/v1/users.drafts.create'
+    ? Number((method.mediaUpload as { maxSize: string }).maxSize)
+    : 64 * 1024 * 1024;
+}
+
+export function validateMethodUpload(method: { path?: string }, params: Record<string, unknown>) {
+  if (method.path !== 'gmail/v1/users.drafts.create') return;
+  if ((params.media as { mimeType?: unknown })?.mimeType !== 'message/rfc822') invalid();
+  const body = object(params.requestBody);
+  exactKeys(body, ['message']);
+  if (body.message !== undefined) {
+    const message = object(body.message);
+    exactKeys(message, ['threadId']);
+    if (
+      message.threadId !== undefined &&
+      (typeof message.threadId !== 'string' ||
+        !message.threadId ||
+        message.threadId.length > 256 ||
+        /[\x00-\x1f\x7f]/.test(message.threadId))
+    )
+      invalid();
+  }
 }
 
 export function supportsUpload(method: {
@@ -56,13 +106,19 @@ export function supportsUpload(method: {
   mediaUpload?: unknown;
 }): boolean {
   const native = method.mediaUpload as
-    { protocols?: { simple?: { path?: string; multipart?: boolean } } } | undefined;
+    | { maxSize?: string; protocols?: { simple?: { path?: string; multipart?: boolean } } }
+    | undefined;
   return (
-    method.path === 'drive/v3/files.create' &&
     method.httpMethod?.toUpperCase() === 'POST' &&
     method.supportsMediaUpload === true &&
     native?.protocols?.simple?.multipart === true &&
-    native.protocols.simple.path === '/upload/drive/v3/files'
+    ((method.path === 'drive/v3/files.create' &&
+      native.protocols.simple.path === '/upload/drive/v3/files') ||
+      (method.path === 'gmail/v1/users.drafts.create' &&
+        native.protocols.simple.path === '/upload/gmail/v1/users/{userId}/drafts' &&
+        typeof native.maxSize === 'string' &&
+        /^[1-9][0-9]*$/.test(native.maxSize) &&
+        Number.isSafeInteger(Number(native.maxSize))))
   );
 }
 

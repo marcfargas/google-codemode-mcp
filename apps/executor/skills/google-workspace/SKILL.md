@@ -69,7 +69,9 @@ v2 references; `runtime.mediaResult` is `artifact-reference`. Upload them throug
 with native metadata, keeping bytes outside Code Mode. Without R2, media `.data`
 is `{encoding:'base64',data,size,mimeType,sha256}` with a 131072-byte cap.
 Small inline uploads remain supported. Inspect `describe({path:'artifacts'})`
-for streaming limits and expiry; large Gmail/MIME and resumable paths are pending.
+for streaming limits and expiry. With storage, trusted Gmail helpers compose and
+retrieve up to 1 MiB of decoded attachments; larger Gmail helpers and resumable
+paths remain pending. Native draft media upload accepts stored message/rfc822.
 Other upload modes and transport overrides remain unavailable. Before composing
 Gmail/Drive transfers, read [media transfers](skill://google-codemode-mcp/google-workspace/references/media-transfers.md)
 through MCP Resources for encoding, composeMime, scopes, examples and limits. Google acknowledgement of a send does not establish recipient delivery.
@@ -95,7 +97,11 @@ Standalone artifact URIs grant their holder read/delete access until expiry.
 Through the gateway, v1 and v2 references also require the verified owner and
 Google account that created them; token rotation does not change ownership.
 Use returned HTTP download links for host file retrieval. Signed R2 URLs expire
-separately and need no Cloudflare Access headers; keep them private. Helpers are
+separately and need no Cloudflare Access headers; keep them private. When `clientUpload.enabled` is advertised, use the gateway's `artifact_upload`
+MCP tool for upload grants and completion, with local file tooling for direct R2
+PUT. Never extract host OAuth credentials or send MCP authorization to signed
+transfer URLs. Stored Gmail composition/attachment helpers are described in the
+media-transfer resource; inline inspection stays bounded. Helpers are
 unavailable inside snippets.
 Inspect the separate trusted storage ledger after errors; storage does not undo
 Google writes. Physical R2 lifecycle and host file presentation need separate proof.

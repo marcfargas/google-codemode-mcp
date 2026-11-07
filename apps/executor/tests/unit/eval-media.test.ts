@@ -532,6 +532,7 @@ test('forward cleanup never recursively deletes folders with unknown or incomple
   const previous = globalThis.fetch;
   try {
     for (const children of [
+      {},
       { files: [] },
       { files: [{ id: 'existing-child' }] },
       { files: [], incompleteSearch: true },
@@ -580,7 +581,7 @@ test('forward cleanup never recursively deletes folders with unknown or incomple
       assert.ok(deleted.includes('/gmail/v1/users/me/drafts/owned-draft'));
       assert.equal(
         deleted.includes('/drive/v3/files/owned-folder'),
-        children.files.length === 0 &&
+        (children.files?.length ?? 0) === 0 &&
           !('incompleteSearch' in children) &&
           !('nextPageToken' in children),
       );

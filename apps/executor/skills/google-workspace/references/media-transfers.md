@@ -41,9 +41,75 @@ provided. These bounds are not measured live/hosted capacity.
 
 Without storage, downloads retain the 128 KiB inline envelope below and reference
 uploads are unavailable. Small inline uploads remain supported with storage too.
-Gmail attachments remain bounded JSON/base64url; large Gmail decode/MIME streaming
-and resumable upload are not implemented. Do not move large files through
+Gmail native attachments remain JSON/base64url; the explicit trusted helpers
+below handle up to 1 MiB. Unbounded Gmail decode/MIME streaming and resumable
+upload are not implemented. Do not move large files through
 `artifacts.readBytes`, `putBytes`, MCP chunks or a giant Gmail `raw` value.
+
+## Stored Gmail attachments beyond the inline limit
+
+When `describe({path:'artifacts'})` advertises the Gmail helpers, top-level
+`execute` can compose up to 1 MiB of decoded attachments (at most eight),
+with a 64 KiB UTF-8 text body. The trusted executor verifies the stored references,
+buffers within this dedicated bound, constructs MIME and stores it. No bytes
+return to the sandbox. Existing `readBytes`, inline uploads and the pure
+`composeMime` snippet keep their 128 KiB limits. Helpers are unavailable inside
+snippets. A helper's 15-second deadline includes Google and storage work; inspect
+both Google and artifact outcomes after failure.
+
+Describe `drive/v3/files.get`, `gmail/v1/users.drafts.create`, the message or
+draft getter used to select the MIME part, `gmail/v1/users.messages.attachments.get`
+and `drive/v3/files.create` before executing their calls:
+
+```js
+const drive = google.drive({ version: 'v3' });
+const gmail = google.gmail({ version: 'v1' });
+const { data: source } = await drive.files.get({ fileId: inputs.fileId, alt: 'media' });
+const mime = await artifacts.composeMime({
+  to: inputs.recipient,
+  subject: inputs.subject,
+  text: 'Attachment',
+  attachments: [{ artifact: source.uri, name: inputs.name, mimeType: source.mimeType }],
+});
+const { data: draft } = await gmail.users.drafts.create({
+  userId: 'me',
+  requestBody: {},
+  media: { mimeType: 'message/rfc822', body: { artifact: mime.uri } },
+});
+return { draftId: draft.id, source, mime };
+```
+
+This creates an unsent draft. Describe and read `users.drafts.get` with
+`format:'full'`, walk its nested `message.payload.parts`, and choose the intended
+attachment. Its filename and MIME type come from that message part; the attachment
+getter itself supplies neither. In a subsequent execution:
+
+```js
+const file = await artifacts.fromGmailAttachment(
+  { userId: 'me', messageId: inputs.messageId, id: inputs.attachmentId },
+  { name: inputs.filename, mimeType: inputs.mimeType },
+);
+const { data: copy } = await google.drive({ version: 'v3' }).files.create({
+  requestBody: { name: file.name },
+  media: { mimeType: file.mimeType, body: { artifact: file.uri } },
+});
+await artifacts.delete(file.uri);
+return copy;
+```
+
+Gmail attachment retrieval is bounded JSON/base64url decoding into storage, not
+native byte streaming. The helper records the native `attachments.get` outcome
+and separate storage outcomes, validates canonical encoding and decoded size,
+and returns a complete reference only. Ordinary `attachments.get` remains
+unchanged for small inline consumers. Gmail media upload is enabled for native
+`drafts.create` only, with `message/rfc822`; do not also supply
+`requestBody.message.raw`. Sending, resumable upload and larger Gmail helper
+payloads remain unsupported. Delete the retained source/MIME references and only
+the draft/file IDs you created when finished.
+
+Native empty responses can return `status:204,data:null`. Cleanup should inspect
+acknowledged outcomes and tolerate absent list arrays; it must not dereference an
+empty response body or interpret a missing body as an uncertain mutation.
 
 ## Gmail attachments to a chosen Drive folder
 
