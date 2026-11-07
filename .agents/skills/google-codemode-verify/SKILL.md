@@ -208,7 +208,10 @@ runs merely to report these existing metrics.
 
 For gateway changes, `apps/gateway/tests/auth.test.ts` exercises the actual OAuth
 provider with synthetic Google/CFA endpoints: admission, consent binding,
-encrypted grants, downstream token exchange, refresh and stable owner context.
+encrypted grants, downstream token exchange, refresh rotation, client/resource
+binding, transient-error recovery, terminal upstream grant teardown, and access-token
+versus whole-grant revocation. These are actual-provider local checks; they do not
+prove hosted refresh or instantaneous global KV revocation.
 Root `tests/integration/gateway-executor.test.ts` exercises two Workers with the
 named executor service binding: hidden token arguments, Skills/resources,
 v1/v2 ownership, signed R2 URL shape, upload completion integrity, fail-closed

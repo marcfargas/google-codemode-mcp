@@ -328,6 +328,24 @@ access, but does not physically delete bytes. Do not equate it with a one-hour
 retention guarantee. Hosted artifact access, bucket lifecycle and native host
 file presentation remain unqualified by the existing hosted media/Gmail records.
 
+## Physical artifact lifecycle observation (2026-11-07)
+
+The live bucket's retained rule covered only `artifacts/v1/`. It has been corrected
+to `artifacts/`, preserving the one-day object age and existing seven-day multipart
+abort rule. Current v2 data, manifests and abandoned client uploads now match the
+object rule. New v1 and v2 46-byte fixtures returned the cleanup rule ID and the
+expected next-day expiry in `x-amz-expiration`; their initial GET sizes and hashes
+matched. This establishes policy coverage, while physical deletion remains pending.
+
+The fixtures are intentionally retained without manual deletion. Observe their
+exact keys after **2026-11-09 17:03:25 UTC**, the later advertised expiry plus
+24 hours. A missing object then provides physical-cleanup evidence; explicit
+DELETE followed by 404 would not. R2 lifecycle changes can take time to affect
+older objects, and this is not an exact deletion deadline. See
+[Cloudflare lifecycle behavior](https://developers.cloudflare.com/r2/buckets/object-lifecycles/).
+The recovery checkpoint and exact object keys are retained in the operator's
+private task evidence; neither fixture contains credentials or user data.
+
 ## Artifact storage qualification (2026-11-05)
 
 Miniflare already emulates the R2 Worker object API. The maintained artifact suite

@@ -125,7 +125,7 @@ test('verified admission and stable ownership survive token rotation; upstream r
                     'openid email https://www.googleapis.com/auth/gmail.modify https://www.googleapis.com/auth/drive.file',
                 });
               }
-              assert.equal(body.get('refresh_token'), 'refresh');
+              assert.ok(['refresh', 'granted-refresh'].includes(body.get('refresh_token')!));
               tokenCalls++;
               return MiniflareResponse.json(tokenResult, { status: tokenStatus });
             },
@@ -223,19 +223,22 @@ test('verified admission and stable ownership survive token rotation; upstream r
       }
       return response;
     };
-    const registered = await worker.dispatchFetch('https://workspace.example/oauth/register', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        client_name: '<script>host</script>',
-        redirect_uris: ['https://host.example/callback'],
-        token_endpoint_auth_method: 'none',
-        grant_types: ['authorization_code', 'refresh_token'],
-        response_types: ['code'],
-      }),
-    });
-    assert.equal(registered.status, 201, await registered.clone().text());
-    const { client_id: clientId } = (await registered.json()) as { client_id: string };
+    const register = async () => {
+      const registered = await worker.dispatchFetch('https://workspace.example/oauth/register', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          client_name: '<script>host</script>',
+          redirect_uris: ['https://host.example/callback'],
+          token_endpoint_auth_method: 'none',
+          grant_types: ['authorization_code', 'refresh_token'],
+          response_types: ['code'],
+        }),
+      });
+      assert.equal(registered.status, 201, await registered.clone().text());
+      return ((await registered.json()) as { client_id: string }).client_id;
+    };
+    const clientId = await register();
     const verifier = 'host-fixture-pkce-verifier-'.repeat(3);
     const authorization = (resource = 'https://workspace.example/mcp') =>
       '/authorize?' +
@@ -303,12 +306,14 @@ test('verified admission and stable ownership survive token rotation; upstream r
       redirect_uri: 'https://host.example/callback',
       resource: 'https://workspace.example/mcp',
     };
-    const exchange = (codeVerifier: string) =>
+    const tokenRequest = (body: Record<string, string>) =>
       worker.dispatchFetch('https://workspace.example/oauth/token', {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ ...tokenBody, code_verifier: codeVerifier }).toString(),
+        body: new URLSearchParams(body).toString(),
       });
+    const exchange = (codeVerifier: string) =>
+      tokenRequest({ ...tokenBody, code_verifier: codeVerifier });
     assert.equal((await exchange('wrong-verifier'.repeat(5))).status, 400);
     const issued = await exchange(verifier);
     assert.equal(issued.status, 200);
@@ -332,6 +337,104 @@ test('verified admission and stable ownership survive token rotation; upstream r
         'stored Google credentials are encrypted',
       );
     }
+
+    const apiToken = (accessToken: string) =>
+      worker.dispatchFetch('https://workspace.example/mcp', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${accessToken}` },
+      });
+    const refresh = (refreshToken: string, overrides: Record<string, string> = {}) =>
+      tokenRequest({
+        grant_type: 'refresh_token',
+        client_id: clientId,
+        refresh_token: refreshToken,
+        resource: 'https://workspace.example/mcp',
+        ...overrides,
+      });
+    const revoke = (value: string, hint: string, client = clientId) =>
+      tokenRequest({ client_id: client, token: value, token_type_hint: hint });
+    const foreignClient = await register();
+    assert.equal(
+      (await refresh(token.refresh_token, { resource: 'https://other.example/mcp' })).status,
+      400,
+    );
+    assert.equal((await refresh(token.refresh_token, { client_id: foreignClient })).status, 400);
+    assert.equal((await revoke(token.refresh_token, 'refresh_token', foreignClient)).status, 200);
+    assert.equal((await apiToken(token.access_token)).status, 200);
+    assert.equal(
+      tokenCalls,
+      3,
+      'invalid resource/client and foreign revocation never reach Google',
+    );
+
+    tokenStatus = 200;
+    tokenResult = { access_token: 'new', token_type: 'Bearer', expires_in: 1800 };
+    const refreshResponse = await refresh(token.refresh_token);
+    assert.equal(refreshResponse.status, 200);
+    const rotated = (await refreshResponse.json()) as any;
+    assert.notEqual(rotated.refresh_token, token.refresh_token);
+    assert.ok(rotated.expires_in <= 1740 && rotated.expires_in >= 1738);
+    assert.doesNotMatch(JSON.stringify(rotated), /granted-access|granted-refresh/);
+    assert.deepEqual(await (await apiToken(rotated.access_token)).json(), {
+      identity: props.identity,
+      subject: 'google-human',
+      bound: false,
+    });
+    tokenStatus = 503;
+    tokenResult = { error: 'temporarily_unavailable' };
+    const temporary = await refresh(rotated.refresh_token);
+    assert.equal(temporary.status, 503);
+    assert.equal(((await temporary.json()) as any).error, 'temporarily_unavailable');
+    assert.equal((await apiToken(rotated.access_token)).status, 200);
+    tokenStatus = 200;
+    tokenResult = { access_token: 'new', token_type: 'Bearer', expires_in: 1800 };
+    const recoveredResponse = await refresh(rotated.refresh_token);
+    assert.equal(recoveredResponse.status, 200, 'temporary failure preserves the refresh grant');
+    const recovered = (await recoveredResponse.json()) as any;
+    assert.notEqual(recovered.refresh_token, rotated.refresh_token);
+    assert.equal(
+      (await refresh(token.refresh_token)).status,
+      400,
+      'using the replacement retires older tokens',
+    );
+    assert.equal(tokenCalls, 6);
+    assert.equal((await revoke(recovered.access_token, 'access_token')).status, 200);
+    assert.equal((await apiToken(recovered.access_token)).status, 401);
+    assert.equal(
+      (await apiToken(rotated.access_token)).status,
+      200,
+      'access revocation leaves other tokens intact',
+    );
+
+    tokenStatus = 400;
+    tokenResult = { error: 'invalid_grant' };
+    const terminal = await refresh(recovered.refresh_token);
+    assert.equal(terminal.status, 400);
+    assert.equal(((await terminal.json()) as any).error, 'invalid_grant');
+    assert.equal((await apiToken(token.access_token)).status, 401);
+    assert.equal((await apiToken(rotated.access_token)).status, 401);
+    assert.equal((await refresh(recovered.refresh_token)).status, 400);
+    assert.equal(
+      tokenCalls,
+      7,
+      'terminal upstream failure removes the grant before another Google call',
+    );
+
+    const revocable = await begin();
+    const callback = await browser(revocable.callback, revocable.cookies);
+    assert.equal(callback.status, 302);
+    const newGrant = await tokenRequest({
+      ...tokenBody,
+      code: new URL(callback.headers.get('location')!).searchParams.get('code')!,
+      code_verifier: verifier,
+    });
+    assert.equal(newGrant.status, 200);
+    const fresh = (await newGrant.json()) as any;
+    assert.equal((await apiToken(fresh.access_token)).status, 200);
+    assert.equal((await revoke(fresh.refresh_token, 'refresh_token')).status, 200);
+    assert.equal((await apiToken(fresh.access_token)).status, 401);
+    assert.equal((await refresh(fresh.refresh_token)).status, 400);
+    assert.equal(tokenCalls, 7, 'explicit downstream revocation never revokes or refreshes Google');
   } finally {
     await worker.dispose();
   }
