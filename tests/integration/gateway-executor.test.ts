@@ -286,6 +286,17 @@ test('gateway and executor preserve discovery, trusted ownership, isolated crede
       alias.headers.get('location'),
       'https://workspace.example/authorize?client_id=example',
     );
+    assert.equal(
+      (
+        await call(
+          'tools/call',
+          { name: 'execute', arguments: { code: 'return 1;' } },
+          { 'x-expired-google': '1' },
+        )
+      ).httpStatus,
+      401,
+      'expired Google credentials refuse execution',
+    );
     const tools = await call('tools/list');
     assert.ok(tools.result.tools.some((tool: any) => tool.name === 'execute'));
     assert.ok(tools.result.tools.some((tool: any) => tool.name === 'artifact_upload'));

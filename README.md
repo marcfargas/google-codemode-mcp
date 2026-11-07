@@ -152,15 +152,27 @@ are never automatically replayed.
 
 Upload grants last ten minutes; complete artifacts last one hour. Configure a
 one-day lifecycle for `artifacts/` and abort abandoned multipart uploads as a
-physical cleanup backstop. Expiry is enforced on reads; abandoned staging data
-waits for lifecycle cleanup. Browser clients need bucket CORS permitting their
+physical cleanup backstop. The prefix must cover both v1 and v2, including
+manifests and abandoned client uploads. Expiry is enforced on reads; abandoned
+staging data waits for lifecycle cleanup. Browser clients need bucket CORS permitting their
 origin, PUT and the signed request headers. Host file presentation depends on
 the particular client.
 
-Local workerd tests exercise the actual OAuth provider's browser/PKCE/nonce and
-refresh flow, two-worker ownership and credential isolation, file staging,
-manifest validation and lost-response behavior. They do not establish real R2
-signature redemption, deployed CFA policy, hosted Google consent or Claude,
+Local workerd tests exercise the actual OAuth provider's browser/PKCE/nonce,
+refresh rotation, client/resource binding and revocation. Transient Google refresh
+failures preserve the grant; terminal `invalid_grant` invalidates its downstream
+tokens. They also cover expired-Google execution refusal, two-worker ownership
+and credential isolation, file staging, manifest validation and lost responses.
+Public OAuth clients (`token_endpoint_auth_method=none`) revoke a downstream
+grant by POSTing form fields `client_id`, `token` and `token_type_hint=refresh_token`
+to `/oauth/token`, without `grant_type`. Confidential clients must also use their
+configured token-endpoint authentication. Access-token
+revocation uses `token_type_hint=access_token` and leaves other tokens intact.
+Downstream revocation does not revoke Google consent. Hosted KV propagation and
+actual hosted refresh/revocation require separate verification.
+
+These local checks alone do not establish real R2 signature redemption, deployed
+CFA policy, hosted Google consent or Claude,
 ChatGPT/OpenClaw acceptance. Historical paid and hosted evidence below remains
 qualified by its original source identity.
 
