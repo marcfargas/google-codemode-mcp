@@ -43,7 +43,7 @@ passing acceptance. Keep candidate equivalence and unselected coverage explicit.
 | Selected retained agent acceptance                        | `just eval-verify /absolute/saved/evidence /absolute/new/report`  | Same offline report with nonzero exit for failed/incomplete/synthetic acceptance; current-source relevance requires inspection |
 | Real Gmail behavior                                       | `just live`                                                       | Manual credentialed Gmail workflow through locally built Worker                                                                |
 | Real Drive behavior                                       | `just live-drive`                                                 | Manual credentialed Drive download/rename, conditional-option refusal and pagination through locally built Worker              |
-| Real attachment composition                               | `just live-media`                                                 | Three built-Worker controls: Gmail to Drive, Drive blob/native export to Gmail draft, exact bytes/MIME and owned cleanup       |
+| Real attachment composition                               | `just live-media`                                                 | Four built-Worker controls: inline Gmail/Drive and native export, plus a 256 KiB stored Drive → Gmail draft → Drive round trip |
 | Agent media feasibility                                   | `just eval-media PROXY_URL /absolute/new/evidence all required`   | Two cases × Sonnet/Sol, ordered advanced-resource retrieval, independent readback and four $1 estimates                        |
 | Agent feasibility                                         | `just eval-matrix gmail PROXY_URL /absolute/new/evidence`         | Manual paid Sonnet/Sol required pair, one fresh attempt each                                                                   |
 | Independent Gmail cases                                   | `just eval-gmail PROXY_URL /absolute/new/evidence`                | Six cases, one fresh attempt per model/case, up to twelve $1 estimates                                                         |
@@ -150,7 +150,11 @@ execution in paid cases. No send is necessary. Cleanup ownership comes only from
 fixture-created and trusted acknowledged create IDs. Markers, folder membership
 and answer.json IDs never authorize deletion. Inspect folder-child inventory and
 unreconciled writes before folder deletion; retained folders or unknown effects
-fail cleanup. Live controls cover native export; the paid reverse case uses a blob.
+fail cleanup. Live controls cover native export and the explicit stored-reference Gmail helpers
+with a 256 KiB blob. The helper case requires independent exact file/attachment
+readback, no payload in receipts, artifact deletion and 404s for trusted fixture
+IDs after cleanup. This is a real-account built-Worker check; it does not exercise
+a native host or redeem the gateway's signed upload URL. The paid reverse case uses a blob.
 Neither establishes durable artifacts or hosted media qualification.
 
 R2-enabled native media uses v2 streamed references; without R2 it retains the

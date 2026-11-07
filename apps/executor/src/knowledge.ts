@@ -42,9 +42,75 @@ provided. These bounds are not measured live/hosted capacity.
 
 Without storage, downloads retain the 128 KiB inline envelope below and reference
 uploads are unavailable. Small inline uploads remain supported with storage too.
-Gmail attachments remain bounded JSON/base64url; large Gmail decode/MIME streaming
-and resumable upload are not implemented. Do not move large files through
+Gmail native attachments remain JSON/base64url; the explicit trusted helpers
+below handle up to 1 MiB. Unbounded Gmail decode/MIME streaming and resumable
+upload are not implemented. Do not move large files through
 \`artifacts.readBytes\`, \`putBytes\`, MCP chunks or a giant Gmail \`raw\` value.
+
+## Stored Gmail attachments beyond the inline limit
+
+When \`describe({path:'artifacts'})\` advertises the Gmail helpers, top-level
+\`execute\` can compose up to 1 MiB of decoded attachments (at most eight),
+with a 64 KiB UTF-8 text body. The trusted executor verifies the stored references,
+buffers within this dedicated bound, constructs MIME and stores it. No bytes
+return to the sandbox. Existing \`readBytes\`, inline uploads and the pure
+\`composeMime\` snippet keep their 128 KiB limits. Helpers are unavailable inside
+snippets. A helper's 15-second deadline includes Google and storage work; inspect
+both Google and artifact outcomes after failure.
+
+Describe \`drive/v3/files.get\`, \`gmail/v1/users.drafts.create\`, the message or
+draft getter used to select the MIME part, \`gmail/v1/users.messages.attachments.get\`
+and \`drive/v3/files.create\` before executing their calls:
+
+\`\`\`js
+const drive = google.drive({ version: 'v3' });
+const gmail = google.gmail({ version: 'v1' });
+const { data: source } = await drive.files.get({ fileId: inputs.fileId, alt: 'media' });
+const mime = await artifacts.composeMime({
+  to: inputs.recipient,
+  subject: inputs.subject,
+  text: 'Attachment',
+  attachments: [{ artifact: source.uri, name: inputs.name, mimeType: source.mimeType }],
+});
+const { data: draft } = await gmail.users.drafts.create({
+  userId: 'me',
+  requestBody: {},
+  media: { mimeType: 'message/rfc822', body: { artifact: mime.uri } },
+});
+return { draftId: draft.id, source, mime };
+\`\`\`
+
+This creates an unsent draft. Describe and read \`users.drafts.get\` with
+\`format:'full'\`, walk its nested \`message.payload.parts\`, and choose the intended
+attachment. Its filename and MIME type come from that message part; the attachment
+getter itself supplies neither. In a subsequent execution:
+
+\`\`\`js
+const file = await artifacts.fromGmailAttachment(
+  { userId: 'me', messageId: inputs.messageId, id: inputs.attachmentId },
+  { name: inputs.filename, mimeType: inputs.mimeType },
+);
+const { data: copy } = await google.drive({ version: 'v3' }).files.create({
+  requestBody: { name: file.name },
+  media: { mimeType: file.mimeType, body: { artifact: file.uri } },
+});
+await artifacts.delete(file.uri);
+return copy;
+\`\`\`
+
+Gmail attachment retrieval is bounded JSON/base64url decoding into storage, not
+native byte streaming. The helper records the native \`attachments.get\` outcome
+and separate storage outcomes, validates canonical encoding and decoded size,
+and returns a complete reference only. Ordinary \`attachments.get\` remains
+unchanged for small inline consumers. Gmail media upload is enabled for native
+\`drafts.create\` only, with \`message/rfc822\`; do not also supply
+\`requestBody.message.raw\`. Sending, resumable upload and larger Gmail helper
+payloads remain unsupported. Delete the retained source/MIME references and only
+the draft/file IDs you created when finished.
+
+Native empty responses can return \`status:204,data:null\`. Cleanup should inspect
+acknowledged outcomes and tolerate absent list arrays; it must not dereference an
+empty response body or interpret a missing body as an uncertain mutation.
 
 ## Gmail attachments to a chosen Drive folder
 
@@ -233,27 +299,37 @@ without Cloudflare Access headers or an MCP token. Do not send the MCP token to
 R2. Request a fresh link through the authenticated gateway after URL expiry.
 A valid link does not establish that your host presents a downloadable file.
 
-To upload a host-side file without sending bytes through MCP or Code Mode, use
-the gateway's authenticated HTTP endpoints:
+To upload a local file, inspect \`describe({path:'artifacts'})\` for
+\`clientUpload.enabled\`. When enabled, use the gateway's \`artifact_upload\` MCP
+tool through the existing authenticated MCP connection:
 
-1. POST \`/mcp/artifacts/upload\` with JSON
-   \`{size,sha256,mimeType,name?}\`. Size is the raw byte length, at most 64 MiB;
-   SHA-256 is the lowercase hexadecimal digest of those bytes.
-2. PUT the raw bytes to the returned \`uploadUrl\`, using the returned \`method\` and
-   \`headers\` exactly. The signature fixes length, MIME type and \`If-None-Match: *\`,
-   which refuses replacement. The upload grant expires after ten minutes.
-3. POST \`/mcp/artifacts/complete\` with JSON \`{uri}\` using the same authenticated
-   gateway identity. The executor reads storage directly, verifies size and hash,
-   then commits the owner's complete v2 manifest. Use the returned reference only
-   after completion. A lost completion response can be reconciled through the same
-   endpoint before the grant expires; this does not replay a Google mutation.
+1. Call \`artifact_upload({action:'grant',size,sha256,mimeType,name?})\`. Size is
+   the raw byte length, at most 64 MiB; SHA-256 is its lowercase hexadecimal hash.
+2. Use local file tooling to PUT the bytes directly to \`uploadUrl\` with the exact
+   returned \`method\` and \`headers\`. The signature fixes size, MIME type and
+   \`If-None-Match: *\`. Do not attach MCP OAuth or Cloudflare Access headers.
+3. Call \`artifact_upload({action:'complete',uri})\` on the same MCP connection.
+   The executor verifies stored size/hash and commits the complete owner-bound
+   v2 manifest. Pass that reference to a discovered native Drive upload method.
 
-The original bytes move between the client and R2. Completion carries metadata
-through the service binding, and Code Mode can subsequently pass the reference to
-a discovered Drive upload method. The gateway also accepts POST
-\`/mcp/artifacts/download\` with JSON \`{uri}\` to issue a fresh download reference.
-These HTTP endpoints are separate from MCP tool calls and require the gateway's
-normal authentication and configured admission.
+Never extract OAuth tokens from the host credential store to authenticate a
+separate HTTP tool. The file bytes travel directly between the client and R2;
+only grant and reference metadata travel through MCP or the service binding.
+Signed upload and download URLs are capabilities: keep them private even though
+the host needs to see them to perform the transfer.
+
+If a PUT response is lost, complete the retained URI to check whether correct
+bytes reached storage; a repeated create-only PUT can return 412. A lost
+completion response can be reconciled by repeating \`complete\` on the same URI
+while the ten-minute grant remains valid. After grant expiry, \`resources/read\`
+can recover an already committed manifest until its one-hour expiry; it cannot
+finalize staging data. An uncommitted expired upload needs a new grant. Abandoned
+staging data waits for lifecycle cleanup. None of this replays a Google mutation.
+
+HTTP clients which already manage gateway authentication can still POST metadata
+to \`/mcp/artifacts/upload\`, \`/mcp/artifacts/complete\` or
+\`/mcp/artifacts/download\`. These endpoints retain normal authentication and
+configured admission; ordinary host HTTP tools do not inherit MCP credentials.
 
 Local two-Worker checks cover ownership, signed-grant shape, completion integrity
 and metadata-only transfer. Live R2 signatures, hosted deployment and actual

@@ -1,6 +1,15 @@
 import { createProvider } from './auth.ts';
 import { canonicalOrigin, isAllowed, ownerFor, verifyAccess } from './identity.ts';
-import { artifactRequest, boundedText, download, type RuntimeEnv } from './artifacts.ts';
+import {
+  artifactRequest,
+  boundedText,
+  clientUploadCapabilities,
+  download,
+  handleUploadMcp,
+  uploadAction,
+  uploadTool,
+  type RuntimeEnv,
+} from './artifacts.ts';
 import type { AuthContext, GatewayEnv } from './types.ts';
 
 const version = '2026-07-28';
@@ -63,7 +72,8 @@ export async function proxy(
       -32602,
       'Credential and owner arguments are supplied by the gateway',
     );
-  if (message.method === 'tools/call' && message.params?.name !== 'describe') {
+  const localUpload = message.method === 'tools/call' && message.params?.name === uploadTool.name;
+  if (message.method === 'tools/call' && message.params?.name !== 'describe' && !localUpload) {
     if (context.props.google.expiresAt <= Date.now() + 1000)
       return new Response('Google grant expired; refresh the MCP token', {
         status: 401,
@@ -81,15 +91,19 @@ export async function proxy(
   if (headers.get('MCP-Protocol-Version') !== version)
     return rpcError(message.id, -32600, `MCP revision ${version} required`);
   let response: Response;
+  let result: any;
+  if (localUpload && !uploadAction(args))
+    return rpcError(message.id, -32602, 'Invalid artifact_upload arguments');
   try {
-    response = await env.EXECUTOR.mcp(
-      new Request('https://executor.internal/mcp', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(message),
-      }),
-      owner,
-    );
+    const forwarded = new Request('https://executor.internal/mcp', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(message),
+    });
+    response = localUpload
+      ? await handleUploadMcp(forwarded, env, owner)
+      : await env.EXECUTOR.mcp(forwarded, owner);
+    result = JSON.parse(await boundedText(response, 4 * 1024 * 1024));
   } catch {
     // In particular, never replay a tools/call after a lost response.
     return rpcError(
@@ -98,23 +112,31 @@ export async function proxy(
       'Executor response unavailable; effects may be unknown. Reconcile before repeating a mutation.',
     );
   }
-  let result: any;
-  try {
-    result = JSON.parse(await boundedText(response, 4 * 1024 * 1024));
-  } catch {
-    return rpcError(
-      message.id,
-      -32603,
-      'Executor response unavailable; effects may be unknown. Reconcile before repeating a mutation.',
-    );
-  }
   if (message.method === 'tools/list' && Array.isArray(result.result?.tools)) {
+    if (result.result.tools.some((tool: any) => tool.name === uploadTool.name))
+      return rpcError(message.id, -32603, 'Gateway tool name collides with executor tool');
     for (const tool of result.result.tools) {
       if (tool.inputSchema?.properties) delete tool.inputSchema.properties.accessToken;
       if (Array.isArray(tool.inputSchema?.required))
         tool.inputSchema.required = tool.inputSchema.required.filter(
           (key: string) => key !== 'accessToken',
         );
+    }
+    if (clientUploadCapabilities(env).enabled) result.result.tools.push(uploadTool);
+  }
+  if (
+    message.method === 'tools/call' &&
+    message.params?.name === 'describe' &&
+    result.result?.structuredContent &&
+    !result.result.isError
+  ) {
+    const capability = clientUploadCapabilities(env);
+    const content = result.result.structuredContent;
+    if (args?.path === 'artifacts') content.clientUpload = capability;
+    else if (!args?.path && content.artifacts) content.artifacts.clientUpload = capability;
+    if (args?.path === 'artifacts' || !args?.path) {
+      const text = result.result.content?.find((item: any) => item.type === 'text');
+      if (text) text.text = JSON.stringify(content);
     }
   }
   // URL failure cannot turn an acknowledged Google write into an apparent failure.

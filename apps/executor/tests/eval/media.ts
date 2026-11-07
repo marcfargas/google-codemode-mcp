@@ -323,6 +323,7 @@ export async function prepareMediaFixture(options: {
   expectedUser: string;
   caseId?: string;
   exportSource?: boolean;
+  byteLength?: number;
   onEvent?: (manifest: unknown) => Promise<unknown> | void;
 }): Promise<MediaFixture> {
   const selected = getMediaCase(options.caseId);
@@ -335,6 +336,15 @@ export async function prepareMediaFixture(options: {
     randomBytes(64),
     Buffer.from('\n'),
   ]);
+  if (options.byteLength !== undefined) {
+    if (
+      !Number.isSafeInteger(options.byteLength) ||
+      options.byteLength < 1 ||
+      options.byteLength > 1048576
+    )
+      throw new Error('Invalid controlled media fixture size');
+    bytes = Buffer.from(Array.from({ length: options.byteLength }, (_, index) => index % 251));
+  }
   const knownFiles: string[] = [];
   const knownDrafts: string[] = [];
   const actorFiles = new Set<string>();
@@ -413,8 +423,9 @@ export async function prepareMediaFixture(options: {
     await emit();
     return value;
   }
-  async function jsonRead(path: string) {
-    return (await request(path)).json() as Promise<Record<string, any>>;
+  async function jsonRead(path: string): Promise<Record<string, any>> {
+    const response = await request(path);
+    return response.status === 204 ? {} : (response.json() as Promise<Record<string, any>>);
   }
   async function draftIds() {
     const ids: string[] = [];
@@ -456,9 +467,13 @@ export async function prepareMediaFixture(options: {
       pageSize: '100',
     });
     const result = await jsonRead(`drive/v3/files?${q}`);
-    if (result.nextPageToken || result.incompleteSearch === true || !Array.isArray(result.files))
+    if (
+      result.nextPageToken ||
+      result.incompleteSearch === true ||
+      (result.files !== undefined && !Array.isArray(result.files))
+    )
       throw new Error('Target inventory incomplete');
-    return result.files.filter((file: any) => !knownFiles.includes(file.id));
+    return (result.files ?? []).filter((file: any) => !knownFiles.includes(file.id));
   }
   const initialDraftIds = await draftIds();
   const expected: MediaExpected = {
@@ -523,8 +538,8 @@ export async function prepareMediaFixture(options: {
               }),
           );
           if (
-            !Array.isArray(children.files) ||
-            children.files.length ||
+            (children.files !== undefined && !Array.isArray(children.files)) ||
+            (children.files ?? []).length ||
             children.nextPageToken ||
             children.incompleteSearch === true ||
             [...writes, ...actorWrites.values()].some(

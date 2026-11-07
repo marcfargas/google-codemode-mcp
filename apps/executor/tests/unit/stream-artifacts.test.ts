@@ -3,6 +3,7 @@ import test from 'node:test';
 import { createHash } from 'node:crypto';
 import { createStreamArtifactStore } from '../../src/stream-artifacts.ts';
 import type { Storage } from '../../src/storage.ts';
+import { composeReferenceMime, decodeGmailAttachment } from '../../src/reference-mime.ts';
 
 function memoryStorage() {
   const objects = new Map<string, Uint8Array>();
@@ -111,4 +112,61 @@ test('closing during a late manifest commit seals unknown outcome and cleans bot
   await assert.rejects(pending, /ARTIFACT_CLOSED/);
   assert.equal(objects.size, 0);
   assert.deepEqual(session.snapshot(), sealed);
+});
+
+test('trusted MIME composition verifies references, headers, owner, MIME and aggregate bounds', async () => {
+  const { storage, objects } = memoryStorage();
+  const session = createStreamArtifactStore(storage, { owner: 'a' }).createExecution({
+    token: 'canary',
+  });
+  const source = await session.put(new Response(new Uint8Array(262144)).body!, metadata);
+  const message = {
+    to: 'recipient@example.test',
+    subject: 'Résumé',
+    text: 'Body',
+    attachments: [{ artifact: source.uri, name: 'résumé.bin', mimeType: 'text/plain' }],
+  };
+  const signal = new AbortController().signal;
+  const mime = await composeReferenceMime(message, session, signal);
+  assert.equal(mime.mimeType, 'message/rfc822');
+  assert.ok(mime.size > source.size);
+  for (const input of [
+    { ...message, to: 'recipient@example.test\r\nBcc: injected@example.test' },
+    { ...message, attachments: [{ ...message.attachments[0], name: 'bad\nname' }] },
+    { ...message, attachments: [{ ...message.attachments[0], mimeType: 'text/html' }] },
+    { ...message, attachments: Array(5).fill(message.attachments[0]) },
+    {
+      ...message,
+      attachments: [{ ...message.attachments[0], artifact: 'https://example.test/file' }],
+    },
+  ])
+    await assert.rejects(composeReferenceMime(input, session, signal));
+  const other = createStreamArtifactStore(storage, { owner: 'b' }).createExecution({
+    token: 'canary',
+  });
+  await assert.rejects(composeReferenceMime(message, other, signal), /ARTIFACT_UNAVAILABLE/);
+  const key = [...objects.keys()].find((key) => key.endsWith('/data'))!;
+  objects.get(key)![0] ^= 1;
+  await assert.rejects(composeReferenceMime(message, session, signal), /ARTIFACT_INTEGRITY/);
+  session.close();
+  other.close();
+});
+
+test('Gmail attachment JSON adapter requires canonical base64url and exact decoded native size', () => {
+  const bytes = Buffer.alloc(1024 * 1024, 255);
+  assert.deepEqual(
+    decodeGmailAttachment({ data: bytes.toString('base64url'), size: bytes.length }),
+    bytes,
+  );
+  for (const body of [
+    { data: 'Zh==', size: 1 },
+    { data: 'Zg=', size: 1 },
+    { data: '/w==', size: 1 },
+    { data: 'Zg', size: 2 },
+    { data: 'Zg', size: -1 },
+    { data: 'Zg', size: 1.5 },
+    { data: Buffer.alloc(bytes.length + 1).toString('base64url'), size: bytes.length + 1 },
+  ])
+    assert.throws(() => decodeGmailAttachment(body));
+  assert.equal(decodeGmailAttachment({ data: '', size: 0 }).length, 0);
 });

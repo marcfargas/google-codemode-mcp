@@ -20,7 +20,10 @@ import {
   jsonBytes,
   artifactUpload,
   streamUploadWire,
+  validateMethodUpload,
+  maxArtifactUploadBytes,
 } from './media.ts';
+import { decodeGmailAttachment, MAX_ATTACHMENT_JSON_BYTES } from './reference-mime.ts';
 import { MAX_STREAM_BYTES } from './storage.ts';
 import type { StreamArtifactExecution } from './stream-artifacts.ts';
 
@@ -74,6 +77,10 @@ interface DispatcherOptions {
 export interface DispatchPolicy {
   services?: readonly string[];
   readOnly?: boolean;
+}
+interface AttachmentProjection {
+  metadata: { name: string; mimeType: string };
+  signal: AbortSignal;
 }
 
 // Native Discovery Endpoint exposes makeEndpoint at runtime, but marks it private
@@ -269,6 +276,7 @@ export function createDispatcher(options: DispatcherOptions) {
     method: MethodMetadata,
     params: unknown,
     record: CallOutcome,
+    attachment?: AttachmentProjection,
   ): Promise<CallResult> {
     if (closed || (method.mutation && unknown)) {
       return failure(record, 'DISPATCH_CLOSED', 'Further Google dispatch is blocked');
@@ -282,7 +290,9 @@ export function createDispatcher(options: DispatcherOptions) {
       ? options.streamArtifacts
         ? MAX_STREAM_BYTES
         : Math.min(limits.maxResponseBytes, MAX_DOWNLOAD_BYTES)
-      : limits.maxResponseBytes;
+      : attachment
+        ? MAX_ATTACHMENT_JSON_BYTES
+        : limits.maxResponseBytes;
     const uploading = Object.hasOwn(params as object, 'media');
     let nativeParams = params;
     let expectedUpload: { metadataJson: string; mimeType: string; bytes: Uint8Array } | undefined;
@@ -290,6 +300,7 @@ export function createDispatcher(options: DispatcherOptions) {
     if (uploading) {
       try {
         if (!supportsUpload(method)) throw new Error('Unsupported media upload');
+        validateMethodUpload(method, params as Record<string, unknown>);
         const body = ((params as Record<string, unknown>).media as { body?: object }).body;
         if (body && Object.hasOwn(body, 'artifact')) {
           if (!options.streamArtifacts) throw new Error('Storage unavailable');
@@ -326,6 +337,9 @@ export function createDispatcher(options: DispatcherOptions) {
         return failure(record, 'DISPATCH_CLOSED', 'Further Google dispatch is blocked');
     }
     const controller = new AbortController();
+    const abort = () => controller.abort(attachment?.signal.reason);
+    attachment?.signal.addEventListener('abort', abort, { once: true });
+    if (attachment?.signal.aborted) abort();
     active.set(record, controller);
     let timer: ReturnType<typeof setTimeout> | undefined;
     let dispatched = false;
@@ -366,6 +380,10 @@ export function createDispatcher(options: DispatcherOptions) {
               await stored.body.cancel();
               throw new Error('Media type differs from stored content');
             }
+            if (stored.reference.size > maxArtifactUploadBytes(method)) {
+              await stored.body.cancel();
+              throw new Error('Media exceeds native method upload limit');
+            }
             // Keep the SDK's URL/parameter construction; replace its Node body.
             (init?.body as unknown as { destroy?: () => void })?.destroy?.();
             const wire = streamUploadWire(headers.get('content-type'), {
@@ -378,7 +396,7 @@ export function createDispatcher(options: DispatcherOptions) {
             uploadBody = wire.body;
             uploadCompletion = wire.completion;
           }
-          if (closed || timedOut || (method.mutation && unknown))
+          if (closed || timedOut || controller.signal.aborted || (method.mutation && unknown))
             throw new Error('Dispatch gate closed');
           const id = (params as Record<string, unknown>).id;
           if (method.path === 'gmail/v1/users.messages.get' && safeAnnotation(id, 256))
@@ -552,6 +570,23 @@ export function createDispatcher(options: DispatcherOptions) {
               },
             };
           }
+          if (attachment) {
+            controller.signal.throwIfAborted();
+            const bytes = decodeGmailAttachment(response.data);
+            const reference = await options.streamArtifacts!.put(new Response(bytes).body!, {
+              ...attachment.metadata,
+              size: bytes.length,
+              signal: controller.signal,
+            });
+            return {
+              ok: true,
+              value: {
+                data: reference,
+                status: response.status,
+                headers: safeHeaders(response.headers),
+              },
+            };
+          }
           const serialized = JSON.stringify(
             response.status === 204 ? null : (response.data ?? null),
           );
@@ -626,9 +661,68 @@ export function createDispatcher(options: DispatcherOptions) {
       );
     } finally {
       controller.abort();
+      attachment?.signal.removeEventListener('abort', abort);
       active.delete(record);
       if (timer !== undefined) clearTimeout(timer);
     }
+  }
+
+  async function call(
+    path: string,
+    params: unknown = {},
+    policy?: DispatchPolicy,
+    attachment?: AttachmentProjection,
+  ): Promise<CallResult> {
+    const record: CallOutcome = {
+      callId: `${options.requestId}:${++sequence}`,
+      path:
+        typeof path === 'string' &&
+        path.length <= 256 &&
+        /^(gmail\/v1|drive\/v3)\/[A-Za-z0-9_.]+$/.test(path)
+          ? path
+          : '<invalid>',
+      mutation: true,
+      outcome: 'not_dispatched',
+    };
+    if (sequence > limits.maxCalls) {
+      if (sequence === limits.maxCalls + 1) outcomes.push(record);
+      return failure(record, 'CALL_LIMIT', 'Google call limit exceeded');
+    }
+    outcomes.push(record);
+    if (record.path === '<invalid>')
+      return failure(record, 'INVALID_PATH', 'Invalid Google method path');
+    let method: MethodMetadata;
+    try {
+      method = await catalog.resolve(path);
+      record.mutation = method.mutation;
+      if (
+        (policy?.readOnly && method.mutation) ||
+        (policy?.services && !policy.services.includes(servicePath(method.path)))
+      )
+        return failure(record, 'POLICY_DENIED', 'Snippet policy does not permit this Google call');
+      try {
+        if (jsonBytes(params) > MAX_UPLOAD_PARAMS_BYTES)
+          return failure(record, 'REQUEST_LIMIT', 'Google parameters exceed execution limit');
+      } catch {
+        return failure(record, 'INVALID_PARAMS', 'Google parameters must be JSON serializable');
+      }
+      if (!validate(method, params, await catalog.document(servicePath(method.path))))
+        return failure(
+          record,
+          'INVALID_PARAMS',
+          'Parameters do not match the supported Google method schema',
+        );
+      params = structuredClone(params);
+    } catch {
+      return failure(record, 'DISCOVERY_ERROR', 'Google method discovery failed');
+    }
+    if (!method.mutation) return dispatch(method, params, record, attachment);
+    const run = mutations.then(() => dispatch(method, params, record));
+    mutations = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   return {
@@ -647,65 +741,14 @@ export function createDispatcher(options: DispatcherOptions) {
         controller.abort();
       }
     },
-    async call(path: string, params: unknown = {}, policy?: DispatchPolicy): Promise<CallResult> {
-      const record: CallOutcome = {
-        callId: `${options.requestId}:${++sequence}`,
-        path:
-          typeof path === 'string' &&
-          path.length <= 256 &&
-          /^(gmail\/v1|drive\/v3)\/[A-Za-z0-9_.]+$/.test(path)
-            ? path
-            : '<invalid>',
-        mutation: true,
-        outcome: 'not_dispatched',
-      };
-      if (sequence > limits.maxCalls) {
-        // Retain one bounded limit record; further attempts cannot grow the ledger.
-        // outcomesComplete then reports whether any attempts were omitted.
-        if (sequence === limits.maxCalls + 1) outcomes.push(record);
-        return failure(record, 'CALL_LIMIT', 'Google call limit exceeded');
-      }
-      outcomes.push(record);
-      if (record.path === '<invalid>')
-        return failure(record, 'INVALID_PATH', 'Invalid Google method path');
-      let method: MethodMetadata;
-      try {
-        method = await catalog.resolve(path);
-        record.mutation = method.mutation;
-        if (
-          (policy?.readOnly && method.mutation) ||
-          (policy?.services && !policy.services.includes(servicePath(method.path)))
-        ) {
-          return failure(
-            record,
-            'POLICY_DENIED',
-            'Snippet policy does not permit this Google call',
-          );
-        }
-        try {
-          if (jsonBytes(params) > MAX_UPLOAD_PARAMS_BYTES)
-            return failure(record, 'REQUEST_LIMIT', 'Google parameters exceed execution limit');
-        } catch {
-          return failure(record, 'INVALID_PARAMS', 'Google parameters must be JSON serializable');
-        }
-        if (!validate(method, params, await catalog.document(servicePath(method.path)))) {
-          return failure(
-            record,
-            'INVALID_PARAMS',
-            'Parameters do not match the supported Google method schema',
-          );
-        }
-        params = structuredClone(params);
-      } catch {
-        return failure(record, 'DISCOVERY_ERROR', 'Google method discovery failed');
-      }
-      if (!method.mutation) return dispatch(method, params, record);
-      const run = mutations.then(() => dispatch(method, params, record));
-      mutations = run.then(
-        () => undefined,
-        () => undefined,
-      );
-      return run;
+    call,
+    storeGmailAttachment(
+      params: unknown,
+      metadata: AttachmentProjection['metadata'],
+      signal: AbortSignal,
+      policy?: DispatchPolicy,
+    ) {
+      return call('gmail/v1/users.messages.attachments.get', params, policy, { metadata, signal });
     },
   };
 }

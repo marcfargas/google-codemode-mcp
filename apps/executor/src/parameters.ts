@@ -51,7 +51,11 @@ export function callableParameters(method: ParameterMethod, artifactUploads = tr
     if (reason) excludedParameters.push({ name, reason, required: schema.required === true });
     else parameters[name] = schema;
   }
-  if (supportsUpload(method)) parameters.media = uploadSchema(artifactUploads);
+  if (supportsUpload(method))
+    parameters.media = uploadSchema(
+      artifactUploads,
+      method.path === 'gmail/v1/users.drafts.create',
+    );
   return {
     parameters,
     excludedParameters,

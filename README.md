@@ -120,6 +120,26 @@ manifest resources include `downloadUrl` and `downloadExpiresAt`. URLs expire
 within ten minutes and no later than the artifact's expiry. CFA protects issuance;
 redemption uses the URL alone. Keep these bearer URLs private.
 
+Agents use the gateway's
+`artifact_upload` MCP tool through their existing authenticated connection:
+
+```js
+artifact_upload({
+  action: 'grant',
+  size: 262144,
+  sha256: '<local SHA-256>',
+  mimeType: 'application/octet-stream',
+  name: 'fixture.bin',
+});
+// Local file tooling PUTs to uploadUrl with the exact returned headers.
+artifact_upload({ action: 'complete', uri: '<grant uri>' });
+```
+
+Only metadata crosses MCP. Never copy MCP authorization or Access headers to R2,
+or extract OAuth credentials from the host's store. The completed reference can
+be passed to native Drive uploads. Discover availability through
+`describe({path:'artifacts'})` and the gateway's tool list.
+
 An authenticated client can also POST to `/mcp/artifacts/download` with `{uri}`.
 For uploads, POST `/mcp/artifacts/upload` with `{size,sha256,mimeType,name?}`. PUT
 the file directly to the returned `uploadUrl` with the returned headers, including
@@ -527,8 +547,9 @@ practical file size below the byte cap. Synthetic Miniflare controls cover a
 33 MiB round trip for known/unknown lengths, source interruption, cancellation,
 cleanup and lost-response mutation fencing; live/hosted large-file support and
 new paid-agent feasibility remain unqualified.
-It does not introduce gateway authentication, client URL signing or large Gmail
-MIME composition. The existing inline byte path remains available without R2.
+The existing inline byte path remains available without R2. The gateway adds
+authenticated client URL signing; the explicit Gmail helpers below handle
+bounded stored attachments.
 
 Read `skill://google-codemode-mcp/google-workspace/references/media-transfers.md`
 for executable transfers and discover the native methods before execution.
@@ -546,14 +567,62 @@ Media-only, update-media, conversion and resumable uploads remain unsupported.
 The trusted host verifies the SDK multipart body and restores a missing closing
 boundary caused by workerd's stream polyfill; other wire differences are refused.
 
+In top-level
+`execute`, compose up to 1 MiB of decoded attachments entirely in the trusted
+executor, create an unsent draft through native media upload, then retrieve an
+attachment directly into storage:
+
+```js
+const mime = await artifacts.composeMime({
+  to: inputs.recipient,
+  subject: inputs.subject,
+  text: 'Attachment',
+  attachments: [{ artifact: inputs.sourceUri, name: inputs.name, mimeType: inputs.mimeType }],
+});
+const gmail = google.gmail({ version: 'v1' });
+const { data: draft } = await gmail.users.drafts.create({
+  userId: 'me',
+  requestBody: {},
+  media: { mimeType: 'message/rfc822', body: { artifact: mime.uri } },
+});
+// After reading the draft/message and selecting the attachment part:
+const file = await artifacts.fromGmailAttachment(
+  { userId: 'me', messageId: draft.message.id, id: inputs.attachmentId },
+  { name: inputs.name, mimeType: inputs.mimeType },
+);
+return (
+  await google.drive({ version: 'v3' }).files.create({
+    requestBody: { name: file.name },
+    media: { mimeType: file.mimeType, body: { artifact: file.uri } },
+  })
+).data;
+```
+
+Describe every native method involved, including the attachment getter invoked
+by the helper. Filename and MIME type come from the selected message part.
+The adapters buffer at most their dedicated bound; this is not unbounded Gmail
+streaming. The pure MIME snippet and public byte inspection remain capped at
+128 KiB. Delete the MIME/source/attachment artifacts and known draft/file IDs
+when finished. Native empty responses can be `204` with `data:null`; cleanup
+must inspect status/outcomes and tolerate missing list arrays.
+
+The 2026-11-07 local `act` live-media run passed all four controls, including
+the 262144-byte stored round trip. Independent Gmail/Drive readback matched exact
+bytes, filename and MIME type; all trusted Google fixture IDs returned 404 after
+cleanup and the local artifact bucket was empty. No email was sent and no
+mutation outcome was unknown. This qualifies real-account behavior through the
+built Worker, with no model inference; it does not qualify a hosted native host
+upload or the new gateway signed PUT.
+
 For the reverse direction, describe the pure `composeMime` snippet and pass Drive
 byte envelopes as attachments. It returns Gmail base64url `raw` for a native
 `users.drafts.create` call. It handles nested MIME encoding and Unicode filenames;
 it makes no Google calls and is not exposed as another tool. See the advanced
 reference for its input limits. Draft verification does not require sending mail.
 
-`just live-media` runs three deterministic real-account controls: Gmail to Drive,
-Drive blob to Gmail draft and native-document export to Gmail draft. The manual
+`just live-media` runs four deterministic real-account controls: Gmail to Drive,
+Drive blob and native-document export to Gmail draft, plus a 256 KiB stored
+Drive → unsent Gmail draft → Drive round trip. The manual
 paid gate is `just eval-media PROXY_URL NEW_ABSOLUTE_OUTPUT all required`: two
 cases × Sonnet/Sol, one attempt each, at most four $1 estimates. Both use the
 existing Gmail/Drive grant. Cleanup deletes only fixture-created and trusted

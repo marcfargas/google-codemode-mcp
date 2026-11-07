@@ -1,6 +1,6 @@
 import type { DiscoveryDocument, DiscoverySchema, MethodMetadata } from './discovery.ts';
 import { callableParameters, supportsDownload } from './parameters.ts';
-import { supportsUpload } from './media.ts';
+import { supportsUpload, GMAIL_DRAFT_MEDIA_REQUEST } from './media.ts';
 
 // Descriptions are generated for one method and only its referenced types.
 // Native Discovery remains the source for runtime validation and dispatch.
@@ -78,7 +78,7 @@ export function methodDeclaration(
       ? `${name}(params: Omit<Params, 'alt'> & {alt: 'media'}): ${result(mediaType)}; ${name}(params: Omit<Params, 'alt'> & {alt?: 'json'}): ${result('Data')}; ${name}(params: Params): ${result('Data | ' + mediaType)};`
       : `${name}(params: Params): ${result(mediaType)};`
     : supportsUpload(method)
-      ? `${name}(params: Omit<Params, 'media'> & {media?: never}): ${result('Data')}; ${name}(params: Params & {media: NonNullable<Params['media']>; requestBody: NonNullable<Params['requestBody']>}): ${result('Data')};`
+      ? `${name}(params: Omit<Params, 'media'> & {media?: never}): ${result('Data')}; ${name}(params: Omit<Params, 'requestBody'> & {media: NonNullable<Params['media']>; requestBody: ${method.path === 'gmail/v1/users.drafts.create' ? render(GMAIL_DRAFT_MEDIA_REQUEST) : "NonNullable<Params['requestBody']>"}}): ${result('Data')};`
       : `${name}(params: Params): ${result('Data')};`;
   return [
     ...aliases,

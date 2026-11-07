@@ -8,8 +8,15 @@ import { SERVICES } from './services.ts';
 import { createArtifactStore } from './artifacts.ts';
 import { registerExecutionArtifactReferences } from './artifact-references.ts';
 import type { StreamArtifactStore } from './stream-artifacts.ts';
+import {
+  attachmentMetadata,
+  composeReferenceMime,
+  REFERENCE_MEDIA_CAPABILITIES,
+} from './reference-mime.ts';
 
 type ArtifactStore = ReturnType<typeof createArtifactStore>;
+// Bound buffered adapters across concurrent requests in the same Worker isolate.
+let activeMediaHelpers = 0;
 
 export interface ExecutionArguments {
   accessToken: string;
@@ -195,10 +202,10 @@ function __artifactJson(value, seen = new Set()) {
   }
   seen.delete(value);
 }
-const artifacts = Object.freeze(Object.fromEntries(['putJson','putBytes','readJson','readBytes','delete'].map(op => [op, async (value, options = {}) => {
+const artifacts = Object.freeze(Object.fromEntries(['putJson','putBytes','readJson','readBytes','delete','composeMime','fromGmailAttachment'].map(op => [op, async (value, options = {}) => {
   __artifactJson(options);
   __artifactJson(value);
-  const input = op === 'putJson' ? {...options,json:__artifactStringify(value)} : op === 'putBytes' ? {...options,body:value} : {uri:value};
+  const input = op === 'composeMime' ? {message:value} : op === 'fromGmailAttachment' ? {params:value,metadata:options} : op === 'putJson' ? {...options,json:__artifactStringify(value)} : op === 'putBytes' ? {...options,body:value} : {uri:value};
   __artifactJson(input);
   const outcome = await hostBridge.artifact(op, __artifactStringify(input));
   if (!outcome.ok) throw Object.assign(new Error(outcome.error.message), outcome.error);
@@ -244,6 +251,7 @@ export async function executeProgram(options: {
     waitUntil: options.waitUntil,
   });
   let snippetCalls = 0;
+  let mediaHelperActive = false;
   const registry = new Map(snippets.map((s) => [s.name, s]));
   const topSnippet = options.snippetName ? registry.get(options.snippetName) : undefined;
   if (options.snippetName && !topSnippet) throw new Error('Unknown snippet');
@@ -267,7 +275,85 @@ export async function executeProgram(options: {
                 ok: false,
                 error: { code: 'ARTIFACT_INPUT', message: 'Invalid artifact input' },
               };
-            const input = JSON.parse(serialized) as { uri?: unknown };
+            if (
+              (op === 'composeMime' || op === 'fromGmailAttachment') &&
+              (serialized.length > REFERENCE_MEDIA_CAPABILITIES.maxInputBytes ||
+                new TextEncoder().encode(serialized).length >
+                  REFERENCE_MEDIA_CAPABILITIES.maxInputBytes)
+            )
+              return {
+                ok: false,
+                error: {
+                  code: 'ARTIFACT_MEDIA_INPUT',
+                  message: 'Reference media input exceeds its bound',
+                },
+              };
+            const input = JSON.parse(serialized) as {
+              uri?: unknown;
+              message?: unknown;
+              params?: unknown;
+              metadata?: unknown;
+            };
+            if (op === 'composeMime' || op === 'fromGmailAttachment') {
+              if (
+                !streamArtifacts ||
+                mediaHelperActive ||
+                activeMediaHelpers >= REFERENCE_MEDIA_CAPABILITIES.maxConcurrentHelpersPerWorker
+              )
+                return {
+                  ok: false,
+                  error: {
+                    code: 'ARTIFACT_MEDIA_LIMIT',
+                    message: 'Reference media helpers require storage and one active helper',
+                  },
+                };
+              mediaHelperActive = true;
+              activeMediaHelpers++;
+              const controller = new AbortController();
+              let timer: ReturnType<typeof setTimeout> | undefined;
+              const work = (async () => {
+                if (op === 'composeMime') {
+                  if (Object.keys(input).join() !== 'message')
+                    throw new Error('ARTIFACT_MEDIA_INVALID');
+                  return composeReferenceMime(input.message, streamArtifacts, controller.signal);
+                }
+                if (Object.keys(input).sort().join() !== 'metadata,params')
+                  throw new Error('ARTIFACT_MEDIA_INVALID');
+                const metadata = attachmentMetadata(input.metadata);
+                const result = await dispatcher.storeGmailAttachment(
+                  input.params,
+                  metadata,
+                  controller.signal,
+                  policy,
+                );
+                if (!result.ok) throw Object.assign(new Error(result.error.message), result.error);
+                return result.value.data;
+              })().finally(() => {
+                mediaHelperActive = false;
+                activeMediaHelpers--;
+              });
+              try {
+                const deadline = new Promise<never>((_, reject) => {
+                  timer = setTimeout(() => {
+                    controller.abort();
+                    reject(new Error('ARTIFACT_MEDIA_TIMEOUT'));
+                  }, REFERENCE_MEDIA_CAPABILITIES.timeoutMs);
+                });
+                return { ok: true, value: await Promise.race([work, deadline]) };
+              } catch (error) {
+                return {
+                  ok: false,
+                  error: {
+                    code: 'ARTIFACT_MEDIA_FAILED',
+                    message:
+                      'Reference media operation failed; inspect Google and storage outcomes',
+                  },
+                };
+              } finally {
+                controller.abort();
+                if (timer !== undefined) clearTimeout(timer);
+              }
+            }
             if (
               typeof input.uri === 'string' &&
               input.uri.startsWith('artifact://google-codemode-mcp/v2/')
