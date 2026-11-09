@@ -208,12 +208,14 @@ and 262144 collected multipart wire bytes. Inline downloads remain 131072 bytes;
 JSON responses remain bounded to 1000000 bytes and execution output to 256000
 characters. Return small metadata, not large base64 strings.
 
-Only Drive `files.create` multipart blob uploads with a metadata object are
-supported. Media-only upload, media on `files.update`, Google-native conversion,
-Gmail media upload endpoints, resumable upload, arbitrary streams/URLs, Range,
-headers and second-argument transport options are refused. Native metadata-only
-methods remain available. Only the stored-reference path above raises media size
-limits; native JSON limits and inline encodings remain bounded.
+Drive uploads support `files.create` multipart blobs with a metadata object.
+With storage enabled, Gmail also supports the `drafts.create` stored-reference
+`message/rfc822` upload described above. Other Gmail media uploads, media-only
+upload, media on `files.update`, Google-native conversion, resumable upload,
+arbitrary streams/URLs, Range, headers and second-argument transport options are
+refused. Native metadata-only methods remain available. Only the stored-reference
+path above raises media size limits; native JSON limits and inline encodings
+remain bounded.
 
 A transfer loop is not atomic. Earlier writes may be acknowledged when a later
 file fails. Inspect all execution mutation outcomes, even if code catches an

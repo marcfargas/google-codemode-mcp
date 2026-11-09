@@ -102,13 +102,13 @@ process.exitCode = Number(process.env.DEPLOY_TEST_EXIT || 0);
   }
 });
 
-test('README wire examples work against the pinned MCP handler', async () => {
+test('deployment guide wire examples work against the pinned MCP handler', async () => {
   const { handleMcp } = await import('../../src/protocol.ts');
-  const readme = await readFile('README.md', 'utf8');
+  const readme = await readFile('DEPLOYMENT.md', 'utf8');
   const listBody = readme.match(/--data-binary '(\{"jsonrpc"[^\n]+\})'/)?.[1];
-  assert.ok(listBody, 'README tools/list curl body');
+  assert.ok(listBody, 'Deployment tools/list curl body');
   const call = readme.match(/```http\nPOST \/mcp HTTP\/1\.1\n([\s\S]+?)\n```/)?.[1];
-  assert.ok(call, 'README execute HTTP example');
+  assert.ok(call, 'Deployment execute HTTP example');
   const [rawHeaders, callBody] = call.split('\n\n');
   let execution: unknown;
   const app = {

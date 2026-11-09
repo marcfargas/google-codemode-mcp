@@ -335,12 +335,17 @@ to `artifacts/`, preserving the one-day object age and existing seven-day multip
 abort rule. Current v2 data, manifests and abandoned client uploads now match the
 object rule. New v1 and v2 46-byte fixtures returned the cleanup rule ID and the
 expected next-day expiry in `x-amz-expiration`; their initial GET sizes and hashes
-matched. This establishes policy coverage, while physical deletion remains pending.
+matched. This established policy coverage; physical deletion was pending at the
+November 7 preparation checkpoint.
 
-The fixtures are intentionally retained without manual deletion. Observe their
-exact keys after **2026-11-09 17:03:25 UTC**, the later advertised expiry plus
-24 hours. A missing object then provides physical-cleanup evidence; explicit
-DELETE followed by 404 would not. R2 lifecycle changes can take time to affect
+The fixtures were retained without manual deletion for observation after
+**2026-11-09 17:03:25 UTC**, the later advertised expiry plus 24 hours. At
+**2026-11-09 17:07:45 UTC**, signed HEAD requests for both exact recorded keys
+returned 404, with no manual DELETE. This is bounded physical-cleanup evidence
+for those two fixtures, distinct from the earlier rule correction; it does not
+establish an exact deletion time or every object category. The one-shot schedule
+was disabled and the probe exited successfully. Explicit DELETE followed by 404
+would not be lifecycle proof. See [#11](https://github.com/marcfargas/google-codemode-mcp/issues/11). R2 lifecycle changes can take time to affect
 older objects, and this is not an exact deletion deadline. See
 [Cloudflare lifecycle behavior](https://developers.cloudflare.com/r2/buckets/object-lifecycles/).
 The recovery checkpoint and exact object keys are retained in the operator's

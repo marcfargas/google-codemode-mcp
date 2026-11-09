@@ -209,12 +209,14 @@ and 262144 collected multipart wire bytes. Inline downloads remain 131072 bytes;
 JSON responses remain bounded to 1000000 bytes and execution output to 256000
 characters. Return small metadata, not large base64 strings.
 
-Only Drive \`files.create\` multipart blob uploads with a metadata object are
-supported. Media-only upload, media on \`files.update\`, Google-native conversion,
-Gmail media upload endpoints, resumable upload, arbitrary streams/URLs, Range,
-headers and second-argument transport options are refused. Native metadata-only
-methods remain available. Only the stored-reference path above raises media size
-limits; native JSON limits and inline encodings remain bounded.
+Drive uploads support \`files.create\` multipart blobs with a metadata object.
+With storage enabled, Gmail also supports the \`drafts.create\` stored-reference
+\`message/rfc822\` upload described above. Other Gmail media uploads, media-only
+upload, media on \`files.update\`, Google-native conversion, resumable upload,
+arbitrary streams/URLs, Range, headers and second-argument transport options are
+refused. Native metadata-only methods remain available. Only the stored-reference
+path above raises media size limits; native JSON limits and inline encodings
+remain bounded.
 
 A transfer loop is not atomic. Earlier writes may be acknowledged when a later
 file fails. Inspect all execution mutation outcomes, even if code catches an
@@ -559,4 +561,221 @@ its per-call cap cannot be recovered by collecting or storing it.
 
 - [Gmail messages list](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/list)
 - [Drive files list](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list)
+`;
+
+export const GMAIL_GUIDE = `# Gmail recipes
+
+Use \`google.gmail({version:'v1'})\` after root discovery, the Workspace skill read
+and descriptions of every method the program will call. These examples illustrate
+native shapes; the running method description supplies the supported parameters,
+schemas and scope alternatives. See [execution](skill://google-codemode-mcp/google-workspace/references/execution.md)
+for the common contract and outcomes.
+
+## Search, then read selected messages
+
+Describe \`gmail/v1/users.messages.list\` and \`gmail/v1/users.messages.get\` first:
+
+\`\`\`js
+const gmail = google.gmail({ version: 'v1' });
+const { data: page } = await gmail.users.messages.list({
+  userId: 'me',
+  q: inputs.query,
+  maxResults: 10,
+});
+const messages = [];
+for (const message of page?.messages ?? []) {
+  const { data } = await gmail.users.messages.get({
+    userId: 'me',
+    id: message.id,
+    format: 'metadata',
+    metadataHeaders: ['From', 'Subject'],
+  });
+  messages.push({ id: data.id, headers: data.payload?.headers ?? [] });
+}
+return { messages, nextPageToken: page?.nextPageToken };
+\`\`\`
+
+This reads one page. Follow \`nextPageToken\` unchanged to continue, including when
+the current page has no messages. Read [bounded pagination](skill://google-codemode-mcp/google-workspace/references/pagination.md)
+before using \`pagination.collect\`. A bounded partial traversal is not a complete
+mailbox search. Use \`format:'full'\` and inspect nested MIME parts when the task
+depends on message bodies rather than headers.
+
+## Create an unsent draft
+
+Describe \`gmail/v1/users.drafts.create\`. Supply a complete RFC MIME message as
+base64url in \`inputs.raw\`; this does not send it:
+
+\`\`\`js
+const { data: draft } = await google.gmail({ version: 'v1' }).users.drafts.create({
+  userId: 'me',
+  requestBody: { message: { raw: inputs.raw } },
+});
+return { draftId: draft.id, messageId: draft.message?.id };
+\`\`\`
+
+Describe \`users.drafts.get\` before reading the returned draft ID to verify its
+recipient, MIME structure and content. Delete only known-owned drafts when a
+test or task requires cleanup. Acknowledgement of a send does not prove recipient
+delivery; inspect the execution ledger before repeating any mutation.
+
+For attachments, MIME composition and Drive transfers, read
+[media transfers](skill://google-codemode-mcp/google-workspace/references/media-transfers.md).
+Gmail attachment bodies are JSON/base64url. Stored MIME and attachment helpers
+avoid returning those bytes to Code Mode and have their own advertised bounds;
+they do not provide unbounded Gmail streaming.
+
+Native empty responses may be \`status:204,data:null\`. Inspect status/outcomes and
+tolerate missing list arrays instead of treating an empty body as a failed write.
+
+- [Gmail message listing](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/list)
+- [Gmail draft creation](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.drafts/create)
+`;
+
+export const DRIVE_GUIDE = `# Drive recipes
+
+Use \`google.drive({version:'v3'})\` after root discovery, the Workspace skill read
+and descriptions of every method the program will call. Native metadata and
+\`requestBody\` fields are preserved; the running description determines supported
+parameters and transport. A file ID is not an access grant: \`drive.file\` covers
+files created by, or explicitly shared/opened with, the OAuth application.
+
+## List metadata
+
+Describe \`drive/v3/files.list\` before using this one-page query:
+
+\`\`\`js
+const { data } = await google.drive({ version: 'v3' }).files.list({
+  q: inputs.query,
+  pageSize: 20,
+  orderBy: 'name',
+  fields: 'nextPageToken,incompleteSearch,files(id,name,mimeType,size,parents)',
+});
+return data;
+\`\`\`
+
+Include top-level \`nextPageToken\` and \`incompleteSearch\` in field masks. Pass each
+token unchanged with the same query and ordering; an empty page can still have a
+continuation token. \`incompleteSearch:true\` prevents a complete-search claim.
+Read [bounded pagination](skill://google-codemode-mcp/google-workspace/references/pagination.md)
+for \`pagination.collect\` and continuation after a bound is reached.
+
+## Rename a file
+
+Describe \`drive/v3/files.update\`, then use the native PATCH body:
+
+\`\`\`js
+const { data } = await google.drive({ version: 'v3' }).files.update({
+  fileId: inputs.fileId,
+  requestBody: { name: inputs.name },
+  fields: 'id,name',
+});
+return data;
+\`\`\`
+
+Describe \`files.get\` before independent readback when verification is required.
+Inspect the trusted mutation ledger after errors: a later parsing or output
+failure does not undo an acknowledged rename. See
+[execution outcomes](skill://google-codemode-mcp/google-workspace/references/execution.md).
+
+**Atomic conditional updates/CAS are unsupported.** Drive v3 Discovery revision
+\`20261102\` has no conditional-update parameter on \`files.update\`; \`File.version\`
+is output-only. Invented parameters, \`If-Match\` headers and second-argument SDK
+options are refused before dispatch. A read followed by this rename cannot
+prevent concurrent lost updates. If the task requires that protection, leave the
+file unchanged and explain the limitation.
+
+## Download, export and transfer files
+
+Describe \`files.get\` with \`alt:'media'\` for blob content, or \`files.export\` with a
+supported export MIME type for a Google-native document. With artifact storage,
+media downloads return a stored reference. Without storage they return a bounded
+base64 envelope; native metadata reads keep their ordinary \`.data\` shape.
+
+Read [media transfers](skill://google-codemode-mcp/google-workspace/references/media-transfers.md)
+for reference uploads, inline limits, Gmail compositions and cleanup, and
+[artifact storage](skill://google-codemode-mcp/google-workspace/references/artifacts.md)
+for client upload/download URLs and retention. Keep bulk bytes outside MCP and
+return selected metadata or an artifact reference.
+
+- [Drive file listing](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list)
+- [Drive file update](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/update)
+`;
+
+export const EXECUTION_GUIDE = `# Discovery, execution and outcomes
+
+Start with \`describe({})\`, read the returned Workspace skill URI through MCP
+Resources, then follow service/resource paths to each native method. Describe
+every method before the execution that calls it, including calls inside loops,
+helpers and snippets. A familiar Google method name is not evidence that this
+deployment supports its parameters or transport.
+
+Method descriptions provide the callable signature, supported parameters,
+generated declarations, request/response schemas, scope alternatives, Discovery
+source/revision and runtime limits. Inspect the leading runtime/navigation fields
+and retrieve the full result if a host shows only a preview. Native schemas are
+not silently truncated. Descriptions of excluded authentication/transport
+parameters explain their exclusion. Scope requirements do not grant access;
+available scopes are unknown for opaque tokens.
+
+## Submit an async JavaScript body
+
+\`execute\` accepts \`code\`, immutable \`inputs\` and optional correlation \`requestId\`.
+The trusted caller injects a short-lived Google \`accessToken\` for a standalone
+executor. Gateway clients authenticate with MCP OAuth and omit that argument.
+Never invent a token or put one in code. The program receives \`google\`, \`inputs\`,
+\`snippets\`, \`pagination\` and optional \`artifacts\`, without the token itself.
+
+Native resource trees, method parameters, \`requestBody\` and the response
+\`{data,status,headers}\` envelope remain intact. Arbitrary URLs, headers,
+callbacks, streams and second-argument SDK transport options are refused.
+Sandbox networking is denied. Return small projections; explicit
+[artifact storage](skill://google-codemode-mcp/google-workspace/references/artifacts.md)
+can retain larger valid results without raising native response limits.
+
+Discover deployment snippets with \`describe({path:'snippets'})\`, then invoke
+\`await snippets.run(name, inputs)\`. Service/read-only restrictions apply through
+nested calls; declared scopes are requirements rather than grants. Snippets are
+bundled at deployment, with no runtime installation API.
+
+## Inspect trusted outcomes
+
+Execution results include status/result, bounded logs, \`outcomes\`,
+\`outcomesComplete\`, \`hasUnknownOutcome\` and loaded Discovery sources/revisions.
+The dispatcher records Google outcomes even when the program catches an error:
+
+| Outcome          | Meaning                                                                                                  |
+| ---------------- | -------------------------------------------------------------------------------------------------------- |
+| \`not_dispatched\` | Validation, policy or the dispatch gate prevented the call.                                              |
+| \`rejected\`       | Google returned an authoritative 4xx rejection, excluding 408.                                           |
+| \`acknowledged\`   | Google returned success; later parsing/output failure does not undo it.                                  |
+| \`unknown\`        | A dispatched call lacks an authoritative result, including a timeout, connection loss or server failure. |
+
+Mutations are serialized. An unknown mutation blocks later mutations in the same
+execution; reads remain available for reconciliation. No automatic mutation
+retry, rollback, durable deduplication or replay is provided. \`requestId\` is
+correlation, not an idempotency key. A lost outer response can lose the in-memory
+ledger; repeating the submission may repeat effects. Gmail acknowledgement does
+not establish recipient delivery. Inspect separate storage outcomes when
+artifacts are involved; storage failure does not reverse a Google write.
+
+Execution completion closes admission and aborts active work. A dispatched write
+remains unknown without a successful observed status; queued calls cannot start
+afterward. Current defaults are:
+
+| Limit                                         | Bound                              |
+| --------------------------------------------- | ---------------------------------- |
+| Execution / Google-call asynchronous deadline | 15 seconds each                    |
+| Google call attempts                          | 100 per execution                  |
+| Native JSON response                          | 1,000,000 bytes per call           |
+| Code / serialized inputs                      | 64,000 characters each             |
+| Serialized output                             | 256,000 characters                 |
+| Logs                                          | 100 entries of 4,096 characters    |
+| Nested snippets                               | 16 invocations, depth at most four |
+
+Oversized or non-JSON results fail without erasing recorded outcomes. The
+requested dynamic-Worker CPU budget is 1,000 ms; its asynchronous timer cannot
+interrupt a synchronous loop. Deployment/runtime enforcement needs its own proof.
+Media, pagination and storage have additional advertised limits; consult their
+references before use.
 `;
