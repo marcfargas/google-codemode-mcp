@@ -5,7 +5,14 @@ import { URL as NodeURL } from 'node:url';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { SkillsClient } from '@modelcontextprotocol/client/ext/skills';
 import { handleMcp, MCP_VERSION, WORKSPACE_SKILL, type ProtocolApp } from '../../src/protocol.ts';
-import { MEDIA_TRANSFERS_GUIDE, ARTIFACTS_GUIDE, PAGINATION_GUIDE } from '../../src/knowledge.ts';
+import {
+  MEDIA_TRANSFERS_GUIDE,
+  ARTIFACTS_GUIDE,
+  PAGINATION_GUIDE,
+  GMAIL_GUIDE,
+  DRIVE_GUIDE,
+  EXECUTION_GUIDE,
+} from '../../src/knowledge.ts';
 
 function fixture() {
   const calls: { kind: string; args: unknown; name?: string }[] = [];
@@ -180,6 +187,9 @@ test('official pinned client discovers, calls tools, and verifies the bundled sk
       'media-transfers': MEDIA_TRANSFERS_GUIDE,
       artifacts: ARTIFACTS_GUIDE,
       pagination: PAGINATION_GUIDE,
+      gmail: GMAIL_GUIDE,
+      drive: DRIVE_GUIDE,
+      execution: EXECUTION_GUIDE,
     })) {
       const resource = await client.readResource({
         uri: `skill://google-codemode-mcp/google-workspace/references/${name}.md`,

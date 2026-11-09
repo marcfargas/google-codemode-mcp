@@ -1,4 +1,11 @@
-import { ARTIFACTS_GUIDE, MEDIA_TRANSFERS_GUIDE, PAGINATION_GUIDE } from './knowledge.ts';
+import {
+  ARTIFACTS_GUIDE,
+  DRIVE_GUIDE,
+  EXECUTION_GUIDE,
+  GMAIL_GUIDE,
+  MEDIA_TRANSFERS_GUIDE,
+  PAGINATION_GUIDE,
+} from './knowledge.ts';
 import { executionArtifactReferences } from './artifact-references.ts';
 import {
   createMcpHandler,
@@ -125,6 +132,9 @@ Google writes. Physical R2 lifecycle and host file presentation need separate pr
 
 References:
 
+- [Gmail recipes](skill://google-codemode-mcp/google-workspace/references/gmail.md)
+- [Drive recipes](skill://google-codemode-mcp/google-workspace/references/drive.md)
+- [Discovery, execution and outcomes](skill://google-codemode-mcp/google-workspace/references/execution.md)
 - [Gmail API reference](https://developers.google.com/workspace/gmail/api/reference/rest)
 - [Gmail send](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/send)
 - [Drive list and pagination](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list)
@@ -223,6 +233,9 @@ export async function handleMcp(request: Request, app: ProtocolApp): Promise<Res
       'google-workspace/references/media-transfers.md': MEDIA_TRANSFERS_GUIDE,
       'google-workspace/references/artifacts.md': ARTIFACTS_GUIDE,
       'google-workspace/references/pagination.md': PAGINATION_GUIDE,
+      'google-workspace/references/gmail.md': GMAIL_GUIDE,
+      'google-workspace/references/drive.md': DRIVE_GUIDE,
+      'google-workspace/references/execution.md': EXECUTION_GUIDE,
     }),
     { prefix: 'google-codemode-mcp', strict: true },
   );

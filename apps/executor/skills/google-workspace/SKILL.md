@@ -108,6 +108,9 @@ Google writes. Physical R2 lifecycle and host file presentation need separate pr
 
 References:
 
+- [Gmail recipes](skill://google-codemode-mcp/google-workspace/references/gmail.md)
+- [Drive recipes](skill://google-codemode-mcp/google-workspace/references/drive.md)
+- [Discovery, execution and outcomes](skill://google-codemode-mcp/google-workspace/references/execution.md)
 - [Gmail API reference](https://developers.google.com/workspace/gmail/api/reference/rest)
 - [Gmail send](https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/send)
 - [Drive list and pagination](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/list)

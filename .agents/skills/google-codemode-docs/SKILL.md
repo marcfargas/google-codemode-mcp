@@ -9,10 +9,12 @@ Use these existing homes according to the reader's question:
 
 | Home                                                                                                      | Purpose / evidence to inspect                                                                                                     |
 | --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| [README.md](../../../README.md)                                                                           | Product contract, discovery/execution examples, deployment, HTTP headers, OAuth and verification setup                            |
+| [README.md](../../../README.md)                                                                           | Product introduction, recommended models and recorded evaluation coverage                                                         |
 | [apps/executor/tests/eval/README.md](../../../apps/executor/tests/eval/README.md)                         | Agent gate commands, coverage, caps, model/runner identities, qualified pilot results                                             |
 | [apps/executor/skills/google-workspace/SKILL.md](../../../apps/executor/skills/google-workspace/SKILL.md) | Distributed agent instructions served through MCP Resources/Skills; inspect `apps/executor/src/protocol.ts` for serving/integrity |
 | [Issue #1](https://github.com/marcfargas/google-codemode-mcp/issues/1) and linked issues                  | Requested outcomes, open decisions and acceptance; tracker is not proof of deployed behavior                                      |
+
+Operator setup lives in [DEPLOYMENT.md](../../../DEPLOYMENT.md); local/live/test OAuth setup lives in [the executor test guide](../../../apps/executor/tests/README.md). Service recipes and the execution contract live in the distributed skill references.
 
 These developer skills in `.agents/skills` are separate from the distributed
 Workspace skill. Product behavior comes from current source/configuration and
@@ -23,7 +25,7 @@ app-owned source/tests under `apps/gateway`; the two-Worker seam lives in root
 
 ## Retrieve and answer
 
-Start with the supplied link/path/section. Otherwise use `rg -n 'TERMS' README.md
+Start with the supplied link/path/section. Otherwise use `rg -n 'TERMS' README.md DEPLOYMENT.md apps/executor/tests/README.md
 apps/executor/tests/eval/README.md apps/executor/skills apps/executor/src apps/gateway tests/integration .github/workflows justfile apps/executor/wrangler.jsonc` and
 read enough surrounding content to preserve limits. Follow useful links and
 inspect relevant code/workflow before claiming freshness. Resolve issue references

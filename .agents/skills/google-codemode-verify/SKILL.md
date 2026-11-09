@@ -5,7 +5,7 @@ description: Verify a Google Code Mode change with the maintained just and GitHu
 
 # Verify a candidate
 
-Read [README workflow verification](../../../README.md#workflow-verification)
+Read [development and verification](../../../apps/executor/tests/README.md)
 and [agent gate documentation](../../../apps/executor/tests/eval/README.md) for the selected
 path. Product/fixture changes use the delivery procedure when available; this skill
 owns proof, not unrelated repairs or deployment authority.
@@ -63,7 +63,7 @@ without `--dry-run`.
 
 `just live` mutates the dedicated test account: labels/drafts and controlled
 self-send. Prerequisites are the matching installed-app client, test user, and
-refresh grant. Resolve through `apps/executor/tests/support/credentials.mjs` and README's local setup;
+refresh grant. Resolve through `apps/executor/tests/support/credentials.mjs` and [test OAuth setup](../../../apps/executor/tests/README.md#test-account-oauth-and-ci-secrets);
 `.test.env` is ignored and client/token overrides are `GOOGLE_OAUTH_CLIENT_FILE`
 and `GOOGLE_TEST_TOKEN_FILE`. Inspect existence/readability without printing contents.
 The default client and grant live together in the private
@@ -185,9 +185,8 @@ physical R2 retention. Two no-model hosted storage controls passed on the retain
 reads, explicit deletion, independent R2 absence and empty returned REST inventory;
 JSON also survived same-bundle redeployment. See [hosted storage evidence](../../../apps/executor/tests/hosted/README.md#hosted-artifact-storage-2026-11-05)
 for exact digest/version identities, protected admission and the S3 TLS limitation.
-The bucket's one-day prefix lifecycle was configured/read back, not exercised.
-Physical lifecycle execution and native host downloadable-file presentation remain
-unqualified. An installed Claude Code 2.1.318 no-model probe saved two resource
+The bucket's one-day prefix lifecycle was configured/read back; the later bounded physical observation is recorded separately below.
+Automatic physical disappearance of two owned v1/v2 fixtures was verified on 2026-11-09 after the lifecycle-prefix correction; see [#11](https://github.com/marcfargas/google-codemode-mcp/issues/11). This does not establish exact deletion time or every object category. Native host downloadable-file presentation requires its own evidence. An installed Claude Code 2.1.318 no-model probe saved two resource
 blob fragments totalling 98304 bytes; independent concatenation matched the
 manifest hash. Its native resource tool omitted chunk metadata. This qualifies
 fragment persistence only, not agent-driven assembly or file presentation.
