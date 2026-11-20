@@ -13,7 +13,9 @@ and owned cleanup. These are recorded task-feasibility results, generally one
 attempt per cell, not a reliability benchmark or a fresh pass on every later build.
 
 [Matrix v3](apps/executor/tests/eval/README.md#model-matrix) uses `gpt-6.2-sol`
-as the required GPT model and `gpt-6.2-astra` as an optional reference. Both await live evaluation.
+as the required GPT model and `gpt-6.2-astra` as an optional reference. Both
+passed [one live Gmail read/search trial each](apps/executor/tests/eval/README.md#gpt-62-gmail-readsearch-2026-11-20),
+including the Workspace skill read and method discovery before execution.
 
 | Model                                | Tested runner           | Result                                                                                          |
 | ------------------------------------ | ----------------------- | ----------------------------------------------------------------------------------------------- |
@@ -40,8 +42,7 @@ outcomes, and GPT-6.1 Sol 6/6 across retained runs. Later focused Sonnet passes 
 rewrite those failures. Runner/oracle/discovery failures remain in the
 [detailed evaluation history](apps/executor/tests/eval/README.md). Its per-attempt
 tables include input/output tokens, cache reads/creation and cost estimates;
-missing billing or cache measurements stay unknown. No new model run was needed
-to assemble this summary.
+missing billing or cache measurements stay unknown.
 
 Model success is separate from host compatibility. The owner reported a successful
 **Claude Sonnet 5.5 native-host 256 KiB upload → Drive → unsent Gmail draft → Drive

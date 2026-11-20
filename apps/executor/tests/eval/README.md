@@ -140,7 +140,8 @@ just eval-matrix gmail http://127.0.0.1:8317 /absolute/new/full-matrix-directory
 | Reference | `claude-opus-5-5` (`opus`)     | `gpt-6.2-astra` (`astra`) |
 
 Matrix version 3 requires Sonnet 5.5 and GPT-6.2 Sol. GPT-6.2 Astra runs with
-`all` or explicit `astra` selection. Both GPT-6.2 cells await live results.
+`all` or explicit `astra` selection. Both GPT-6.2 cells passed the
+[Gmail read/search case](#gpt-62-gmail-readsearch-2026-11-20).
 Retained version 1 and 2 reports preserve their recorded model IDs, roles and
 grades. The required GPT model was GPT-6.1 Terra in v1 and GPT-6.1 Sol in v2.
 
@@ -398,6 +399,26 @@ retained. The revised run demonstrates that an agent can perform this Gmail task
 but does not validate agent use of method discovery, the other services, every
 target host, or hosted Cloudflare behavior. No extra trials were run to obtain a
 green result.
+
+## GPT-6.2 Gmail read/search (2026-11-20)
+
+Both models passed one live `read-search` v1 attempt through `responses-loop-3`
+on local Worker source `b6fe631`, with grading v4. Gmail readback verified the
+answer. Both models completed `resources/read` for the Workspace `SKILL.md`
+before their first execution and described every Gmail method before calling it.
+Neither model changed the mailbox. The harness cleaned all owned fixtures and
+reported no unknown effects.
+
+| Model           | Requests | Input tokens | Cache-read input | Output tokens | Published-rate estimate |
+| --------------- | -------: | -----------: | ---------------: | ------------: | ----------------------: |
+| `gpt-6.2-sol`   |       10 |       63,719 |           49,536 |           645 |                $0.03977 |
+| `gpt-6.2-astra` |        8 |       45,795 |           28,032 |           393 |                $0.16904 |
+
+The selected run passed 2/2 cells. Cache reads are included in input tokens.
+Cache creation and provider billing were unavailable. Both cells together used
+18 requests with a $0.20881 published-rate estimate. The remaining Gmail cases,
+other service cases and per-service guide retrieval still need GPT-6.2 evidence.
+Sonnet was outside this selection, so the required-pair gate remained pending.
 
 ## First model matrix (2026-11-04)
 
