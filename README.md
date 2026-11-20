@@ -7,10 +7,13 @@ Drive and temporary storage without passing file bytes through the model or MCP.
 
 ## Which models work?
 
-**Use Sonnet 5.5 or GPT 6.1 Sol.** Both passed bounded Gmail/Drive agent evaluations
+**Sonnet 5.5 and GPT-6.1 Sol are the tested recommendations.** Both passed bounded Gmail/Drive agent evaluations
 with method discovery, actual skill-resource retrieval, independent result checks
 and owned cleanup. These are recorded task-feasibility results, generally one
 attempt per cell, not a reliability benchmark or a fresh pass on every later build.
+
+[Matrix v3](apps/executor/tests/eval/README.md#model-matrix) uses `gpt-6.2-sol`
+as the required GPT model and `gpt-6.2-astra` as an optional reference. Both await live evaluation.
 
 | Model                                | Tested runner           | Result                                                                                          |
 | ------------------------------------ | ----------------------- | ----------------------------------------------------------------------------------------------- |
@@ -23,17 +26,17 @@ attempt per cell, not a reliability benchmark or a fresh pass on every later bui
 
 Passing coverage for the recommended pair, on each assessment's recorded candidate:
 
-| Assessment                                                        | Sonnet | Sol | Evidence                                                                                                    |
-| ----------------------------------------------------------------- | -----: | --: | ----------------------------------------------------------------------------------------------------------- |
-| Drive download, pagination, rename, conditional-update limitation |    4/4 | 4/4 | [Drive results](apps/executor/tests/eval/README.md#current-candidate-drive-completion-2026-11-05)           |
-| Gmail ↔ Drive media composition                                   |    2/2 | 2/2 | [Media results](apps/executor/tests/eval/README.md#media-composition-results-2026-11-05)                    |
-| Large JSON and binary artifacts                                   |    2/2 | 2/2 | [Artifact results](apps/executor/tests/eval/README.md#artifact-agent-acceptance-2026-11-05)                 |
-| Bounded pagination helper                                         |    1/1 | 1/1 | [Pagination results](apps/executor/tests/eval/README.md#pagination-helper-feasibility-2026-11-05)           |
-| Frozen content-selected Gmail labelling and Drive renaming        |    2/2 | 2/2 | [Unused-case assessment](apps/executor/tests/eval/README.md#first-frozen-unused-case-assessment-2026-11-06) |
-| Focused direct hosted Gmail attachment and pagination             |    2/2 | 2/2 | [Hosted Gmail results](apps/executor/tests/eval/README.md#focused-direct-hosted-gmail-results-2026-11-04)   |
+| Assessment                                                        | Sonnet | GPT-6.1 Sol | Evidence                                                                                                    |
+| ----------------------------------------------------------------- | -----: | ----------: | ----------------------------------------------------------------------------------------------------------- |
+| Drive download, pagination, rename, conditional-update limitation |    4/4 |         4/4 | [Drive results](apps/executor/tests/eval/README.md#current-candidate-drive-completion-2026-11-05)           |
+| Gmail ↔ Drive media composition                                   |    2/2 |         2/2 | [Media results](apps/executor/tests/eval/README.md#media-composition-results-2026-11-05)                    |
+| Large JSON and binary artifacts                                   |    2/2 |         2/2 | [Artifact results](apps/executor/tests/eval/README.md#artifact-agent-acceptance-2026-11-05)                 |
+| Bounded pagination helper                                         |    1/1 |         1/1 | [Pagination results](apps/executor/tests/eval/README.md#pagination-helper-feasibility-2026-11-05)           |
+| Frozen content-selected Gmail labelling and Drive renaming        |    2/2 |         2/2 | [Unused-case assessment](apps/executor/tests/eval/README.md#first-frozen-unused-case-assessment-2026-11-06) |
+| Focused direct hosted Gmail attachment and pagination             |    2/2 |         2/2 | [Hosted Gmail results](apps/executor/tests/eval/README.md#focused-direct-hosted-gmail-results-2026-11-04)   |
 
 The historical six-case Gmail suite had Sonnet **4/6 full grades**, despite 6/6 task
-outcomes, and Sol 6/6 across retained runs. Later focused Sonnet passes do not
+outcomes, and GPT-6.1 Sol 6/6 across retained runs. Later focused Sonnet passes do not
 rewrite those failures. Runner/oracle/discovery failures remain in the
 [detailed evaluation history](apps/executor/tests/eval/README.md). Its per-attempt
 tables include input/output tokens, cache reads/creation and cost estimates;

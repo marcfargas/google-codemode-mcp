@@ -1,6 +1,7 @@
 import type { ServerResponse } from 'node:http';
+import { NATIVE_CODEX_PROBE } from '../eval/matrix.ts';
 
-export const MODEL = 'gpt-6.1-sol';
+export const MODEL = NATIVE_CODEX_PROBE.model;
 export const exec = (input: string, callId = 'call-exec') => ({
   type: 'custom_tool_call',
   id: `item-${callId}`,

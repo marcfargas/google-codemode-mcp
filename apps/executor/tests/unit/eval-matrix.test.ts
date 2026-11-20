@@ -22,16 +22,19 @@ test('matrix selects exact declared models in a stable order without fallbacks',
     ['sonnet', 'sol'],
   );
   assert.deepEqual(
-    selectCells('sol,sonnet,terra').map((cell) => cell.id),
-    ['sonnet', 'sol', 'terra'],
+    selectCells('sol,sonnet,astra').map((cell) => cell.id),
+    ['sonnet', 'sol', 'astra'],
   );
   assert.equal(selectCells('all').length, 6);
-  assert.equal(getCellByModel('gpt-6.1-sol').runner, 'responses');
+  assert.equal(getCellByModel('gpt-6.2-sol').runner, 'responses');
+  assert.equal(getCellByModel('gpt-6.2-astra').runner, 'responses');
+  assert.equal(getCellByModel('gpt-6.2-astra').role, 'reference');
   assert.equal(getCellByModel('claude-haiku-5-5').role, 'probe');
   assert.ok(MATRIX.every((cell) => cell.attempts === 1));
-  for (const selection of ['', 'sonnet,', ',sol', 'sonnet,sonnet', 'fallback', 'required,terra'])
+  for (const selection of ['', 'sonnet,', ',sol', 'sonnet,sonnet', 'terra', 'required,astra'])
     assert.throws(() => selectCells(selection));
-  assert.throws(() => getCellByModel('gpt-6.1-sol-latest'), /not in/);
+  for (const model of ['gpt-6.2-sol-latest', 'gpt-6.1-sol', 'gpt-6.1-terra'])
+    assert.throws(() => getCellByModel(model), /not in/);
 });
 
 test('required full-gate passes qualify despite optional model score failures', () => {
@@ -48,10 +51,10 @@ test('required full-gate passes qualify despite optional model score failures', 
 
 test('task success or reference success cannot substitute for a required full-gate failure', () => {
   const sol = { ...result('sol', 'fail'), taskSuccess: true };
-  const summary = aggregateMatrix(selectCells('sonnet,sol,terra'), [
+  const summary = aggregateMatrix(selectCells('sonnet,sol,astra'), [
     result('sonnet'),
     sol,
-    result('terra'),
+    result('astra'),
   ]);
   assert.equal(summary.gatedStatus, 'fail');
   assert.equal(summary.passed, false);
@@ -72,7 +75,7 @@ test('unattempted selected cells stay explicit even when required models passed'
   const summary = aggregateMatrix(selectCells('all'), [result('sonnet'), result('sol')]);
   assert.equal(summary.complete, false);
   assert.equal(summary.gatedStatus, 'pending');
-  assert.deepEqual(summary.unattempted, ['haiku', 'luna', 'opus', 'terra']);
+  assert.deepEqual(summary.unattempted, ['haiku', 'luna', 'opus', 'astra']);
   assert.equal(summary.rows.find((row) => row.id === 'luna')?.status, 'unattempted');
 });
 

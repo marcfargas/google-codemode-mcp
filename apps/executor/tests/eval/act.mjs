@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { localCredentials } from '../support/credentials.mjs';
-import { getCellByModel, selectCells } from './matrix.ts';
+import { getCellByModel, NATIVE_CODEX_PROBE, selectCells } from './matrix.ts';
 
 // flock is held by a subprocess until release; the kernel also releases it if
 // this launcher exits unexpectedly. The pathname is shared across checkouts.
@@ -106,12 +106,14 @@ async function main() {
     runner &&
     (runner !== 'codex' ||
       profile !== 'gmail' ||
-      model !== 'gpt-6.1-sol' ||
+      model !== NATIVE_CODEX_PROBE.model ||
       !!selection ||
       !!cases ||
       repeats !== '1')
   )
-    throw new Error('Native Codex is one optional Gmail read-search/Sol probe');
+    throw new Error(
+      `Native Codex is one optional Gmail read-search probe with ${NATIVE_CODEX_PROBE.model}`,
+    );
   if (
     !profile ||
     (!model && !selection) ||
@@ -124,7 +126,7 @@ async function main() {
   if (selection) {
     selectCells(selection);
     if (repeats !== '1') throw new Error('Matrix uses one attempt per selected cell');
-  } else getCellByModel(model);
+  } else if (!runner) getCellByModel(model);
   if (cases) {
     const { selectCases } = await import('./cases.ts');
     selectCases(profile, cases);

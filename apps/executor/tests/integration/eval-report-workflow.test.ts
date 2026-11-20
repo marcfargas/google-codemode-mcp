@@ -83,6 +83,7 @@ test('report CLI retains optional native Codex identity when execution stops bef
     const row = report.attempts[0];
     assert.equal(row.caseId, 'read-search');
     assert.equal(row.cellId, 'sol-native-codex');
+    assert.equal(row.model, 'gpt-6.1-sol');
     assert.equal(row.runner, 'codex');
     assert.equal(row.role, 'probe');
     assert.equal(report.recordedGate.requiredPairStatus, 'unknown');

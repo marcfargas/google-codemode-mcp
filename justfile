@@ -27,7 +27,7 @@ live-media:
 eval $profile $model $proxy_url $output $repeats='1':
     node apps/executor/tests/eval/act.mjs
 
-# Required Sonnet/Sol pair by default; select all for the six-model comparison.
+# Sonnet 5.5 and GPT-6.2 Sol by default; select all for the six-model comparison.
 eval-matrix $profile $proxy_url $output $selection='required':
     node apps/executor/tests/eval/act.mjs
 
@@ -51,7 +51,7 @@ eval-artifacts $proxy_url $output $cases='all' $selection='required':
 eval-preflight $output:
     profile=gmail proxy_url=http://127.0.0.1:1 selection=required preflight_only=true node apps/executor/tests/eval/act.mjs
 
-# One optional native Codex/Sol read-search attempt; not the required matrix.
+# Optional native Codex read-search probe with GPT-6.1 Sol.
 eval-native-gmail $proxy_url $output:
     profile=gmail model=gpt-6.1-sol runner=codex node apps/executor/tests/eval/act.mjs
 

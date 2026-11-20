@@ -16,7 +16,7 @@ import { runActor } from './actor.ts';
 import { startEvalServer } from './server.ts';
 import { gradeMechanisms, GRADING_VERSION } from './mechanisms.ts';
 export { gradeMechanisms } from './mechanisms.ts';
-import { getCellByModel } from './matrix.ts';
+import { getCellByModel, NATIVE_CODEX_PROBE } from './matrix.ts';
 import { verifyModels } from './catalog.ts';
 import { RESPONSES_RUNNER_VERSION } from './responses.ts';
 import { RESPONSES_ACCOUNTING_VERSION } from './responses-relay.ts';
@@ -125,14 +125,14 @@ export async function runCell(configuration?: {
   if (
     nativeProbe &&
     (profile !== 'gmail' ||
-      (configuration?.model ?? process.env.EVAL_MODEL) !== 'gpt-6.1-sol' ||
+      (configuration?.model ?? process.env.EVAL_MODEL) !== NATIVE_CODEX_PROBE.model ||
       (configuration?.caseId ?? process.env.EVAL_CASE ?? 'read-search') !== 'read-search' ||
       Number(configuration?.repeats ?? process.env.EVAL_REPEATS ?? 1) !== 1 ||
       !!process.env.EVAL_SELECTION ||
       !!process.env.EVAL_CASES)
   )
     throw new Error(
-      'Native Codex is one optional Gmail read-search/Sol probe, not a matrix override',
+      `Native Codex is one optional Gmail read-search probe with ${NATIVE_CODEX_PROBE.model}`,
     );
   const output = resolve(configuration?.output ?? required('EVAL_OUTPUT'));
   await mkdir(output, { recursive: true, mode: 0o700 });
@@ -155,8 +155,8 @@ export async function runCell(configuration?: {
       'Run via just eval/act; separate actor OS identity requires the workflow root runner',
     );
   const model = configuration?.model ?? required('EVAL_MODEL');
-  const cell = getCellByModel(model);
-  const runner = nativeProbe ? 'codex' : cell.runner;
+  const cell = nativeProbe ? NATIVE_CODEX_PROBE : getCellByModel(model);
+  const { runner } = cell;
   const proxyUrl = required('EVAL_PROXY_URL');
   if (!/^https?:\/\//.test(proxyUrl)) throw new Error('Proxy URL must use HTTP or HTTPS');
   const repeats = Number(configuration?.repeats ?? process.env.EVAL_REPEATS ?? 1);
@@ -238,8 +238,8 @@ export async function runCell(configuration?: {
       runnerVersion:
         runner === 'claude' ? '2.1.318' : runner === 'codex' ? '0.166.0' : RESPONSES_RUNNER_VERSION,
       accountingVersion: runner === 'claude' ? null : RESPONSES_ACCOUNTING_VERSION,
-      role: nativeProbe ? 'probe' : cell.role,
-      cellId: nativeProbe ? 'sol-native-codex' : cell.id,
+      role: cell.role,
+      cellId: cell.id,
       repeats,
       createdAt: new Date().toISOString(),
       limits: {
@@ -454,7 +454,7 @@ export async function runCell(configuration?: {
       `Profile: ${profile}. Model: ${model}. Result: ${passed ? 'PASS' : 'FAIL'}.`,
       '',
       nativeProbe
-        ? 'Optional native Codex CLI capability probe with a broader tool surface. This does not replace or qualify the required Sol Responses matrix performer.'
+        ? 'Optional native Codex CLI capability probe with a broader tool surface. The required Responses runner has its own matrix results.'
         : `Runner: ${runner}.`,
       '',
       'Gmail, Drive and their media-composition profiles are implemented. Sheets, Docs, and Calendar remain pending.',

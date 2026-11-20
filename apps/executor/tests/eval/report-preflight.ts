@@ -16,9 +16,9 @@ export async function prepareReportPreflight(output: string) {
       EVAL_REPEATS: '1',
     });
     const passed = await runCampaign({
-      verifyModels: async () => ({
+      verifyModels: async (_proxy, _key, models) => ({
         checkedAt: 'synthetic',
-        models: ['claude-sonnet-5-5', 'gpt-6.1-sol'],
+        models,
         evidence: 'synthetic; no inference',
       }),
       runCell: async (options) => {

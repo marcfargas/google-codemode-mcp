@@ -12,7 +12,7 @@ test('native capability mode cannot replace matrix performers or expand its case
   try {
     for (const patch of [
       { EVAL_SELECTION: 'required' },
-      { EVAL_MODEL: 'claude-sonnet-5-5' },
+      { EVAL_MODEL: 'gpt-6.2-sol' },
       { EVAL_PROFILE: 'drive' },
       { EVAL_CASE: 'attachment' },
       { EVAL_REPEATS: '2' },
@@ -31,7 +31,7 @@ test('native capability mode cannot replace matrix performers or expand its case
         EVAL_OUTPUT: output,
         ...patch,
       };
-      await assert.rejects(runCell(), /one optional Gmail read-search\/Sol probe/);
+      await assert.rejects(runCell(), /one optional Gmail read-search probe with gpt-6\.1-sol/);
       await assert.rejects(access(output));
     }
   } finally {

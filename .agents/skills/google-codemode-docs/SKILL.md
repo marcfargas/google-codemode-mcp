@@ -51,7 +51,7 @@ for a bounded mechanics/history explanation; it does not itself authorize a doc.
 3. Amend the selected home, retaining unrelated material, source attribution,
    version/date qualifications and unresolved decisions. Keep failed historical
    results as history; new evidence must not retroactively turn them into passes.
-   Current required models are Sonnet/Sol; distinguish model feasibility from
+   Current required models are Sonnet 5.5 and GPT-6.2 Sol; distinguish model feasibility from
    concrete Claude, ChatGPT, or OpenClaw host qualification.
 4. After implementation/verification, compare impacted claims against real source,
    configuration, commands and evidence. Remove the proposed qualification only
