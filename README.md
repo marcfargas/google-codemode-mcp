@@ -78,6 +78,12 @@ const { data } = await gmail.users.messages.list({
 return data;
 ```
 
+Method paths return a compact brief with callable arguments, runtime limits,
+and links to shared arguments and named schemas. Follow `drive/v3#File` for its
+field list and `drive/v3#File/properties/modifiedTime` for field details.
+Existing consumers of an expanded method or named schema can pass `view: 'full'`
+with the same path. This also retrieves generated TypeScript for a method.
+
 ## Recipes and reference
 
 These guides are also served as MCP Resources under
@@ -89,6 +95,7 @@ These guides are also served as MCP Resources under
 - [Gmail ↔ Drive transfers](apps/executor/skills/google-workspace/references/media-transfers.md): stored references, MIME and attachments.
 - [Pagination](apps/executor/skills/google-workspace/references/pagination.md): bounded traversal and continuation.
 - [Artifacts](apps/executor/skills/google-workspace/references/artifacts.md): large results and direct file upload/download.
+- [Shared conventions](apps/executor/skills/google-workspace/references/conventions.md): field masks, pagination, value formats and validation.
 - [Execution contract](apps/executor/skills/google-workspace/references/execution.md): native parameters, limits and mutation outcomes.
 
 Transfers and writes are bounded. A lost or unknown mutation outcome requires

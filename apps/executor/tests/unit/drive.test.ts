@@ -177,7 +177,19 @@ test('registry selects lazy native documents, root resources, dynamic methods an
 
 test('descriptions and generated declarations expose metadata and bounded byte selection truthfully', async () => {
   const dynamic = catalog();
-  const described = await dynamic.describe(get);
+  for (const streamMedia of [false, true]) {
+    const brief = JSON.parse(JSON.stringify(await dynamic.describe(get, { streamMedia })));
+    const expanded = await dynamic.describe(get, { streamMedia, view: 'full' });
+    assert.deepEqual(brief.parameters.alt.enum, ['json', 'media']);
+    assert.deepEqual(brief.commonParameters.names, ['fields']);
+    assert.equal(brief.runtime.mediaResult, streamMedia ? 'artifact-reference' : 'inline-base64');
+    assert.deepEqual(brief.runtime, {
+      ...(expanded.runtime as object),
+      mediaResult: streamMedia ? 'artifact-reference' : 'inline-base64',
+    });
+    assert.deepEqual(brief.response, { schemaPath: 'drive/v3#File' });
+  }
+  const described = await dynamic.describe(get, { view: 'full' });
   assert.deepEqual((described.parameters as Record<string, { enum?: string[] }>).alt.enum, [
     'json',
     'media',
@@ -197,18 +209,18 @@ test('descriptions and generated declarations expose metadata and bounded byte s
   );
   assert.ok(described.mediaResponseSchema);
   assert.match(described.declarations as string, /alt: 'media'.*GoogleMediaBytes/);
-  const exported = await dynamic.describe(exportFile);
+  const exported = await dynamic.describe(exportFile, { view: 'full' });
   assert.equal((exported.runtime as { json: boolean }).json, false);
   assert.match(
     exported.declarations as string,
     /"export"\(params: Params\): Promise<\{data: GoogleMediaBytes/,
   );
-  assert.equal((await dynamic.describe(update)).mediaResponseSchema, undefined);
+  assert.equal((await dynamic.describe(update, { view: 'full' })).mediaResponseSchema, undefined);
   const { createSourceFile, ScriptTarget, ScriptKind } = await import('typescript');
   for (const path of [get, update, exportFile, 'drive/v3/rootDiagnostic']) {
     const parsed = createSourceFile(
       'selected.ts',
-      (await dynamic.describe(path)).declarations as string,
+      (await dynamic.describe(path, { view: 'full' })).declarations as string,
       ScriptTarget.Latest,
       true,
       ScriptKind.TS,
@@ -331,7 +343,7 @@ test('Drive descriptions and declaration parameter shapes invent no conditional 
     [get, ['alt', 'fields', 'fileId']],
     [update, ['fields', 'fileId', 'requestBody']],
   ] as const) {
-    const described = await catalog().describe(path);
+    const described = await catalog().describe(path, { view: 'full' });
     assert.deepEqual(
       Object.keys(described.parameters as object).sort(),
       expected.filter((key) => key !== 'requestBody').sort(),

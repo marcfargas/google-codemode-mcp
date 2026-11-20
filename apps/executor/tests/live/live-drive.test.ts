@@ -306,6 +306,7 @@ test(
           observedWorker = await openObservedWorker(entry);
           const described = await observedWorker.tool<Record<string, unknown>>('describe', {
             path: 'drive/v3/files.update',
+            view: 'full',
           });
           const parameters = Object.keys(described.parameters as Record<string, unknown>);
           const refusals: { shape: string; receipt: Receipt<unknown> }[] = [];

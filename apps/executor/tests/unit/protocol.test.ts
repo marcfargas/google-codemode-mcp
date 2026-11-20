@@ -12,6 +12,7 @@ import {
   GMAIL_GUIDE,
   DRIVE_GUIDE,
   EXECUTION_GUIDE,
+  CONVENTIONS_GUIDE,
 } from '../../src/knowledge.ts';
 
 function fixture() {
@@ -190,6 +191,7 @@ test('official pinned client discovers, calls tools, and verifies the bundled sk
       gmail: GMAIL_GUIDE,
       drive: DRIVE_GUIDE,
       execution: EXECUTION_GUIDE,
+      conventions: CONVENTIONS_GUIDE,
     })) {
       const resource = await client.readResource({
         uri: `skill://google-codemode-mcp/google-workspace/references/${name}.md`,

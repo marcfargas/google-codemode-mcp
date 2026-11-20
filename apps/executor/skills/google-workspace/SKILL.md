@@ -13,6 +13,11 @@ before calling it in `execute`, including methods familiar from other Google
 clients: this deployment's available methods, parameters, schemas and transport
 limits come from its Discovery document.
 
+Each method opens with a compact brief. Follow its schema and common argument
+paths for details. Use `view:'full'` for expanded schemas and generated TypeScript.
+See [shared conventions](skill://google-codemode-mcp/google-workspace/references/conventions.md)
+for field masks, pagination, date and numeric formats, and validation.
+
 Use `execute` to submit JavaScript. The trusted caller supplies a short-lived
 OAuth `accessToken` as a standalone request argument. Through the authentication
 gateway, sign in using MCP OAuth and omit this argument: the gateway injects the
