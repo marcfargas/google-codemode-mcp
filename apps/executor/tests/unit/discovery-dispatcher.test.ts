@@ -390,7 +390,9 @@ test('Gmail draft brief retains the capability-specific multipart contract', asy
     assert.deepEqual(brief.runtime, full.runtime);
     assert.equal(brief.runtime.artifactUpload, streamMedia);
     assert.deepEqual(brief.runtime.uploadMimeTypes, ['message/rfc822']);
-    assert.equal(brief.parameters.media.type, 'object');
+    assert.deepEqual(brief.parameters.media, (full.parameters as Record<string, unknown>).media);
+    assert.deepEqual(brief.parameters.media.properties.mimeType.enum, ['message/rfc822']);
+    assert.equal(JSON.stringify(brief.parameters.media).includes('"artifact"'), streamMedia);
     assert.equal(brief.requestBody.schemaPath, 'gmail/v1#Message');
   }
 });

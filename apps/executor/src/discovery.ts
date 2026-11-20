@@ -397,7 +397,8 @@ export class DiscoveryCatalog {
           const common = shared[name];
           if (schema === common || (common && JSON.stringify(schema) === JSON.stringify(common)))
             sharedNames.push(name);
-          else local[name] = parameterBrief(key, schema);
+          // The projected media argument is already bounded and its branches are callable inputs.
+          else local[name] = name === 'media' ? schema : parameterBrief(key, schema);
         }
         return {
           path,

@@ -232,6 +232,21 @@ test('descriptions and generated declarations expose metadata and bounded byte s
   }
 });
 
+test('every method in the Drive and Gmail Discovery fixtures fits the brief budget in both media modes', async () => {
+  const dynamic = catalog();
+  const pending = ['drive/v3', 'gmail/v1'];
+  while (pending.length) {
+    const resource = await dynamic.describe(pending.pop());
+    pending.push(...(resource.resources as string[]));
+    for (const { path } of resource.methods as { path: string }[]) {
+      for (const streamMedia of [false, true]) {
+        const brief = await dynamic.describe(path, { streamMedia });
+        assert.ok(Buffer.byteLength(JSON.stringify(brief)) < 5_000, path);
+      }
+    }
+  }
+});
+
 test('metadata GET and native PATCH retain JSON bodies and actual Drive paths', async () => {
   const calls: { url: string; method: string; body?: string }[] = [];
   let name = 'old';
