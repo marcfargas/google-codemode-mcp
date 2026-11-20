@@ -1,5 +1,13 @@
 import type { Schema } from '@cfworker/json-schema';
 import { methodDeclaration } from './declarations.ts';
+import {
+  methodSummary,
+  parameterBrief,
+  schemaField,
+  schemaInventory,
+  schemaSummary,
+  selectSchemaNode,
+} from './discovery-brief.ts';
 import { callableParameters, supportsDownload } from './parameters.ts';
 import {
   supportsUpload,
@@ -71,6 +79,8 @@ export interface MethodMetadata extends DiscoveryMethod {
 
 export const GMAIL_DISCOVERY_URL = SERVICES['gmail/v1'].discoveryUrl;
 export const MAX_DOWNLOAD_BYTES = 128 * 1024;
+export type DiscoveryView = 'brief' | 'full';
+const CONVENTIONS_URI = 'skill://google-codemode-mcp/google-workspace/references/conventions.md';
 const DISCOVERY_NEXT =
   "Before execute, describe every distinct Google method the program may call, including calls inside helpers, loops and branches. A resource listing or another method's schemas do not describe that method. Reuse method descriptions already read in this conversation.";
 export const MEDIA_SCHEMA = {
@@ -262,7 +272,7 @@ export class DiscoveryCatalog {
 
   async describe(
     path = '',
-    options: { streamMedia?: boolean } = {},
+    options: { streamMedia?: boolean; view?: DiscoveryView } = {},
   ): Promise<Record<string, unknown>> {
     const navigationError = () =>
       new Error('Unknown discovery path. Call describe({}) and follow its returned paths.');
@@ -275,6 +285,7 @@ export class DiscoveryCatalog {
         })),
         next: 'Read the skill URI through MCP Resources, then follow service and resource paths with describe to each needed method for its signature and schemas before execute.',
         skill: 'skill://google-codemode-mcp/google-workspace/SKILL.md',
+        conventions: CONVENTIONS_URI,
       };
     const entries = Object.entries(SERVICES).filter(([, service]) => service.name === path);
     if (entries.length)
@@ -293,6 +304,37 @@ export class DiscoveryCatalog {
       throw navigationError();
     const service = SERVICES[key];
     const document = await this.document(key);
+    const provenance = { revision: document.revision, source: service.discoveryUrl };
+    const commonPath = `${key}/@parameters`;
+    if (path === commonPath)
+      return {
+        path,
+        ...provenance,
+        parameters: callableParameters({ parameters: document.parameters }).parameters,
+        conventions: CONVENTIONS_URI,
+      };
+    if (path.startsWith(`${key}#`)) {
+      const fragment = path.slice(key.length + 1);
+      const slash = fragment.indexOf('/');
+      const name = slash === -1 ? fragment : fragment.slice(0, slash);
+      if (!document.schemas || !Object.hasOwn(document.schemas, name))
+        throw new Error('Unknown Google schema');
+      const schema = document.schemas[name];
+      if (slash !== -1)
+        return {
+          ...schemaField(key, path, selectSchemaNode(schema, fragment.slice(slash + 1))),
+          ...provenance,
+        };
+      if (options.view === 'full')
+        return { path, schema: this.schemaFor(document, { $ref: name }) };
+      return {
+        path,
+        view: 'brief',
+        ...provenance,
+        schema: schemaInventory(key, path, schema),
+        full: { path, view: 'full' },
+      };
+    }
     const methods = await this.methods(key);
     const method = methods.get(path);
     if (method) {
@@ -300,20 +342,13 @@ export class DiscoveryCatalog {
       const upload = method.supported && supportsUpload(method);
       const localPath = path.slice(key.length + 1);
       const separator = localPath.lastIndexOf('.');
-      const described = {
-        ...method,
-        parameters: callableParameters(method, !!options.streamMedia).parameters,
-        revision: document.revision,
-        source: service.discoveryUrl,
-        declarations: method.supported
-          ? methodDeclaration(document, method, options.streamMedia)
-          : undefined,
+      const { parameters } = callableParameters(method, !!options.streamMedia);
+      const contract = {
         skill: 'skill://google-codemode-mcp/google-workspace/SKILL.md',
         documentation: `${service.documentationRoot}/${separator < 0 ? localPath : localPath.slice(0, separator) + '/' + localPath.slice(separator + 1)}`,
         signature: method.supported
           ? `${path.slice(key.length + 1)}(params): Promise<{ data, status, headers }>`
           : undefined,
-        next: DISCOVERY_NEXT,
         unsupportedReason: method.supported
           ? undefined
           : 'A required native parameter is excluded by the execution parameter policy',
@@ -353,6 +388,51 @@ export class DiscoveryCatalog {
               }
             : {}),
         },
+      };
+      if (options.view !== 'full') {
+        const shared = callableParameters({ parameters: document.parameters }).parameters;
+        const sharedNames: string[] = [];
+        const local: Record<string, unknown> = Object.create(null);
+        for (const [name, schema] of Object.entries(parameters)) {
+          const common = shared[name];
+          if (schema === common || (common && JSON.stringify(schema) === JSON.stringify(common)))
+            sharedNames.push(name);
+          // The projected media argument is already bounded and its branches are callable inputs.
+          else local[name] = name === 'media' ? schema : parameterBrief(key, schema);
+        }
+        return {
+          path,
+          view: 'brief',
+          summary: methodSummary(method.description),
+          ...contract,
+          supported: method.supported,
+          mutation: method.mutation,
+          httpMethod: method.httpMethod,
+          parameters: local,
+          commonParameters: sharedNames.length
+            ? { path: commonPath, names: sharedNames }
+            : undefined,
+          requestBody: method.request && schemaSummary(key, method.request),
+          response: method.response && schemaSummary(key, method.response),
+          runtime: {
+            ...contract.runtime,
+            ...(download && !options.streamMedia ? { mediaResult: 'inline-base64' } : {}),
+          },
+          excludedParameters: method.excludedParameters,
+          scopes: method.scopes,
+          ...provenance,
+          full: { path, view: 'full' },
+        };
+      }
+      const described = {
+        ...method,
+        parameters,
+        ...provenance,
+        declarations: method.supported
+          ? methodDeclaration(document, method, options.streamMedia)
+          : undefined,
+        ...contract,
+        next: DISCOVERY_NEXT,
         mediaResponseSchema: download
           ? options.streamMedia
             ? MEDIA_ARTIFACT_SCHEMA
@@ -381,11 +461,6 @@ export class DiscoveryCatalog {
         ...Object.entries(described),
       ]);
     }
-    if (path.startsWith(`${key}#`)) {
-      const name = path.slice(key.length + 1);
-      if (!document.schemas?.[name]) throw new Error('Unknown Google schema');
-      return { path, schema: this.schemaFor(document, { $ref: name }) };
-    }
     const prefix = path === key ? '' : path.slice(key.length + 1) + '.';
     const matching = [...methods.values()].filter((value) =>
       value.path.slice(key.length + 1).startsWith(prefix),
@@ -407,6 +482,7 @@ export class DiscoveryCatalog {
       methods: direct,
       next: DISCOVERY_NEXT,
       schemaPath: `${key}#<SchemaName>`,
+      commonParameters: commonPath,
     };
   }
 

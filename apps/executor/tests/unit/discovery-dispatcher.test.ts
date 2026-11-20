@@ -98,6 +98,7 @@ test('Discovery is lazy, progressive, and resolves methods absent from a handwri
     ],
     next: 'Read the skill URI through MCP Resources, then follow service and resource paths with describe to each needed method for its signature and schemas before execute.',
     skill: 'skill://google-codemode-mcp/google-workspace/SKILL.md',
+    conventions: 'skill://google-codemode-mcp/google-workspace/references/conventions.md',
   });
   assert.deepEqual((await dynamic.describe('gmail')).paths, ['gmail/v1']);
   assert.equal(fetched, 0);
@@ -107,7 +108,8 @@ test('Discovery is lazy, progressive, and resolves methods absent from a handwri
   const nested = await dynamic.describe((resource.resources as string[])[0]);
   const method = await dynamic.describe((nested.methods as { path: string }[])[0].path);
   assert.match(method.signature as string, /Promise/);
-  assert.ok(method.responseSchema);
+  assert.equal(method.view, 'brief');
+  assert.deepEqual(JSON.parse(JSON.stringify(method.response)), { schemaPath: 'gmail/v1#Message' });
   for (const invalid of ['gmail.users.messages.get', 'sheets/v4', 'gmail/v1/nonexistent'])
     await assert.rejects(dynamic.describe(invalid), /follow its returned paths/);
   assert.deepEqual((await dynamic.describe('gmail/v1')).resources, ['gmail/v1/users']);
@@ -172,7 +174,7 @@ test('described parameters and declarations expose exactly the supported top-lev
   for (const name of excluded) document.parameters![name] = { type: 'string' };
   const original = structuredClone(document);
   const dynamic = new DiscoveryCatalog({ document });
-  const described = await dynamic.describe(list);
+  const described = await dynamic.describe(list, { view: 'full' });
   const parameters = described.parameters as Record<string, unknown>;
   assert.equal(described.supported, true);
   assert.deepEqual(Object.keys(parameters).sort(), ['fields', 'labelIds', 'maxResults', 'userId']);
@@ -232,7 +234,19 @@ test('oversized method descriptions keep complete execution guidance within the 
   };
   const original = structuredClone(document);
   const dynamic = new DiscoveryCatalog({ document });
-  const described = await dynamic.describe(send);
+  const described = await dynamic.describe(send, { view: 'full' });
+  const brief = JSON.parse(JSON.stringify(await dynamic.describe(send)));
+  assert.ok(Buffer.byteLength(JSON.stringify(brief)) < 2_500);
+  assert.match(brief.summary, /…$/);
+  assert.equal(brief.signature, described.signature);
+  assert.deepEqual(brief.runtime, described.runtime);
+  assert.deepEqual(brief.requestBody, { schemaPath: 'gmail/v1#Message' });
+  assert.deepEqual(brief.response, brief.requestBody);
+  assert.deepEqual(await dynamic.describe(brief.full.path, { view: brief.full.view }), described);
+  const inventory = await dynamic.describe(brief.requestBody.schemaPath);
+  assert.ok(Buffer.byteLength(JSON.stringify(inventory)) < 1_000);
+  const child = await dynamic.describe('gmail/v1#Message/properties/largeNested/properties/child');
+  assert.deepEqual(child.schema, { type: 'string', description: largeDescription });
   const resolved = await dynamic.resolve(send);
   const computed = [
     'revision',
@@ -300,6 +314,89 @@ test('oversized method descriptions keep complete execution guidance within the 
   assert.deepEqual(document, original, 'presentation order must not mutate native Discovery');
 });
 
+test('brief shares inherited callable parameters and preserves method-specific overrides', async () => {
+  const document = fixture();
+  document.parameters!.auth = { type: 'string' };
+  document.parameters!.prettyPrint = { type: 'boolean', default: 'true' };
+  document.resources!.users.resources!.messages.methods!.list.parameters!.fields = {
+    type: 'string',
+    pattern: '^messages',
+  };
+  const dynamic = new DiscoveryCatalog({ document });
+  const brief = JSON.parse(JSON.stringify(await dynamic.describe(list)));
+  assert.deepEqual(brief.commonParameters, {
+    path: 'gmail/v1/@parameters',
+    names: ['prettyPrint'],
+  });
+  assert.equal(brief.parameters.fields.pattern, '^messages');
+  assert.deepEqual(brief.parameters.labelIds, { type: 'array', items: { type: 'string' } });
+  const common = await dynamic.describe(brief.commonParameters.path);
+  assert.deepEqual(Object.keys(common.parameters as object).sort(), ['fields', 'prettyPrint']);
+  assert.equal(common.revision, brief.revision);
+  assert.equal(common.source, brief.source);
+});
+
+test('schema details keep original formats and follow escaped own properties without expanding references', async () => {
+  const document = fixture();
+  const node = { type: 'string', format: 'date-time', description: 'RFC 3339.' };
+  document.schemas!.Message.properties!['some/~date'] = node;
+  document.schemas!.Message.properties!.children = { type: 'array', items: { $ref: 'Message' } };
+  const dynamic = new DiscoveryCatalog({ document });
+  const brief = JSON.parse(JSON.stringify(await dynamic.describe('gmail/v1#Message')));
+  assert.equal(brief.schema.fields['some/~date'].format, 'date-time');
+  assert.deepEqual(brief.schema.fields.children.items, { schemaPath: 'gmail/v1#Message' });
+  const escaped = await dynamic.describe('gmail/v1#Message/properties/some~1~0date');
+  assert.deepEqual(escaped.schema, node);
+  assert.equal(escaped.revision, brief.revision);
+  const children = await dynamic.describe('gmail/v1#Message/properties/children/items');
+  assert.deepEqual(children.schema, { $ref: 'Message' });
+  assert.deepEqual(children.references, ['gmail/v1#Message']);
+  for (const path of [
+    'gmail/v1#constructor',
+    'gmail/v1#Message/properties/__proto__',
+    'gmail/v1#Message/properties/constructor',
+    'gmail/v1#Message/properties/some~2date',
+    'gmail/v1#Message/properties/children/items/properties/raw',
+    'gmail/v1#Message/properties/' + 'q'.repeat(513),
+  ])
+    await assert.rejects(dynamic.describe(path), /Google schema/);
+});
+
+test('Gmail draft brief retains the capability-specific multipart contract', async () => {
+  const document = fixture();
+  document.resources!.users.resources!.drafts = {
+    methods: {
+      create: {
+        path: 'gmail/v1/users/{userId}/drafts',
+        httpMethod: 'POST',
+        parameters: { userId: { type: 'string', required: true, location: 'path' } },
+        supportsMediaUpload: true,
+        mediaUpload: {
+          maxSize: '36700160',
+          protocols: {
+            simple: { path: '/upload/gmail/v1/users/{userId}/drafts', multipart: true },
+          },
+        },
+        request: { $ref: 'Message' },
+        response: { $ref: 'Message' },
+      },
+    },
+  };
+  const dynamic = new DiscoveryCatalog({ document });
+  const path = 'gmail/v1/users.drafts.create';
+  for (const streamMedia of [false, true]) {
+    const brief = JSON.parse(JSON.stringify(await dynamic.describe(path, { streamMedia })));
+    const full = await dynamic.describe(path, { streamMedia, view: 'full' });
+    assert.deepEqual(brief.runtime, full.runtime);
+    assert.equal(brief.runtime.artifactUpload, streamMedia);
+    assert.deepEqual(brief.runtime.uploadMimeTypes, ['message/rfc822']);
+    assert.deepEqual(brief.parameters.media, (full.parameters as Record<string, unknown>).media);
+    assert.deepEqual(brief.parameters.media.properties.mimeType.enum, ['message/rfc822']);
+    assert.equal(JSON.stringify(brief.parameters.media).includes('"artifact"'), streamMedia);
+    assert.equal(brief.requestBody.schemaPath, 'gmail/v1#Message');
+  }
+});
+
 test('transport-looking request-body fields remain native data rather than top-level overrides', async () => {
   const document = fixture();
   document.schemas!.Message.properties = {
@@ -309,7 +406,7 @@ test('transport-looking request-body fields remain native data rather than top-l
   };
   document.parameters!.auth = { type: 'string' };
   const dynamic = new DiscoveryCatalog({ document });
-  const described = await dynamic.describe(send);
+  const described = await dynamic.describe(send, { view: 'full' });
   assert.ok(!Object.hasOwn(described.parameters as object, 'auth'));
   assert.match(described.declarations as string, /"auth": string/);
   assert.match(described.declarations as string, /"headers_"\?: string/);
@@ -339,7 +436,6 @@ test('a policy-excluded required native parameter makes the method explicitly un
   const dynamic = new DiscoveryCatalog({ document });
   const described = await dynamic.describe(list);
   assert.equal(described.supported, false);
-  assert.deepEqual(described.parameterOrder, ['userId']);
   assert.equal((described.runtime as { json: boolean }).json, false);
   assert.match(described.unsupportedReason as string, /required native parameter/);
   assert.equal(described.signature, undefined);
@@ -379,7 +475,7 @@ test('transient Discovery errors can recover and selected schemas exclude unrela
       ++attempts === 1 ? new Response('unavailable', { status: 503 }) : json(document),
   });
   await assert.rejects(dynamic.resolve(list));
-  const described = await dynamic.describe(send);
+  const described = await dynamic.describe(send, { view: 'full' });
   assert.deepEqual(Object.keys((described.requestSchema as { definitions: object }).definitions), [
     'Message',
   ]);
@@ -642,6 +738,7 @@ test('generated declarations parse for reserved Google names and retain selected
     native.resources!.users.resources!.messages.methods!.remove;
   const described = await new DiscoveryCatalog({ document: native }).describe(
     'gmail/v1/users.messages.delete',
+    { view: 'full' },
   );
   const declarations = described.declarations as string;
   const parsed = createSourceFile(

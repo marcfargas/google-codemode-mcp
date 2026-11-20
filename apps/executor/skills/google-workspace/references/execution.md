@@ -6,13 +6,26 @@ every method before the execution that calls it, including calls inside loops,
 helpers and snippets. A familiar Google method name is not evidence that this
 deployment supports its parameters or transport.
 
-Method descriptions provide the callable signature, supported parameters,
-generated declarations, request/response schemas, scope alternatives, Discovery
-source/revision and runtime limits. Inspect the leading runtime/navigation fields
-and retrieve the full result if a host shows only a preview. Native schemas are
-not silently truncated. Descriptions of excluded authentication/transport
-parameters explain their exclusion. Scope requirements do not grant access;
-available scopes are unknown for opaque tokens.
+Method briefs provide the callable signature, method arguments, supported
+runtime modes and limits, exclusions, scope alternatives and Discovery
+provenance. A brief describes the method for the required lookup before
+execution. Follow the brief's `commonParameters.path` for the shared arguments
+it lists and read [shared conventions](skill://google-codemode-mcp/google-workspace/references/conventions.md)
+for field masks, pagination, formats and validation.
+
+For a named request or response schema, follow its `schemaPath`. For example,
+`describe({path:'drive/v3#File'})` lists fields and their types and links.
+`describe({path:'drive/v3#File/properties/modifiedTime'})` returns the original
+Discovery metadata for that field. Use `~1` for a slash and `~0` for a tilde in
+a field name. A field detail can point to another named schema. Match
+service/version and Discovery revision when reusing details on the same
+deployment. Resolve them afresh when the revision is missing or changes, or
+the deployment's capabilities change.
+
+For the expanded method description with generated TypeScript or the expanded
+named schema, call the same path with `view:'full'`. The Discovery source URL
+provides the original document. Scope requirements do not grant access.
+Available scopes are unknown for an opaque token.
 
 ## Submit an async JavaScript body
 

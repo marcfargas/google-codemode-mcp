@@ -1,5 +1,6 @@
 import {
   ARTIFACTS_GUIDE,
+  CONVENTIONS_GUIDE,
   DRIVE_GUIDE,
   EXECUTION_GUIDE,
   GMAIL_GUIDE,
@@ -7,6 +8,7 @@ import {
   PAGINATION_GUIDE,
 } from './knowledge.ts';
 import { executionArtifactReferences } from './artifact-references.ts';
+import type { DiscoveryView } from './discovery.ts';
 import {
   createMcpHandler,
   fromJsonSchema,
@@ -36,6 +38,11 @@ service and resource paths down to each method you need. Describe each method
 before calling it in \`execute\`, including methods familiar from other Google
 clients: this deployment's available methods, parameters, schemas and transport
 limits come from its Discovery document.
+
+Each method opens with a compact brief. Follow its schema and common argument
+paths for details. Use \`view:'full'\` for expanded schemas and generated TypeScript.
+See [shared conventions](skill://google-codemode-mcp/google-workspace/references/conventions.md)
+for field masks, pagination, date and numeric formats, and validation.
 
 Use \`execute\` to submit JavaScript. The trusted caller supplies a short-lived
 OAuth \`accessToken\` as a standalone request argument. Through the authentication
@@ -165,8 +172,13 @@ export interface ProtocolSnippet {
   tool?: { name: string; description?: string };
 }
 
+export interface DescribeArguments {
+  path?: string;
+  view?: DiscoveryView;
+}
+
 export interface ProtocolApp {
-  describe(args: { path?: string }): Promise<unknown>;
+  describe(args: DescribeArguments): Promise<unknown>;
   execute(args: ExecuteArguments): Promise<unknown>;
   snippets: readonly ProtocolSnippet[];
   runSnippet(name: string, args: SnippetArguments): Promise<unknown>;
@@ -236,6 +248,7 @@ export async function handleMcp(request: Request, app: ProtocolApp): Promise<Res
       'google-workspace/references/gmail.md': GMAIL_GUIDE,
       'google-workspace/references/drive.md': DRIVE_GUIDE,
       'google-workspace/references/execution.md': EXECUTION_GUIDE,
+      'google-workspace/references/conventions.md': CONVENTIONS_GUIDE,
     }),
     { prefix: 'google-codemode-mcp', strict: true },
   );
@@ -277,14 +290,20 @@ export async function handleMcp(request: Request, app: ProtocolApp): Promise<Res
         {
           description:
             'Discover available Google APIs, methods, schemas, snippets and helper capabilities. Start with describe({}), read the returned Workspace skill through MCP Resources, and follow returned paths to inspect each needed method before execute.',
-          inputSchema: fromJsonSchema<{ path?: string }>(
+          inputSchema: fromJsonSchema<DescribeArguments>(
             {
               type: 'object',
               properties: {
                 path: {
                   type: 'string',
                   description:
-                    'Omit to list services and helper capabilities. Follow returned paths to inspect versions, resources, methods, or schemas. Version paths use service/version; resource and method paths use service/version/resource.method.',
+                    'Follow returned paths to inspect services, methods, common parameters, schemas or individual fields. Omit to list services and helpers.',
+                },
+                view: {
+                  type: 'string',
+                  enum: ['brief', 'full'],
+                  description:
+                    'Methods and named schemas default to brief. Use full for the expanded schemas and method declarations.',
                 },
               },
               additionalProperties: false,

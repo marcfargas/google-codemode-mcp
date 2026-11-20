@@ -308,7 +308,10 @@ test('trusted stored-reference helpers round-trip 256 KiB through native Gmail m
   try {
     const capabilities = await client.tool<any>('describe', { path: 'artifacts' });
     assert.equal(capabilities.referenceMedia.maxAttachmentBytes, 1024 * 1024);
-    const method = await client.tool<any>('describe', { path: 'gmail/v1/users.drafts.create' });
+    const method = await client.tool<any>('describe', {
+      path: 'gmail/v1/users.drafts.create',
+      view: 'full',
+    });
     assert.equal(method.runtime.mediaUpload, true);
     assert.equal(method.runtime.maxArtifactUploadBytes, 36700160);
     assert.match(method.declarations, /message\/rfc822/);
@@ -478,7 +481,7 @@ test('native SDK streams 33 MiB through R2 references with known and unknown len
     const description = await client.tool<{
       runtime: { mediaResult: string; maxDownloadBytes: number };
       declarations: string;
-    }>('describe', { path: 'drive/v3/files.get' });
+    }>('describe', { path: 'drive/v3/files.get', view: 'full' });
     assert.equal(description.runtime.mediaResult, 'artifact-reference');
     assert.match(description.declarations, /GoogleMediaArtifact/);
     for (const id of ['known', 'unknown']) {

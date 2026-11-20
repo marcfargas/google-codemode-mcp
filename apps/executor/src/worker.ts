@@ -2,7 +2,7 @@ import { DiscoveryCatalog } from './discovery.ts';
 import { executeProgram, createExecutor, PAGINATION_CAPABILITIES } from './runtime.ts';
 import type { ExecutionArguments, SnippetArguments } from './runtime.ts';
 import { validateSnippets } from './snippets.ts';
-import { handleMcp } from './protocol.ts';
+import { handleMcp, type DescribeArguments } from './protocol.ts';
 import definitions from '../snippets.config.ts';
 import { createArtifactStore, ARTIFACTS_CAPABILITIES } from './artifacts.ts';
 import { createR2Storage } from './storage.ts';
@@ -85,7 +85,7 @@ async function handle(
       uri.startsWith('artifact://google-codemode-mcp/v2/') && streamArtifactStore
         ? streamArtifactStore.readResource(uri)
         : artifactStore.readResource(uri),
-    describe: async (args: { path?: string }) => {
+    describe: async (args: DescribeArguments) => {
       if (args.path === 'snippets') return { snippets };
       if (args.path === 'pagination') return PAGINATION_CAPABILITIES;
       if (args.path === 'artifacts')
@@ -119,7 +119,7 @@ async function handle(
             skill: 'skill://google-codemode-mcp/google-workspace/references/artifacts.md',
           },
         };
-      return catalog.describe(args.path, { streamMedia: !!streamArtifactStore });
+      return catalog.describe(args.path, { streamMedia: !!streamArtifactStore, view: args.view });
     },
     execute: (args: ExecutionArguments) =>
       executeProgram({

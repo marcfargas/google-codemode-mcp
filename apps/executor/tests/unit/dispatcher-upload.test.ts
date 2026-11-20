@@ -123,7 +123,7 @@ test('native Discovery SDK emits exact binary multipart metadata and zero-byte u
 
 test('upload descriptions and declarations expose the same create-only byte contract', async () => {
   const discovery = catalog();
-  const create = await discovery.describe('drive/v3/files.create');
+  const create = await discovery.describe('drive/v3/files.create', { view: 'full' });
   const runtime = create.runtime as Record<string, unknown>;
   assert.equal(runtime.mediaUpload, true);
   assert.equal(runtime.maxUploadBytes, MAX_UPLOAD_BYTES);
@@ -279,8 +279,23 @@ test('media descriptions expose reference inputs and results only when storage i
   const discovery = catalog();
   const inline = await discovery.describe('drive/v3/files.create');
   const streamed = await discovery.describe('drive/v3/files.create', { streamMedia: true });
+  const inlineFull = await discovery.describe('drive/v3/files.create', { view: 'full' });
+  const streamedFull = await discovery.describe('drive/v3/files.create', {
+    streamMedia: true,
+    view: 'full',
+  });
   assert.equal(JSON.stringify(inline.parameters).includes('"artifact"'), false);
-  assert.equal((inline.declarations as string).includes('"artifact"'), false);
+  assert.equal((inlineFull.declarations as string).includes('"artifact"'), false);
   assert.equal(JSON.stringify(streamed.parameters).includes('"artifact"'), true);
-  assert.match(streamed.declarations as string, /"artifact"/);
+  assert.match(streamedFull.declarations as string, /"artifact"/);
+  for (const [brief, full] of [
+    [inline, inlineFull],
+    [streamed, streamedFull],
+  ]) {
+    assert.deepEqual(
+      (brief.parameters as Record<string, unknown>).media,
+      (full.parameters as Record<string, unknown>).media,
+    );
+    assert.ok(Buffer.byteLength(JSON.stringify(brief)) < 5_000);
+  }
 });

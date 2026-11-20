@@ -184,10 +184,22 @@ test('modern MCP client reaches real Worker sandbox and exposed deployment snipp
       name: 'describe',
       arguments: { path: 'gmail/v1/users.messages.list' },
     });
-    assert.equal(
-      (described.structuredContent as Record<string, unknown>)?.revision,
-      'test-revision',
-    );
+    const brief = described.structuredContent as Record<string, unknown>;
+    assert.equal(brief.revision, 'test-revision');
+    assert.equal(brief.view, 'brief');
+    assert.equal(brief.declarations, undefined);
+    const field = await client.callTool({
+      name: 'describe',
+      arguments: { path: 'gmail/v1#Message/properties/id' },
+    });
+    assert.deepEqual((field.structuredContent as Record<string, unknown>).schema, {
+      type: 'string',
+    });
+    const full = await client.callTool({
+      name: 'describe',
+      arguments: { path: 'gmail/v1/users.messages.list', view: 'full' },
+    });
+    assert.match((full.structuredContent as Record<string, string>).declarations, /type Params/);
     const executed = await client.callTool({
       name: 'execute',
       arguments: {

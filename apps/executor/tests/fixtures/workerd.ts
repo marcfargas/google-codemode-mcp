@@ -166,7 +166,7 @@ export default {
     if (url.pathname === '/mcp')
       return handleMcp(request, {
         snippets,
-        describe: async (args: { path?: string }) => catalog.describe(args.path),
+        describe: (args) => catalog.describe(args.path, args),
         execute,
         runSnippet: async (name: string, args: SnippetArguments) =>
           execute({ ...args, code: snippets.find((s) => s.name === name)!.code }, name),
