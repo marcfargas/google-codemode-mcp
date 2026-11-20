@@ -396,12 +396,14 @@ test('suite safety stops retain every declared unattempted case/model and do not
 
 test('matrix report preserves historical roles and reports missing selected results as unknown', async () => {
   await workspace(async (root) => {
-    const terra = { ...MATRIX.find((item) => item.id === 'terra')!, role: 'required' };
-    const oldSol = { ...sol, role: 'reference' };
     await json(join(root, 'matrix-source.json'), {
+      matrixVersion: 1,
       caseId: 'read-file',
       caseVersion: 1,
-      cells: [terra, oldSol],
+      cells: [
+        { id: 'terra', model: 'gpt-6.1-terra', runner: 'responses', role: 'required' },
+        { ...sol, model: 'gpt-6.1-sol', role: 'reference' },
+      ],
     });
     const report = await summarizeSavedRun(root);
     assert.equal(report.counts.selected, 2);
@@ -412,6 +414,10 @@ test('matrix report preserves historical roles and reports missing selected resu
       ['required', 'reference'],
     );
     assert.equal(report.recordedGate.selectedStatus, 'unknown');
+    assert.deepEqual(
+      report.attempts.map((row) => row.model),
+      ['gpt-6.1-terra', 'gpt-6.1-sol'],
+    );
     assert.equal(report.models[0].requests.value, null);
   });
 });

@@ -90,7 +90,7 @@ test(
       response.end(
         JSON.stringify({
           id: `response-${number}`,
-          model: 'gpt-6.1-terra',
+          model: 'gpt-6.2-sol',
           status: 'completed',
           output,
           usage: {
@@ -106,7 +106,7 @@ test(
     try {
       const actor = await runActor({
         runner: 'responses',
-        model: 'gpt-6.1-terra',
+        model: 'gpt-6.2-sol',
         prompt: 'Synthetic file and MCP preflight.',
         output: directory,
         mcpUrl: url + '/mcp',

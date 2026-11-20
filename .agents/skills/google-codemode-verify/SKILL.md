@@ -44,8 +44,8 @@ passing acceptance. Keep candidate equivalence and unselected coverage explicit.
 | Real Gmail behavior                                       | `just live`                                                       | Manual credentialed Gmail workflow through locally built Worker                                                                |
 | Real Drive behavior                                       | `just live-drive`                                                 | Manual credentialed Drive download/rename, conditional-option refusal and pagination through locally built Worker              |
 | Real attachment composition                               | `just live-media`                                                 | Four built-Worker controls: inline Gmail/Drive and native export, plus a 256 KiB stored Drive → Gmail draft → Drive round trip |
-| Agent media feasibility                                   | `just eval-media PROXY_URL /absolute/new/evidence all required`   | Two cases × Sonnet/Sol, ordered advanced-resource retrieval, independent readback and four $1 estimates                        |
-| Agent feasibility                                         | `just eval-matrix gmail PROXY_URL /absolute/new/evidence`         | Manual paid Sonnet/Sol required pair, one fresh attempt each                                                                   |
+| Agent media feasibility                                   | `just eval-media PROXY_URL /absolute/new/evidence all required`   | Two cases × the required pair, ordered advanced-resource retrieval, independent readback and four $1 estimates                 |
+| Agent feasibility                                         | `just eval-matrix gmail PROXY_URL /absolute/new/evidence`         | Manual paid Sonnet 5.5 and GPT-6.2 Sol, one fresh attempt each                                                                 |
 | Independent Gmail cases                                   | `just eval-gmail PROXY_URL /absolute/new/evidence`                | Six cases, one fresh attempt per model/case, up to twelve $1 estimates                                                         |
 | Independent Drive cases                                   | `just eval-drive PROXY_URL /absolute/new/evidence`                | Four cases after Drive consent, one fresh attempt per model/case, up to eight $1 estimates                                     |
 | Prepare private hosted probes                             | `just hosted-prepare /absolute/new/prepared`                      | Exact source/bundle identity and private dry-run; no deployment                                                                |
@@ -87,7 +87,7 @@ is not needed to recover recorded metrics. Authoring this skill does not authori
 an additional paid attempt. Use `mafe-si:build-eval` when substantially changing
 cases/grading, rather than weakening expectations to turn a run green.
 
-`just eval-artifacts PROXY_URL NEW_OUTPUT all required` runs two local artifact cases × Sonnet/Sol under four $1 estimates. The trusted harness snapshots R2 content before actor deletion; later helper/resource reads, deletion, no residual objects, unchanged Gmail sources and cleanup are required. It does not qualify hosted retention or host file presentation.
+`just eval-artifacts PROXY_URL NEW_OUTPUT all required` runs two local artifact cases × the required pair under four $1 estimates. The trusted harness snapshots R2 content before actor deletion; later helper/resource reads, deletion, no residual objects, unchanged Gmail sources and cleanup are required. It does not qualify hosted retention or host file presentation.
 
 ## Observe, retain, and clean up
 

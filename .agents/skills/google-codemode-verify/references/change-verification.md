@@ -44,7 +44,7 @@ task worklog, with only the useful result in the delivery report.
 | Hosted limits, deployment or native host behavior         | Maintained hosted controls or actual host journey; local actor passes cannot replace these boundaries                                                       |
 
 Case definitions live in `apps/executor/tests/eval/{cases,drive,media,artifacts}.ts`; current
-versions and required Sonnet/Sol roles come from those registries and `matrix.ts`.
+versions and model roles come from those registries and `matrix.ts`.
 A common contract needs an owning check, not a separate matrix for every skill.
 Preserve cases that exercise distinct failure mechanisms. Sheets, Docs and
 Calendar remain pending and cannot substitute a Gmail pass.

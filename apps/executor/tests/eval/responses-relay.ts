@@ -18,14 +18,15 @@ const integer = (value: unknown): value is number =>
 export const RESPONSES_ACCOUNTING_VERSION = 2;
 
 export const RESPONSES_PRICING = Object.freeze({
-  version: 1,
+  version: 2,
   source: 'https://developers.openai.com/api/docs/pricing',
-  fetchedAt: '2026-11-04',
   basis: 'Standard USD per million tokens; estimate only, not proxy billing',
   models: Object.freeze({
-    'gpt-6.1-terra': { input: 1, output: 5, cachedInput: 0.05 },
-    'gpt-6.1-sol': { input: 2, output: 10, cachedInput: 0.1 },
-    'gpt-6-luna': { input: 0.1, output: 0.5, cachedInput: 0.01 },
+    'gpt-6.2-sol': { input: 2, output: 10, cachedInput: 0.1, fetchedAt: '2026-11-20' },
+    'gpt-6.2-astra': { input: 8, output: 40, cachedInput: 0.4, fetchedAt: '2026-11-20' },
+    'gpt-6.1-terra': { input: 1, output: 5, cachedInput: 0.05, fetchedAt: '2026-11-04' },
+    'gpt-6.1-sol': { input: 2, output: 10, cachedInput: 0.1, fetchedAt: '2026-11-04' },
+    'gpt-6-luna': { input: 0.1, output: 0.5, cachedInput: 0.01, fetchedAt: '2026-11-04' },
   }),
 });
 
@@ -123,8 +124,10 @@ export function createResponsesHandler(options: {
   /** Separately qualified native host profile; leaves the custom runner contract unchanged. */
   nativeCodex?: boolean;
 }) {
-  const rates = RESPONSES_PRICING.models[options.model as keyof typeof RESPONSES_PRICING.models];
-  if (!rates) throw new Error('GPT model lacks an explicit evaluation pricing entry');
+  const { models, ...pricing } = RESPONSES_PRICING;
+  const price = models[options.model as keyof typeof models];
+  if (!price) throw new Error('GPT model lacks an explicit evaluation pricing entry');
+  const { fetchedAt, ...rates } = price;
   let active = false;
   let stopped = false;
   let requests = 0;
@@ -202,7 +205,7 @@ export function createResponsesHandler(options: {
         refundUsd: 0,
         settlementEligible: false,
         settlementReason: 'awaiting_verified_terminal',
-        pricing: { ...RESPONSES_PRICING, models: undefined, rates },
+        pricing: { ...pricing, fetchedAt, rates },
         providerBilledCostUsd: null,
         complete: false,
         servedModels: [],

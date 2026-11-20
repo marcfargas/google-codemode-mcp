@@ -3,7 +3,7 @@ import { appendFile, lstat, mkdir, readFile, realpath, writeFile } from 'node:fs
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { MATRIX, getCellByModel, selectCells } from './matrix.ts';
+import { MATRIX, NATIVE_CODEX_PROBE, getCellByModel, selectCells } from './matrix.ts';
 import { GMAIL_CASES, GMAIL_EVALUATION_CASES, getCase, selectCases } from './cases.ts';
 import { DRIVE_CASES, DRIVE_EVALUATION_CASES } from './drive.ts';
 import { MEDIA_CASES } from './media.ts';
@@ -43,8 +43,17 @@ const caseIds = [
   ...ARTIFACT_CASES.map((item) => item.id),
   ...MEDIA_CASES.map((item) => item.id),
 ];
-const models = MATRIX.map((cell) => cell.model);
-const cellIds = [...MATRIX.map((cell) => cell.id), 'sol-native-codex'];
+// Retained v1/v2 manifests preserve the role each cell had at the time.
+const reportCells = [
+  ...MATRIX,
+  NATIVE_CODEX_PROBE,
+  { id: 'sol', model: 'gpt-6.1-sol', runner: 'responses', role: 'required' },
+  { id: 'sol', model: 'gpt-6.1-sol', runner: 'responses', role: 'reference' },
+  { id: 'terra', model: 'gpt-6.1-terra', runner: 'responses', role: 'required' },
+  { id: 'terra', model: 'gpt-6.1-terra', runner: 'responses', role: 'reference' },
+];
+const models = reportCells.map((cell) => cell.model);
+const cellIds = reportCells.map((cell) => cell.id);
 const criteria = new Set([
   'readback',
   'gmail_selection',
@@ -314,24 +323,13 @@ export function retainedRunPassed(report: RunReport): boolean {
 }
 function cell(value: unknown) {
   const item = object(value);
-  const declared = MATRIX.find((entry) => entry.id === item.id);
-  const nativeProbe =
-    item.id === 'sol-native-codex' &&
-    item.model === 'gpt-6.1-sol' &&
-    item.runner === 'codex' &&
-    item.role === 'probe';
-  return {
-    cellId: oneOf(item.id, cellIds),
-    model: oneOf(item.model, models),
-    runner: oneOf(item.runner, ['claude', 'responses', 'codex']),
-    role: oneOf(item.role, ['required', 'probe', 'reference']),
-    valid:
-      nativeProbe ||
-      (!!declared &&
-        item.model === declared.model &&
-        item.runner === declared.runner &&
-        oneOf(item.role, ['required', 'probe', 'reference']) !== null),
-  };
+  return reportCells.find(
+    (entry) =>
+      item.id === entry.id &&
+      item.model === entry.model &&
+      item.runner === entry.runner &&
+      item.role === entry.role,
+  );
 }
 function declarationSource(declaration: ReportDeclaration) {
   try {
@@ -349,7 +347,7 @@ function declarationSource(declaration: ReportDeclaration) {
     if (
       nativeProbe &&
       (profile !== 'gmail' ||
-        declaration.model !== 'gpt-6.1-sol' ||
+        declaration.model !== NATIVE_CODEX_PROBE.model ||
         (declaration.caseId || 'read-search') !== 'read-search' ||
         declaration.repeats === '2' ||
         declaration.selection ||
@@ -360,7 +358,7 @@ function declarationSource(declaration: ReportDeclaration) {
       ? selectCases(profile, declaration.cases)
       : [getCase(profile, declaration.caseId || (nativeProbe ? 'read-search' : undefined))];
     const cells = nativeProbe
-      ? [{ id: 'sol-native-codex', model: 'gpt-6.1-sol', runner: 'codex', role: 'probe' }]
+      ? [NATIVE_CODEX_PROBE]
       : declaration.selection
         ? selectCells(declaration.selection)
         : [getCellByModel(declaration.model ?? '')];
@@ -670,11 +668,11 @@ export async function summarizeSavedRun(
           : result;
       for (const declaredCell of cells) {
         const checked = cell(declaredCell);
-        if (!checked.valid || !checked.cellId) {
+        if (!checked) {
           issues.push('invalid_cell_declaration');
           continue;
         }
-        const row = array(caseResult.rows).find((item) => item?.id === checked.cellId);
+        const row = array(caseResult.rows).find((item) => item?.id === checked.id);
         const fallbackSingle = mode === 'declaration' && !declaration?.selection;
         for (
           let repetition = 1;
@@ -682,18 +680,19 @@ export async function summarizeSavedRun(
           repetition++
         )
           plans.push({
-            ...checked,
-            directory: fallbackSingle ? saved : join(caseDirectory, checked.cellId),
+            cellId: checked.id,
+            model: checked.model,
+            runner: checked.runner,
+            role: checked.role,
+            directory: fallbackSingle ? saved : join(caseDirectory, checked.id),
             caseId: id,
             caseVersion: count(selectedCase.version),
             repetition,
-            fallback: object(
-              array(caseResult.results).find((item) => item?.cellId === checked.cellId),
-            ),
+            fallback: object(array(caseResult.results).find((item) => item?.cellId === checked.id)),
             unattempted:
               mode === 'declaration' ||
               array(result.unattempted).includes(id) ||
-              array(caseResult.unattempted).includes(checked.cellId) ||
+              array(caseResult.unattempted).includes(checked.id) ||
               row?.status === 'unattempted',
           });
       }

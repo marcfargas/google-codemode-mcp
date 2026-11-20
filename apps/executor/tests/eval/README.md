@@ -42,7 +42,7 @@ be called. Existing cases retain their version-2 criteria when this policy is ab
 Independent cases cover read/search, reply, attachment, labels, pagination,
 and safe failure handling. Each has fresh fixtures and an actor workspace, exact
 answer/file or independent Google state checks, case-specific mutation limits,
-and cleanup. One required Sonnet/Sol attempt per case permits twelve attempts,
+and cleanup. One attempt each for Sonnet 5.5 and GPT-6.2 Sol per case permits twelve attempts,
 each retaining the existing five-minute and $1 estimate caps: at most $12 in
 estimates, separate from proxy billing. Ordinary checks remain inference-free.
 
@@ -124,6 +124,8 @@ the later conditional-v2 pair produced one pass and one failure. Those failed
 campaigns remain retained. A later current-candidate matrix passed all eight
 required cells. Hosted Drive and actual target-host acceptance remain separate.
 
+## Model matrix
+
 Run the required pair, or explicitly select all six cells:
 
 ```sh
@@ -133,12 +135,15 @@ just eval-matrix gmail http://127.0.0.1:8317 /absolute/new/full-matrix-directory
 
 | Role      | Claude (native CLI 2.1.318)    | GPT (Responses runner)    |
 | --------- | ------------------------------ | ------------------------- |
-| Required  | `claude-sonnet-5-5` (`sonnet`) | `gpt-6.1-sol` (`sol`)     |
+| Required  | `claude-sonnet-5-5` (`sonnet`) | `gpt-6.2-sol` (`sol`)     |
 | Probe     | `claude-haiku-5-5` (`haiku`)   | `gpt-6-luna` (`luna`)     |
-| Reference | `claude-opus-5-5` (`opus`)     | `gpt-6.1-terra` (`terra`) |
+| Reference | `claude-opus-5-5` (`opus`)     | `gpt-6.2-astra` (`astra`) |
 
-Matrix version 2 selects Sonnet and Sol as the required pair. Version 1 results
-retain their original Sonnet/Terra roles and are not reclassified.
+Matrix version 3 requires Sonnet 5.5 and GPT-6.2 Sol. GPT-6.2 Astra runs with
+`all` or explicit `astra` selection. Both GPT-6.2 cells passed the
+[Gmail read/search case](#gpt-62-gmail-readsearch-2026-11-20).
+Retained version 1 and 2 reports preserve their recorded model IDs, roles and
+grades. The required GPT model was GPT-6.1 Terra in v1 and GPT-6.1 Sol in v2.
 
 The Responses runner supplies the server's actual instructions and resource metadata to the model. Skill contents still
 require a model-requested resource read. Shared tool descriptions and root
@@ -156,7 +161,7 @@ retain unattempted cells. A subset cannot qualify the absent required pair.
 For a single model, use its exact manifest ID:
 
 ```sh
-just eval gmail gpt-6.1-sol http://127.0.0.1:8317 /absolute/new/single-model-directory
+just eval gmail gpt-6.2-sol http://127.0.0.1:8317 /absolute/new/single-model-directory
 ```
 
 Requires Docker, `act`, `just`, Node 24, the existing test OAuth grant, and a running
@@ -394,6 +399,26 @@ retained. The revised run demonstrates that an agent can perform this Gmail task
 but does not validate agent use of method discovery, the other services, every
 target host, or hosted Cloudflare behavior. No extra trials were run to obtain a
 green result.
+
+## GPT-6.2 Gmail read/search (2026-11-20)
+
+Both models passed one live `read-search` v1 attempt through `responses-loop-3`
+on local Worker source `b6fe631`, with grading v4. Gmail readback verified the
+answer. Both models completed `resources/read` for the Workspace `SKILL.md`
+before their first execution and described every Gmail method before calling it.
+Neither model changed the mailbox. The harness cleaned all owned fixtures and
+reported no unknown effects.
+
+| Model           | Requests | Input tokens | Cache-read input | Output tokens | Published-rate estimate |
+| --------------- | -------: | -----------: | ---------------: | ------------: | ----------------------: |
+| `gpt-6.2-sol`   |       10 |       63,719 |           49,536 |           645 |                $0.03977 |
+| `gpt-6.2-astra` |        8 |       45,795 |           28,032 |           393 |                $0.16904 |
+
+The selected run passed 2/2 cells. Cache reads are included in input tokens.
+Cache creation and provider billing were unavailable. Both cells together used
+18 requests with a $0.20881 published-rate estimate. The remaining Gmail cases,
+other service cases and per-service guide retrieval still need GPT-6.2 evidence.
+Sonnet was outside this selection, so the required-pair gate remained pending.
 
 ## First model matrix (2026-11-04)
 
@@ -783,9 +808,9 @@ and Gmail/Drive composition are not established by this Drive result. The later
 ## Native Codex capability probe
 
 `just eval-native-gmail PROXY_URL NEW_OUTPUT` runs one fresh `read-search` case
-with native Codex 0.166.0 and `gpt-6.1-sol`. It is an optional host capability
-probe, separate from the required Sonnet/Sol matrix; it does not replace the Sol
-Responses performer. It can use the same explicit hosted backend settings.
+with native Codex 0.166.0 and `gpt-6.1-sol`. This optional host capability probe
+has its own result. The required GPT-6.2 Sol cell uses the Responses runner.
+The probe can use the same explicit hosted backend settings.
 
 The native profile has a broader advertised tool surface. It uses an isolated
 actor identity/home, workspace sandbox, shell tools disabled, and the trusted

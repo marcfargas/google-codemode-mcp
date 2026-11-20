@@ -8,15 +8,23 @@ export interface MatrixCell {
   readonly attempts: 1;
 }
 
-export const MATRIX_VERSION = 2;
+export const NATIVE_CODEX_PROBE = {
+  id: 'sol-native-codex',
+  model: 'gpt-6.1-sol',
+  runner: 'codex',
+  role: 'probe',
+  attempts: 1,
+} as const satisfies MatrixCell;
+
+export const MATRIX_VERSION = 3;
 export const MATRIX: readonly MatrixCell[] = Object.freeze(
   [
     { id: 'sonnet', model: 'claude-sonnet-5-5', runner: 'claude', role: 'required', attempts: 1 },
-    { id: 'sol', model: 'gpt-6.1-sol', runner: 'responses', role: 'required', attempts: 1 },
+    { id: 'sol', model: 'gpt-6.2-sol', runner: 'responses', role: 'required', attempts: 1 },
     { id: 'haiku', model: 'claude-haiku-5-5', runner: 'claude', role: 'probe', attempts: 1 },
     { id: 'luna', model: 'gpt-6-luna', runner: 'responses', role: 'probe', attempts: 1 },
     { id: 'opus', model: 'claude-opus-5-5', runner: 'claude', role: 'reference', attempts: 1 },
-    { id: 'terra', model: 'gpt-6.1-terra', runner: 'responses', role: 'reference', attempts: 1 },
+    { id: 'astra', model: 'gpt-6.2-astra', runner: 'responses', role: 'reference', attempts: 1 },
   ].map((cell) => Object.freeze(cell)) as MatrixCell[],
 );
 

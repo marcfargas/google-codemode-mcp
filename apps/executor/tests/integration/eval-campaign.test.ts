@@ -13,13 +13,13 @@ test('metadata preflight requires exact advertised IDs without inference', async
     paths.push(req.url!);
     assert.equal(req.headers.authorization, 'Bearer synthetic');
     res.setHeader('content-type', 'application/json');
-    res.end(JSON.stringify({ data: [{ id: 'gpt-6.1-terra' }] }));
+    res.end(JSON.stringify({ data: [{ id: 'gpt-6.2-astra' }] }));
   });
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done));
   const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
   try {
-    await verifyModels(base, 'synthetic', ['gpt-6.1-terra']);
-    await assert.rejects(verifyModels(base, 'synthetic', ['gpt-6.1-sol']), /does not advertise/);
+    await verifyModels(base, 'synthetic', ['gpt-6.2-astra']);
+    await assert.rejects(verifyModels(base, 'synthetic', ['gpt-6.2-sol']), /does not advertise/);
     await assert.rejects(
       verifyModels(base + '?secret=invalid', 'synthetic', []),
       /credential-free/,
@@ -149,7 +149,7 @@ test('hosted runner cannot start paid evaluation or create fixture evidence', as
     process.env.GITHUB_ACTIONS = 'true';
     delete process.env.ACT;
     await assert.rejects(
-      runCell({ profile: 'gmail', model: 'gpt-6.1-sol', output }),
+      runCell({ profile: 'gmail', model: 'gpt-6.2-sol', output }),
       /requires local act/,
     );
     await assert.rejects(access(output), { code: 'ENOENT' });
@@ -202,7 +202,7 @@ test('Drive suite declares four cases and eight bounded required attempts withou
       attempted,
       ['read-file', 'list-pages', 'rename-file', 'conditional-update-unsupported'].flatMap((id) => [
         `${id}/claude-sonnet-5-5`,
-        `${id}/gpt-6.1-sol`,
+        `${id}/gpt-6.2-sol`,
       ]),
     );
     const source = JSON.parse(await readFile(join(root, 'suite-source.json'), 'utf8'));

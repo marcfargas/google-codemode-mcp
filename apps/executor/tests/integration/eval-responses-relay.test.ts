@@ -43,19 +43,20 @@ const harness = (
 ) => responsesHarness(respond, payload(model));
 
 test('Responses relay preserves cache controls, terminal usage and model identity without leaking auth', async () => {
+  const model = 'gpt-6.2-astra';
   const gate = await harness((_body, response) => {
     response.writeHead(200, { 'Content-Type': 'application/json' });
-    response.end(JSON.stringify(terminal('one')));
-  });
+    response.end(JSON.stringify(terminal('one', model)));
+  }, model);
   try {
     const body = {
-      ...payload(),
+      ...payload(model),
       prompt_cache_key: 'stable-evaluation-prefix',
       max_output_tokens: 10_000,
     };
     const response = await gate.invoke(body);
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), terminal('one'));
+    assert.deepEqual(await response.json(), terminal('one', model));
     assert.equal(gate.upstream[0].headers.authorization, 'Bearer private-proxy-key');
     assert.equal(gate.upstream[0].body.max_output_tokens, 2048);
     assert.equal(gate.upstream[0].body.prompt_cache_key, body.prompt_cache_key);
@@ -63,19 +64,19 @@ test('Responses relay preserves cache controls, terminal usage and model identit
     const receipt = gate.receipts[0];
     assert.equal(receipt.api, 'responses');
     assert.equal(receipt.complete, true);
-    assert.deepEqual(receipt.servedModels, [MODEL]);
+    assert.deepEqual(receipt.servedModels, [model]);
     assert.equal(receipt.cacheReadInputTokens, 12);
     assert.equal(receipt.cacheCreationInputTokens, null);
     assert.equal(receipt.totalOutputTokensOrUpperBound, 9);
     assert.equal(receipt.accountingVersion, 2);
     assert.equal(receipt.settlementEligible, true);
     assert.equal(receipt.settlementReason, 'settled_verified_terminal');
-    assert.equal(receipt.settledUsd, (20 * 1 + 9 * 5) / 1_000_000);
+    assert.equal(receipt.settledUsd, (20 * 8 + 9 * 40) / 1_000_000);
     assert.equal(receipt.heldUsd, 0);
     assert.ok(receipt.refundUsd > 0);
     assert.equal(receipt.totalCommittedEstimateUsd, receipt.estimatedUsdUpperBound);
     assert.equal(receipt.providerBilledCostUsd, null);
-    assert.ok(receipt.usagePublishedRateEstimateUsd > 0);
+    assert.equal(receipt.usagePublishedRateEstimateUsd, (8 * 8 + 12 * 0.4 + 9 * 40) / 1_000_000);
     assert.ok(receipt.estimatedUsdUpperBound >= receipt.usagePublishedRateEstimateUsd);
     assert.match(receipt.responseSha256, /^[a-f0-9]{64}$/);
     for (const name of ['model-requests.jsonl', 'model-receipts.jsonl'])
@@ -236,7 +237,7 @@ test('model mismatch is retained and returned as a transport failure without sil
 
 test('high actual usage still blocks a large third request before spending', async () => {
   let count = 0;
-  const model = 'gpt-6.1-sol';
+  const model = 'gpt-6.2-sol';
   const gate = await harness(
     (_body, response) =>
       response.end(
@@ -416,7 +417,7 @@ test('settled input usage admits twelve-plus growing Sol requests that permanent
     [110000, 25000, 30],
     [115000, 26000, 35],
   ];
-  const model = 'gpt-6.1-sol';
+  const model = 'gpt-6.2-sol';
   let call = 0;
   const gate = await harness((_body, response) => {
     const [, input_tokens, output_tokens] = shapes[call];

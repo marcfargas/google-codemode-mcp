@@ -70,7 +70,8 @@ just eval-media http://127.0.0.1:8317 /absolute/new/media-evidence all required
 just eval-artifacts http://127.0.0.1:8317 /absolute/new/artifact-evidence all required
 ```
 
-Sonnet/Sol are required; probe/reference cells are explicitly selected. One attempt
+Sonnet 5.5 and GPT-6.2 Sol are required. GPT-6.2 Astra and other probe/reference
+cells are explicitly selected. One attempt
 per cell, no retries or model fallback. Reuse relevant retained evidence before
 spending; each fresh attempt has its five-minute, request/output and $1 estimate
 limits. Estimates are distinct from billing.

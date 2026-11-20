@@ -16,7 +16,7 @@ consuming selected saved acceptance, after establishing relevant source equivale
    ceiling. Read [the maintained gate guide](../../../../apps/executor/tests/eval/README.md),
    [case/model selection](../../../../apps/executor/tests/eval/campaign.ts), and
    [the launcher](../../../../apps/executor/tests/eval/act.mjs) when those inputs changed.
-   Defaults are Sonnet 5.5 (`sonnet`) and GPT 6.1 Sol (`sol`), one fresh attempt
+   Defaults are Sonnet 5.5 (`sonnet`) and GPT-6.2 Sol (`sol`), one fresh attempt
    per case/model. Gmail has six cases, at most twelve $1 estimates; Drive has
    four cases, at most eight $1 estimates. Artifacts has two cases through local Miniflare R2, at most four $1 estimates. Media has two cases, at most four $1 estimates, and requires ordered advanced-media resource retrieval. Use explicit case/model selections
    for a bounded subset. A subset does not qualify missing required cells.
