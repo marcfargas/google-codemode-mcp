@@ -54,8 +54,8 @@ Use `mafe-si:technical-writing` for composition when available.
 ## Move or consolidate
 
 Nothing checks links; the check's Prettier step only formats. Headings in the
-eval and hosted guides are link targets from README.md, DEPLOYMENT.md, these
-skills and issue bodies, which link to the file on `main`. Before renaming a
+eval and hosted guides are link targets from README.md, DEPLOYMENT.md, the
+test guides and issue bodies, which link to the file on `main`. Before renaming a
 heading or moving a file, search the repository for its path and anchor and fix
 every hit in the same change. Links from issues break without any signal, so
 leave dated headings and guide paths as they are unless the move is the point.

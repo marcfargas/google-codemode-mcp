@@ -13,9 +13,8 @@ This skill adds the decisions they leave open.
 
 ## Which tier a change needs
 
-The credential-free check runs on every PR. It builds both Workers and runs
-every unit, integration and preflight test, including stored artifacts on
-workerd with Miniflare R2, the gateway's OAuth provider and the two-Worker
+The credential-free check runs on every PR and already covers stored artifacts
+on workerd with Miniflare R2, the gateway's OAuth provider and the two-Worker
 gateway/executor seam. The tiers below are slow, mutate a real account or cost
 money. Run one when the owner asks, or when the change alters what it
 exercises:
@@ -23,19 +22,21 @@ exercises:
 | Tier                                           | Exercises                                                                         | A change that triggers it                                                                                                                             |
 | ---------------------------------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Live (`live`, `live-drive`, `live-media`)      | The built executor Worker against the real Google test account                    | Executor code between `execute` and Google: dispatch, runtime, media and stored-artifact transfers, the pagination helper, or the live fixtures       |
-| Paid agent evaluation (the `eval-*` campaigns) | A model that reads the served skill and `describe` output and then uses the tools | What an agent reads (served skill text, `describe` output, tool descriptions) or the gate itself (runners, cases, graders under `tests/eval/`)        |
+| Paid agent evaluation (the `eval-*` campaigns) | A model that reads the served skill and `describe` output and then uses the tools | What an agent reads (served skill text, `describe` output, tool descriptions), or the runners and cases under `tests/eval/`                           |
 | Hosted (`hosted-*`)                            | A deployed, Access-protected Worker                                               | None by itself: it needs a deployment and `HOSTED_*` settings that only the owner supplies. Report that hosted behavior is unverified for the change. |
 
 - Take the live recipe for the service the change touches; a transfer or media
   change takes `live-media`.
-- Paid evaluation spends the owner's money: each case and model cell is capped
-  at a $1 estimate, and a default suite is up to twelve cells. Select only the
-  cases the change affects, with the required model pair, through the recipe's
-  trailing arguments. Do not repeat a cell to get a pass or add a second trial.
-  One attempt per cell is the gate's design, and a failed cell is a result to
-  report.
-- When only runner, MCP or file plumbing changed, `eval-preflight` exercises it
-  with synthetic responses and no spend.
+- Paid evaluation spends the owner's money. Select only the cases the change
+  affects, with the required model pair, through the recipe's trailing
+  arguments, and do not repeat a cell to get a pass: a failed cell is a result
+  to report.
+- A change to grading alone needs no paid run: the check's grader tests cover
+  it, and a saved trial can be regraded offline. A change to runner, MCP or
+  file plumbing alone takes the synthetic preflight.
+- A passing Drive `list-pages` or Gmail `pagination` grade proves native
+  paging, not that the agent used `pagination.collect`. Read the executed code
+  in the trial before reporting helper use.
 - No live tier reaches `apps/gateway`. The credential-free check covers gateway
   changes; its hosted OAuth behavior is open acceptance in
   [#5](https://github.com/marcfargas/google-codemode-mcp/issues/5), not
@@ -45,8 +46,11 @@ exercises:
   [google-codemode-docs](../google-codemode-docs/SKILL.md).
 - For a change limited to Wrangler or deploy settings, run the deploy recipe
   with `--dry-run` and read the bindings and variables Wrangler prints for the
-  effective values. It shows configuration, not admission: Access policy is
-  applied in Cloudflare, not by the deploy.
+  effective values. Set the environment settings under change first: the
+  artifact bucket binding and download origin are added only when
+  `ARTIFACTS_BUCKET` and `ARTIFACT_DOWNLOAD_ORIGIN` are set, so a plain dry run
+  passes without showing them. A dry run shows configuration, not admission:
+  Access policy is applied in Cloudflare, not by the deploy.
 - When cases or grading change substantially, use `mafe-si:build-eval` instead
   of loosening an expectation until a run passes.
 
