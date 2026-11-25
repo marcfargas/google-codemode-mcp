@@ -1,9 +1,7 @@
 # Development and verification
 
-For change delivery, use the [project verifier](../../../.agents/skills/google-codemode-verify/SKILL.md)
-and its [case/evidence selection procedure](../../../.agents/skills/google-codemode-verify/references/change-verification.md).
-Select existing checks by affected behavior, reuse applicable retained evidence,
-and run fresh paid cells only for unresolved agent behavior. `just check` qualifies
+For change delivery, the [project verifier](../../../.agents/skills/google-codemode-verify/SKILL.md)
+says which live, paid or hosted tier a change needs. `just check` qualifies
 its deterministic checks; agent and hosted acceptance remain separate.
 
 Executor test suites and infrastructure live here: `unit/` for isolated checks,
@@ -30,7 +28,7 @@ just verify      # Run its steps directly for fast feedback
 just live        # Run the explicit Live Gmail workflow in act
 ```
 
-Check runs on pushes and pull requests with no OAuth credentials. Live Gmail is
+Check runs on pull requests and pushes to `main` with no OAuth credentials. Live Gmail is
 manual-only on `main`, serialized in GitHub, and receives only its three required
 repository secrets. Local `act` copies the working tree respecting `.gitignore`,
 uses explicit env/secret files, and does not bind-mount the repository or expose

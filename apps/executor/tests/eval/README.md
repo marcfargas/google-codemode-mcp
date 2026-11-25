@@ -237,9 +237,9 @@ identifiers, raw requests and private error text; raw evidence remains private.
 Reporting success never changes the evaluation gate. A report-generation error
 fails its own workflow step and leaves the original failure in place.
 
-For change verification, first select affected cases and establish whether saved
-evidence applies using the [verification procedure](../../../../.agents/skills/google-codemode-verify/references/change-verification.md).
-Use the offline acceptance command:
+For change verification, the [project verifier](../../../../.agents/skills/google-codemode-verify/SKILL.md)
+says when a fresh paid run is due. To consume saved evidence, use the offline
+acceptance command:
 
 ```sh
 just eval-verify /absolute/saved/evidence /absolute/new/verification-report

@@ -328,6 +328,14 @@ access, but does not physically delete bytes. Do not equate it with a one-hour
 retention guarantee. Hosted artifact access, bucket lifecycle and native host
 file presentation remain unqualified by the existing hosted media/Gmail records.
 
+One local native-host observation exists. An installed Claude Code 2.1.318
+no-model probe saved two resource blob fragments totalling 98304 bytes;
+independent concatenation matched the manifest hash. Its native resource tool
+omitted chunk metadata. This qualifies fragment persistence only, not
+agent-driven assembly or file presentation. For another host, inspect the actual
+native resource results: base64 preserved in model-visible text is not a saved
+file.
+
 ## Physical artifact lifecycle observation (2026-11-07)
 
 The live bucket's retained rule covered only `artifacts/v1/`. It has been corrected
