@@ -1,13 +1,28 @@
 # google-codemode-mcp
 
-Google Workspace through native Google APIs and server-side JavaScript Code Mode.
-Discover methods, transform their results in code, and move files between Gmail,
-Drive and temporary storage without passing file bytes through the model or MCP.
-**Gmail v1 and Drive v3 are supported.** Sheets, Docs and Calendar come later.
+We started this experiment to see whether Code Mode could give AI agents the
+best way to work with Google Workspace. We ended the project at the MVP after
+Google announced its new Workspace AI Tools Addendum on November 24, 2026.
+Google requires AI agents to access Workspace through its own MCP servers or
+Workspace CLI, with technical enforcement starting February 1, 2027. The MVP
+depended on direct Workspace REST API access through our own MCP server. See
+[Google’s announcement][google-announcement] and the [Workspace AI Tools Addendum][google-terms].
+
+The MVP let agents discover native Gmail and Drive methods on demand, compose
+calls and filter results in server-side JavaScript, and move attachments between
+Gmail and Drive without passing file bytes through the model or MCP. In bounded
+evaluations, Sonnet 5.5 and GPT-6.1 Sol completed cross-service file transfers,
+paginated searches, and tasks that selected which messages to label or files to
+rename based on their contents. See the [evaluation history](apps/executor/tests/eval/README.md).
+
+The source is available under the [Apache License 2.0](LICENSE).
+
+[google-announcement]: https://workspaceupdates.googleblog.com/2026/11/mcp-servers-cli-standardized-usage-tiers-now-available.html
+[google-terms]: https://workspace.google.com/terms/ai-tools/
 
 ## Which models work?
 
-**Sonnet 5.5 and GPT-6.1 Sol are the tested recommendations.** Both passed bounded Gmail/Drive agent evaluations
+**Sonnet 5.5 and GPT-6.1 Sol were the MVP’s tested recommendations.** Both passed bounded Gmail/Drive agent evaluations
 with method discovery, actual skill-resource retrieval, independent result checks
 and owned cleanup. These are recorded task-feasibility results, generally one
 attempt per cell, not a reliability benchmark or a fresh pass on every later build.
@@ -49,20 +64,20 @@ Model success is separate from host compatibility. The owner reported a successf
 → local download** trial, with matching hashes and complete cleanup
 ([#25](https://github.com/marcfargas/google-codemode-mcp/issues/25)). It is manual
 evidence without a raw audit, exact deployment identity or usage metrics. Responses
-loop results do not qualify ChatGPT or native Codex; ChatGPT, OpenClaw and actual
-Skills activation remain [acceptance work](https://github.com/marcfargas/google-codemode-mcp/issues/5).
+loop results do not qualify ChatGPT or native Codex. ChatGPT, OpenClaw and actual
+Skills activation were still [open acceptance work](https://github.com/marcfargas/google-codemode-mcp/issues/5)
+when the experiment ended.
 
-## Connect and use
+## How the MVP worked
 
-A compatible client must support **MCP revision `2026-07-28`**, with independent
-HTTP POST requests and finite JSON responses. This endpoint has no initialization
+A compatible client needed **MCP revision `2026-07-28`**, with independent
+HTTP POST requests and finite JSON responses. The endpoint had no initialization
 handshake, persistent sessions or streaming GET connection.
 
-The hosted gateway endpoint is `https://google-workspace.lachispa.dev/mcp`; it
-requires admission and MCP OAuth. The gateway holds durable Google credentials
-and injects short-lived tokens into the executor. Standalone deployments instead
-require a trusted caller to supply `accessToken`. See
-[deployment and connection setup](DEPLOYMENT.md), including the HTTP contract.
+The hosted gateway required admission and MCP OAuth. It held durable Google
+credentials and injected short-lived tokens into the executor. Standalone
+deployments required a trusted caller to supply `accessToken`. The
+[deployment notes](DEPLOYMENT.md) record the setup and HTTP contract.
 
 Start with `describe({})`, read the returned Workspace skill, then follow service
 and method paths before execution. For example, after describing
